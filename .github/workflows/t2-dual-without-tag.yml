@@ -1,0 +1,35 @@
+name: 't2-dual-without-tag'
+on:
+  workflow_dispatch:
+
+jobs:
+  testJob:
+    runs-on: [ 
+      "self-hosted", 
+      "anka", 
+      "anka-template:ae1d3b9b-314e-44bc-9e6b-0b8e2bbc823b",
+      "run-id:${{ github.run_id }}", 
+      "unique-id:1"
+    ]
+    steps:
+      - uses: actions/checkout@v3
+      - run: |
+          ls -laht
+          sw_vers
+          hostname
+          echo "123"
+  testJob2:
+    runs-on: [ 
+      "self-hosted", 
+      "anka", 
+      "anka-template:ae1d3b9b-314e-44bc-9e6b-0b8e2bbc823b",
+      "run-id:${{ github.run_id }}", 
+      "unique-id:2"
+    ]
+    steps:
+      - uses: actions/checkout@v3
+      - run: |
+          ls -laht
+          sw_vers
+          hostname
+          echo "123"
