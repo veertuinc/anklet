@@ -84,7 +84,6 @@ Anklet handles VM [Templates/Tags](https://docs.veertu.com/anka/anka-virtualizat
             database: 0
 
     ```
-    - Your PAT must have **Actions** and **Administration** Read and Write permissions.
 3. Run the daemon by executing `anklet` on the host that has the [Anka CLI installed](https://docs.veertu.com/anka/anka-virtualization-cli/getting-started/installing-the-anka-virtualization-package/).
     - `tail -fF /Users/myUser/Library/Logs/anklet.log` to see the logs. You can run `anklet` with `LOG_LEVEL=DEBUG` to see more verbose output.
 3. To stop, you have two options:

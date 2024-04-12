@@ -24,6 +24,8 @@ services:
       database: 0
 ```
 
+- Your PAT must have **Actions** and **Administration** Read and Write permissions.
+
 In your workflow yml's `runs-on`, you need to add several labels. Here is the list and an example:
 
 1. `self-hosted` (required)
