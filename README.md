@@ -1,8 +1,8 @@
 # ANKLET
 
-Inspired by our customer requirements, **Anklet** is a ["controller-less"](https://docs.veertu.com/anka/plugins-and-integrations/#controller-less-registry-only) solution created to meet the specific needs of our larger enterprise users who cannot use [the existing solution for github actions](https://docs.veertu.com/anka/plugins-and-integrations/controller-+-registry/github-actions/) to run on-demand and ephemeral [Anka macOS VMs](https://docs.veertu.com/anka/what-is-anka/). Here are some of the reasons why:
+Inspired by our customer requirements, **Anklet** is a ["controller-less"](https://docs.veertu.com/anka/plugins-and-integrations/#controller-less-registry-only) solution created to meet the specific needs of our users who cannot use [the existing solution for github actions](https://docs.veertu.com/anka/plugins-and-integrations/controller-+-registry/github-actions/) to run on-demand and ephemeral [Anka macOS VMs](https://docs.veertu.com/anka/what-is-anka/). Here are some of the reasons why:
 
-1. Each team and repository should not have knowledge of the Controller URL, potential auth methods, Anka Node Groups, etc. These are all things that had to be set in the job yaml for github actions. This should be abstracted away for security and simplicity of use.
+1. Each team and repository should not have knowledge of the Controller URL, potential auth methods, Anka Node Groups, etc. These are all things that had to be set in the job yaml for [the existing solution for github actions](https://docs.veertu.com/anka/plugins-and-integrations/controller-+-registry/github-actions/). This should be abstracted away for security and simplicity of use.
 2. Their workflow files cannot have multiple stages (start -> the actual job that runs in the VM -> a cleanup step) just to run a single Anka VM
 3. They don't want the job to be responsible for cleaning up the VM + registered runner either.
 
