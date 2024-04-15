@@ -87,7 +87,7 @@ Anklet handles VM [Templates/Tags](https://docs.veertu.com/anka/anka-virtualizat
 3. Run the daemon by executing `anklet` on the host that has the [Anka CLI installed](https://docs.veertu.com/anka/anka-virtualization-cli/getting-started/installing-the-anka-virtualization-package/).
     - `tail -fF /Users/myUser/Library/Logs/anklet.log` to see the logs. You can run `anklet` with `LOG_LEVEL=DEBUG` to see more verbose output.
 3. To stop, you have two options:
-    - `anklet -s stop` to stop the servies semi-gracefully (interrupt the plugin at the next context cancellation definition, and still try to cleanup gracefully). This requires that the plugin has properly defined context cancellation checks.
+    - `anklet -s stop` to stop the services semi-gracefully (interrupt the plugin at the next context cancellation definition, and still try to cleanup gracefully). This requires that the plugin has properly defined context cancellation checks.
     - `anklet -s drain` to stop services, but wait for all jobs to finish gracefully.
 
 ### Database Setup
