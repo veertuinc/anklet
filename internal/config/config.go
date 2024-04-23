@@ -41,6 +41,7 @@ type Service struct {
 	Repo          string   `yaml:"repo"`
 	Owner         string   `yaml:"owner"`
 	Database      Database `yaml:"database"`
+	RegistryURL   string   `yaml:"registry_url"`
 }
 
 func LoadConfig(configPath string) (*Config, error) {

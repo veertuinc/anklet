@@ -145,13 +145,20 @@ func (cli *Cli) AnkaRegistryPull(ctx context.Context, template string, tag strin
 		return fmt.Errorf("context canceled before AnkaRegistryPull")
 	}
 	logger := logging.GetLoggerFromContext(ctx)
-	logger.DebugContext(ctx, "pulling template to host")
+	service := config.GetServiceFromContext(ctx)
+	var registryExtra []string
+	if service.RegistryURL != "" {
+		registryExtra = []string{"--remote", service.RegistryURL}
+	}
 	var args []string
 	if tag != "(using latest)" {
-		args = []string{"anka", "-j", "registry", "pull", "--shrink", template, "--tag", tag}
+		args = append([]string{"anka", "-j", "registry"}, registryExtra...)
+		args = append(args, "pull", "--shrink", template, "--tag", tag)
 	} else {
-		args = []string{"anka", "-j", "registry", "pull", "--shrink", template}
+		args = append([]string{"anka", "-j", "registry"}, registryExtra...)
+		args = append(args, "pull", "--shrink", template)
 	}
+	logger.DebugContext(ctx, "pulling template to host")
 	pulledTemplate, err := cli.ExecuteParseJson(ctx, args...)
 	if err != nil {
 		return err
