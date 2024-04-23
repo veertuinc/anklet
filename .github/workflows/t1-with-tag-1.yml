@@ -19,3 +19,4 @@ jobs:
           sw_vers
           hostname
           echo "123"
+          sleep 60

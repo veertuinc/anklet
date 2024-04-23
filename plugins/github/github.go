@@ -411,6 +411,12 @@ func Run(ctx context.Context, logger *slog.Logger) {
 					logger.WarnContext(ctx, "context canceled during job status check")
 					return
 				}
+				// check if the job was cancelled
+				logger.DebugContext(ctx, "checking if job was cancelled", "job_status", *currentJob.Status)
+				if *currentJob.Status == "cancelled" {
+					logger.WarnContext(ctx, "job was cancelled", "job_id", *workflowRunJob.Job.ID)
+					return
+				}
 				logger.InfoContext(ctx, "job still in progress", "job_id", *workflowRunJob.Job.ID)
 				time.Sleep(5 * time.Second) // Wait before checking the job status again
 			}
