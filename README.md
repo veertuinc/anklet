@@ -63,6 +63,7 @@ Anklet handles VM [Templates/Tags](https://docs.veertu.com/anka/anka-virtualizat
         repo: anklet
         owner: veertuinc
         registry_url: http://anka.registry:8089
+        sleep_interval: 10 # sleep 10 seconds between checks for new jobs
         database:
             enabled: true
             url: localhost

@@ -405,16 +405,11 @@ func Run(ctx context.Context, logger *slog.Logger) {
 			}
 			if *currentJob.Status == "completed" {
 				jobCompleted = true
+				ctx = logging.AppendCtx(ctx, slog.String("conclusion", *currentJob.Conclusion))
 				logger.InfoContext(ctx, "job completed", "job_id", *workflowRunJob.Job.ID)
 			} else if logCounter%2 == 0 {
 				if ctx.Err() != nil {
 					logger.WarnContext(ctx, "context canceled during job status check")
-					return
-				}
-				// check if the job was cancelled
-				logger.DebugContext(ctx, "checking if job was cancelled", "job_status", *currentJob.Status)
-				if *currentJob.Status == "cancelled" {
-					logger.WarnContext(ctx, "job was cancelled", "job_id", *workflowRunJob.Job.ID)
 					return
 				}
 				logger.InfoContext(ctx, "job still in progress", "job_id", *workflowRunJob.Job.ID)
@@ -457,14 +452,7 @@ func removeSelfHostedRunner(ctx context.Context, vm anka.VM, workflowRunID int64
 					"ankaTemplateTag": "(using latest)",
 					"err": "DELETE https://api.github.com/repos/veertuinc/anklet/actions/runners/142: 422 Bad request - Runner \"anklet-vm-\u003cuuid\u003e\" is still running a job\" []",
 				*/
-				cancelResponse, _, cancelErr := ExecuteGitHubClientFunction[github.Response](ctx, logger, func() (*github.Response, *github.Response, error) {
-					resp, err := githubClient.Actions.CancelWorkflowRunByID(ctx, service.Owner, service.Repo, workflowRunID)
-					return resp, nil, err
-				})
-				if cancelErr != nil || cancelResponse.Response.StatusCode != 202 {
-					logger.ErrorContext(ctx, "error executing githubClient.Actions.CancelWorkflowRunByID", "err", cancelErr, "response", cancelResponse)
-					return
-				}
+				cancelSent := false
 				for {
 					workflowRun, _, err := ExecuteGitHubClientFunction[github.WorkflowRun](ctx, logger, func() (*github.WorkflowRun, *github.Response, error) {
 						workflowRun, resp, err := githubClient.Actions.GetWorkflowRunByID(context.Background(), service.Owner, service.Repo, workflowRunID)
@@ -478,6 +466,17 @@ func removeSelfHostedRunner(ctx context.Context, vm anka.VM, workflowRunID int64
 						break
 					} else {
 						logger.WarnContext(ctx, "workflow run is still active... waiting for cancellation so we can clean up the runner...", "workflow_run_id", workflowRunID)
+						if !cancelSent { // this has to happen here so that it doesn't error with "409 Cannot cancel a workflow run that is completed. " if the job is already cancelled
+							cancelResponse, _, cancelErr := ExecuteGitHubClientFunction[github.Response](ctx, logger, func() (*github.Response, *github.Response, error) {
+								resp, err := githubClient.Actions.CancelWorkflowRunByID(ctx, service.Owner, service.Repo, workflowRunID)
+								return resp, nil, err
+							})
+							if cancelErr != nil || cancelResponse.Response.StatusCode != 202 {
+								logger.ErrorContext(ctx, "error executing githubClient.Actions.CancelWorkflowRunByID", "err", cancelErr, "response", cancelResponse)
+								break
+							}
+							cancelSent = true
+						}
 						time.Sleep(20 * time.Second)
 					}
 				}
