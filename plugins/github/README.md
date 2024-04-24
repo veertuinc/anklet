@@ -10,11 +10,12 @@ In the `config.yml`, you can define the `github` plugin as follows:
 services:
   - name: RUNNER1
     plugin: github
-    token: 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
+    token: github_pat_XXX
     # can be org or repo
     registration: repo
     repo: anklet
     owner: veertuinc
+    registry_url: http://anka.registry:8089
     database:
       enabled: true
       url: localhost
