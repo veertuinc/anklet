@@ -33,7 +33,7 @@ archives:
 checksum:
   name_template: 'checksums.txt'
 release:
-  draft: true
+  disable: true
   # extra_files:
   # - glob: ./docs.zip
   # disable: true
