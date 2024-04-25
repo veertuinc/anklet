@@ -30,8 +30,8 @@ archives:
     files:
       - none*
     name_template: '{{ .ProjectName }}_v{{ .Version }}_{{ .Os }}_{{ .Arch }}'
-checksum:
-  name_template: 'checksums.txt'
+# checksum:
+#   name_template: 'checksums.txt'
 release:
   disable: true
   # extra_files:
