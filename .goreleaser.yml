@@ -30,22 +30,10 @@ archives:
     files:
       - none*
     name_template: '{{ .ProjectName }}_v{{ .Version }}_{{ .Os }}_{{ .Arch }}'
-checksum:
-  name_template: 'checksums.txt'
-# signs:
-#   - artifacts: checksum
-#     args:
-#       # if you are using this is in a GitHub action or some other automated pipeline, you
-#       # need to pass the batch flag to indicate its not interactive.
-#       - "--batch"
-#       - "--local-user"
-#       - "{{ .Env.GPG_FINGERPRINT }}"
-#       - "--output"
-#       - "${signature}"
-#       - "--detach-sign"
-#       - "${artifact}"
+# checksum:
+#   name_template: 'checksums.txt'
 release:
-  draft: true
+  disable: true
   # extra_files:
   # - glob: ./docs.zip
   # disable: true

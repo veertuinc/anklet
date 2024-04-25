@@ -35,7 +35,7 @@ Anklet is fairly lightweight. When running 2 `github` plugin services, we see co
 ### How does it manage VM Templates on the host?
 
 Anklet handles VM [Templates/Tags](https://docs.veertu.com/anka/anka-virtualization-cli/getting-started/creating-vms/#vm-templates) the best it can using the Anka CLI.
-- If the VM Template or Tag does not exist, Anklet will pull it from the Registry using the `default` configured registry under `anka registry list-repos`.
+- If the VM Template or Tag does not exist, Anklet will pull it from the Registry using the `default` configured registry under `anka registry list-repos`. You can also set the `registry_url` in the `config.yml` to use a different registry.
     - Two consecutive pulls cannot happen on the same host or else the data may become corrupt. If a second job is picked up that requires a pull, it will send it back to the queue so another host can handle it.
 - If the Template *AND* Tag already exist, it does *not* issue a pull from the Registry (which therefore doesn't require maintaining a Registry at all; useful for users who use `anka export/import`). Important: You must define the tag, or else it will attempt to use "latest" and forcefully issue a pull.
 
@@ -62,6 +62,8 @@ Anklet handles VM [Templates/Tags](https://docs.veertu.com/anka/anka-virtualizat
         registration: repo
         repo: anklet
         owner: veertuinc
+        registry_url: http://anka.registry:8089
+        sleep_interval: 10 # sleep 10 seconds between checks for new jobs
         database:
             enabled: true
             url: localhost
@@ -75,6 +77,7 @@ Anklet handles VM [Templates/Tags](https://docs.veertu.com/anka/anka-virtualizat
         registration: repo
         repo: anklet
         owner: veertuinc
+        registry_url: http://anka.registry:8089
         database:
             enabled: true
             url: localhost
@@ -84,6 +87,7 @@ Anklet handles VM [Templates/Tags](https://docs.veertu.com/anka/anka-virtualizat
             database: 0
 
     ```
+    > Note: You can only ever run two VMs per host per the Apple macOS SLA. While you can specify more than two services, only two will ever be running a VM at one time. `sleep_interval` can be used to control the frequency/priority of a service and increase the odds that a job will be picked up.
 3. Run the daemon by executing `anklet` on the host that has the [Anka CLI installed](https://docs.veertu.com/anka/anka-virtualization-cli/getting-started/installing-the-anka-virtualization-package/).
     - `tail -fF /Users/myUser/Library/Logs/anklet.log` to see the logs. You can run `anklet` with `LOG_LEVEL=DEBUG` to see more verbose output.
 3. To stop, you have two options:
@@ -117,6 +121,7 @@ While you can run it anywhere you want, its likely going to be less latency to h
 brew install go
 go mod tidy
 LOG_LEVEL=dev go run main.go
+tail -fF ~/Library/Logs/anklet.log
 ```
 
 The `dev` LOG_LEVEL has colored output with text + pretty printed JSON for easier debugging. Here is an example:
@@ -175,11 +180,3 @@ The `Run` function should be designed to run multiple times in parallel. It shou
     - Always `return` out of `Run` so the sleep interval and main.go can handle the next run properly with new context. Never loop inside of the plugin code.
     - Should never panic but instead throw an ERROR and return.
     - It's critical that you check for context cancellation before important logic that could orphan resources.
-
-TODO
-
-- Developer guide for writing plugins
-- Timeouts for pulls, etc
-- Check for user cancellation (from github) and cleanup
-- Output inner actions-runner/_diag log on failure
-- support org level registration for github plugin
