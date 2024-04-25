@@ -87,6 +87,7 @@ Anklet handles VM [Templates/Tags](https://docs.veertu.com/anka/anka-virtualizat
             database: 0
 
     ```
+    > Note: You can only ever run two VMs per host per the Apple macOS SLA. While you can specify more than two services, only two will ever be running a VM at one time. `sleep_interval` can be used to control the frequency/priority of a service and increase the odds that a job will be picked up.
 3. Run the daemon by executing `anklet` on the host that has the [Anka CLI installed](https://docs.veertu.com/anka/anka-virtualization-cli/getting-started/installing-the-anka-virtualization-package/).
     - `tail -fF /Users/myUser/Library/Logs/anklet.log` to see the logs. You can run `anklet` with `LOG_LEVEL=DEBUG` to see more verbose output.
 3. To stop, you have two options:
