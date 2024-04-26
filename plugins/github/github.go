@@ -346,7 +346,7 @@ func Run(ctx context.Context, logger *slog.Logger) {
 			return
 		}
 		ankRunScriptOutput, err := ankaCLI.ExecuteAndParseJsonOnError(ctx,
-			"anka", "-j", "run", vm.Name, "./install-runner.bash",
+			"anka", "-j", "run", vm.Name, "bash", "-c", "./install-runner.bash",
 		)
 		logger.DebugContext(ctx, "install runner", "stdout", string(ankRunScriptOutput))
 		if err != nil {
@@ -360,7 +360,7 @@ func Run(ctx context.Context, logger *slog.Logger) {
 			return
 		}
 		ankRunScriptOutput, err = ankaCLI.ExecuteAndParseJsonOnError(ctx,
-			"anka", "-j", "run", vm.Name, "./register-runner.bash",
+			"anka", "-j", "run", vm.Name, "bash", "-c", "./register-runner.bash",
 			vm.Name, *repoRunnerRegistration.Token, repositoryURL, strings.Join(workflowRunJob.Job.Labels, ","),
 		)
 		if err != nil {
@@ -375,7 +375,7 @@ func Run(ctx context.Context, logger *slog.Logger) {
 			return
 		}
 		ankRunScriptOutput, err = ankaCLI.ExecuteAndParseJsonOnError(ctx,
-			"anka", "-j", "run", vm.Name, "./start-runner.bash",
+			"anka", "-j", "run", vm.Name, "bash", "-c", "./start-runner.bash",
 		)
 		if err != nil {
 			logger.ErrorContext(ctx, "error executing start runner script", "err", err)
