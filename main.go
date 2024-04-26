@@ -225,6 +225,6 @@ func worker(parentCtx context.Context, logger *slog.Logger, rateLimiter *http.Cl
 		}(service)
 	}
 	wg.Wait()
-	logger.WarnContext(workerCtx, "anklet shut down")
+	logger.WarnContext(workerCtx, "anklet (and all services) shut down")
 	os.Exit(0)
 }

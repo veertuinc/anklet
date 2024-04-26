@@ -335,41 +335,45 @@ func (cli *Cli) EnsureVMTemplateExists(ctx context.Context, targetTemplate strin
 		logger.DebugContext(ctx, "list", "stdout", list.Body)
 	}
 	logger.DebugContext(ctx, "list output", "json", list)
-	if list.Status == "ERROR" {
-		if list.Message == fmt.Sprintf("%s: not found", targetTemplate) {
-			pullTemplate = true
-		} else {
-			logger.ErrorContext(ctx, "error executing anka list", "err", list.Message)
-			return err
+	if list != nil {
+		if list.Status == "ERROR" {
+			if list.Message == fmt.Sprintf("%s: not found", targetTemplate) {
+				pullTemplate = true
+			} else {
+				logger.ErrorContext(ctx, "error executing anka list", "err", list.Message)
+				return err
+			}
 		}
-	}
-	if list.Status == "OK" {
-		// ensure tag is proper; skip if tag is hard coded and we already have it locally
-		if bodySlice, ok := list.Body.([]interface{}); ok {
-			body, ok := bodySlice[0].(map[string]interface{})
-			if !ok {
-				logger.InfoContext(ctx, "list", "body", list.Body)
-				logger.ErrorContext(ctx, "unable to parse bodySlice[0] to map[string]interface{}")
-				return fmt.Errorf("unable to parse bodySlice[0] to map[string]interface{}")
-			}
-			if status, ok := body["status"].(string); ok {
-				if status == "failed" {
-					return fmt.Errorf("vm template is not running and instead %s", status)
+		if list.Status == "OK" {
+			// ensure tag is proper; skip if tag is hard coded and we already have it locally
+			if bodySlice, ok := list.Body.([]interface{}); ok {
+				body, ok := bodySlice[0].(map[string]interface{})
+				if !ok {
+					logger.InfoContext(ctx, "list", "body", list.Body)
+					logger.ErrorContext(ctx, "unable to parse bodySlice[0] to map[string]interface{}")
+					return fmt.Errorf("unable to parse bodySlice[0] to map[string]interface{}")
 				}
-			}
-			if version, ok := body["version"].(string); ok {
-				if targetTag != "(using latest)" {
-					if version != targetTag {
+				if status, ok := body["status"].(string); ok {
+					if status == "failed" {
+						return fmt.Errorf("vm template is not running and instead %s", status)
+					}
+				}
+				if version, ok := body["version"].(string); ok {
+					if targetTag != "(using latest)" {
+						if version != targetTag {
+							pullTemplate = true
+						}
+					} else {
+						// always pull to ensure latest, if (using latest)
 						pullTemplate = true
 					}
-				} else {
-					// always pull to ensure latest, if (using latest)
-					pullTemplate = true
 				}
+			} else {
+				return fmt.Errorf("unable to parse list.Body to []interface{}")
 			}
-		} else {
-			return fmt.Errorf("unable to parse list.Body to []interface{}")
 		}
+	} else {
+		pullTemplate = true
 	}
 	if pullTemplate {
 		if !globals.PullLock.TryLock() {

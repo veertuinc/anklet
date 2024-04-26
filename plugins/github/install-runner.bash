@@ -3,7 +3,7 @@ set -exo pipefail
 RUNNER_HOME="${RUNNER_HOME:-"$HOME/actions-runner"}"
 mkdir -p "${RUNNER_HOME}"
 cd "${RUNNER_HOME}"
-GITHUB_RUNNER_VERSION="2.314.1"
+GITHUB_RUNNER_VERSION="2.316.0"
 RUNNER_ARCH=${RUNNER_ARCH:-"$(uname -m)"}
 if [ "$RUNNER_ARCH" = "x86_64" ] || [ "$RUNNER_ARCH" = "x64" ]; then
   RUNNER_ARCH="x64"
