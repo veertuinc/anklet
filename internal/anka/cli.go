@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -80,7 +81,7 @@ func NewCLI(ctx context.Context) (*Cli, error) {
 
 func (cli *Cli) Execute(ctx context.Context, args ...string) ([]byte, error) {
 	logger := logging.GetLoggerFromContext(ctx)
-	// logger.DebugContext(ctx, "executing", "command", strings.Join(args, " "))
+	logger.DebugContext(ctx, "executing", "command", strings.Join(args, " "))
 	done := make(chan error, 1)
 	var cmd *exec.Cmd
 	var combinedOutput bytes.Buffer

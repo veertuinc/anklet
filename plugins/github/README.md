@@ -26,6 +26,7 @@ services:
 ```
 
 - Your PAT must have **Actions** and **Administration** Read and Write permissions.
+- The `database` is required. You can find installation instructions in the anklet main [README.md](../../README.md#database-setup).
 
 In your workflow yml's `runs-on`, you need to add several labels. Here is the list and an example:
 

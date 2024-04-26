@@ -8,9 +8,9 @@ import (
 	"math/rand"
 	"time"
 
+	"github.com/redis/go-redis/v9"
 	"github.com/veertuinc/anklet/internal/config"
 	"github.com/veertuinc/anklet/internal/logging"
-	"github.com/redis/go-redis/v9"
 )
 
 type Database struct {
@@ -37,12 +37,12 @@ func NewClient(ctx context.Context, config config.Database) (*redis.Client, erro
 	return rdb, nil
 }
 
-func GetDatabaseFromContext(ctx context.Context) Database {
+func GetDatabaseFromContext(ctx context.Context) (Database, error) {
 	database, ok := ctx.Value(config.ContextKey("database")).(Database)
 	if !ok {
-		panic("GetDatabaseFromContext failed")
+		return Database{}, errors.New("GetDatabaseFromContext failed (is your database running?)")
 	}
-	return database
+	return database, nil
 }
 
 func UpdateUniqueRunKey(ctx context.Context, key string) context.Context {
@@ -73,7 +73,10 @@ func CheckIfKeyExists(ctx context.Context, key string) (bool, error) {
 	if ctx.Err() != nil {
 		return false, errors.New("context canceled during CheckIfKeyExists")
 	}
-	database := GetDatabaseFromContext(ctx)
+	database, err := GetDatabaseFromContext(ctx)
+	if err != nil {
+		return false, err
+	}
 	// introduce a random millisecond sleep to prevent concurrent executions from colliding
 	src := rand.NewSource(time.Now().UnixNano())
 	r := rand.New(src)
@@ -90,7 +93,10 @@ func AddUniqueRunKey(ctx context.Context) (bool, error) {
 	if ctx.Err() != nil {
 		return false, errors.New("context canceled during AddUniqueRunKey")
 	}
-	database := GetDatabaseFromContext(ctx)
+	database, err := GetDatabaseFromContext(ctx)
+	if err != nil {
+		return false, err
+	}
 	exists, err := CheckIfKeyExists(ctx, database.UniqueRunKey)
 	if err != nil {
 		return false, err
