@@ -79,9 +79,11 @@ func NewCLI(ctx context.Context) (*Cli, error) {
 	return cli, nil
 }
 
-func (cli *Cli) Execute(ctx context.Context, args ...string) ([]byte, error) {
+func (cli *Cli) Execute(ctx context.Context, args ...string) ([]byte, int, error) {
 	logger := logging.GetLoggerFromContext(ctx)
-	logger.DebugContext(ctx, "executing", "command", strings.Join(args, " "))
+	if args[2] != "list" { // hide spammy list command
+		logger.DebugContext(ctx, "executing", "command", strings.Join(args, " "))
+	}
 	done := make(chan error, 1)
 	var cmd *exec.Cmd
 	var combinedOutput bytes.Buffer
@@ -101,8 +103,12 @@ func (cli *Cli) Execute(ctx context.Context, args ...string) ([]byte, error) {
 		select {
 		case <-ticker.C:
 			logger.InfoContext(ctx, fmt.Sprintf("execution of command %v is still in progress...", args))
-		case <-done:
-			return combinedOutput.Bytes(), nil
+		case err := <-done:
+			exitCode := 0
+			if exitErr, ok := err.(*exec.ExitError); ok {
+				exitCode = exitErr.ExitCode()
+			}
+			return combinedOutput.Bytes(), exitCode, err
 		}
 	}
 }
@@ -117,7 +123,10 @@ func (cli *Cli) ParseAnkaJson(ctx context.Context, jsonData []byte) (*AnkaJson, 
 }
 
 func (cli *Cli) ExecuteParseJson(ctx context.Context, args ...string) (*AnkaJson, error) {
-	out, _ := cli.Execute(ctx, args...)
+	out, exitCode, _ := cli.Execute(ctx, args...)
+	if exitCode != 0 {
+		return nil, fmt.Errorf("command execution failed with code %d: %s", exitCode, string(out))
+	}
 	// registry pull can output muliple json objects, per line, so we need to only get the last line
 	lines := bytes.Split(out, []byte("\n"))
 	lastLine := lines[len(lines)-1]
@@ -133,12 +142,26 @@ func (cli *Cli) ExecuteAndParseJsonOnError(ctx context.Context, args ...string) 
 		return nil, fmt.Errorf("context canceled before ExecuteAndParseJsonOnError")
 	}
 	ankaJson := &AnkaJson{}
-	out, _ := cli.Execute(ctx, args...)
+	out, exitCode, _ := cli.Execute(ctx, args...)
+	if exitCode != 0 {
+		return out, fmt.Errorf("command execution failed with code %d: %s", exitCode, string(out))
+	}
 	err := json.Unmarshal(out, &ankaJson)
-	if err == nil {
+	if err != nil {
 		return out, fmt.Errorf("command execution failed: %v", err)
 	}
 	return out, nil
+}
+
+func (cli *Cli) AnkaRun(ctx context.Context, args ...string) error {
+	vm := GetAnkaVmFromContext(ctx)
+	runOutput, exitCode, err := cli.Execute(ctx, "anka", "-j", "run", vm.Name, "bash", "-c", strings.Join(args, " "))
+	if exitCode != 0 || err != nil {
+		return fmt.Errorf("command execution failed with code %d: %s %s", exitCode, string(runOutput), err)
+	}
+	logger := logging.GetLoggerFromContext(ctx)
+	logger.DebugContext(ctx, "command executed successfully", "stdout", string(runOutput))
+	return nil
 }
 
 func (cli *Cli) AnkaRegistryPull(ctx context.Context, template string, tag string) error {

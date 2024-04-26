@@ -65,7 +65,9 @@ func ExecuteGitHubClientFunction[T any](ctx context.Context, logger *slog.Logger
 			return nil, nil, ctx.Err()
 		}
 	}
-	if err != nil {
+	if err != nil &&
+		err.Error() != "context canceled" &&
+		!strings.Contains(err.Error(), "try again later") {
 		logger.Error("error executing GitHub client function: " + err.Error())
 		return nil, nil, err
 	}
@@ -95,7 +97,7 @@ func getWorkflowRunJobs(ctx context.Context, logger *slog.Logger) ([]WorkflowRun
 	// WORKFLOWS
 	workflows, _, err := ExecuteGitHubClientFunction[*github.Workflows](ctx, logger, func() (**github.Workflows, *github.Response, error) {
 		workflows, resp, err := githubClient.Actions.ListWorkflows(context.Background(), service.Owner, service.Repo, &github.ListOptions{})
-		return &workflows, resp, err // Adjusted to return the direct result
+		return &workflows, resp, err
 	})
 	if ctx.Err() != nil {
 		logger.WarnContext(ctx, "context canceled during workflows listing")
@@ -345,43 +347,25 @@ func Run(ctx context.Context, logger *slog.Logger) {
 			logger.WarnContext(ctx, "context canceled before install runner")
 			return
 		}
-		ankRunScriptOutput, err := ankaCLI.ExecuteAndParseJsonOnError(ctx,
-			"anka", "-j", "run", vm.Name, "bash", "-c", "./install-runner.bash",
+		ankaCLI.AnkaRun(ctx,
+			"./install-runner.bash",
 		)
-		logger.DebugContext(ctx, "install runner", "stdout", string(ankRunScriptOutput))
-		if err != nil {
-			logger.ErrorContext(ctx, "error executing install runner script", "err", err)
-			return
-		}
-		logger.DebugContext(ctx, "install runner", "stdout", string(ankRunScriptOutput))
 		// Register runner
 		if ctx.Err() != nil {
 			logger.WarnContext(ctx, "context canceled before register runner")
 			return
 		}
-		ankRunScriptOutput, err = ankaCLI.ExecuteAndParseJsonOnError(ctx,
-			"anka", "-j", "run", vm.Name, "bash", "-c", "./register-runner.bash",
+		ankaCLI.AnkaRun(ctx,
+			"./register-runner.bash",
 			vm.Name, *repoRunnerRegistration.Token, repositoryURL, strings.Join(workflowRunJob.Job.Labels, ","),
 		)
-		if err != nil {
-			logger.ErrorContext(ctx, "error executing register runner script", "err", err)
-			return
-		}
 		defer removeSelfHostedRunner(ctx, *vm, *workflowRunJob.Job.RunID)
-		logger.DebugContext(ctx, "register runner", "stdout", string(ankRunScriptOutput))
 		// Install and Start runner
 		if ctx.Err() != nil {
 			logger.WarnContext(ctx, "context canceled before start runner")
 			return
 		}
-		ankRunScriptOutput, err = ankaCLI.ExecuteAndParseJsonOnError(ctx,
-			"anka", "-j", "run", vm.Name, "bash", "-c", "./start-runner.bash",
-		)
-		if err != nil {
-			logger.ErrorContext(ctx, "error executing start runner script", "err", err)
-			return
-		}
-		logger.DebugContext(ctx, "runner logs", "data", string(ankRunScriptOutput))
+		ankaCLI.AnkaRun(ctx, "./start-runner.bash")
 		if ctx.Err() != nil {
 			logger.WarnContext(ctx, "context canceled before jobCompleted checks")
 			return
@@ -468,16 +452,17 @@ func removeSelfHostedRunner(ctx context.Context, vm anka.VM, workflowRunID int64
 						logger.WarnContext(ctx, "workflow run is still active... waiting for cancellation so we can clean up the runner...", "workflow_run_id", workflowRunID)
 						if !cancelSent { // this has to happen here so that it doesn't error with "409 Cannot cancel a workflow run that is completed. " if the job is already cancelled
 							cancelResponse, _, cancelErr := ExecuteGitHubClientFunction[github.Response](ctx, logger, func() (*github.Response, *github.Response, error) {
-								resp, err := githubClient.Actions.CancelWorkflowRunByID(ctx, service.Owner, service.Repo, workflowRunID)
+								resp, err := githubClient.Actions.CancelWorkflowRunByID(context.Background(), service.Owner, service.Repo, workflowRunID)
 								return resp, nil, err
 							})
-							if cancelErr != nil || cancelResponse.Response.StatusCode != 202 {
+							// don't use cancelResponse.Response.StatusCode or else it'll error with SIGSEV
+							if cancelErr != nil && !strings.Contains(cancelErr.Error(), "try again later") {
 								logger.ErrorContext(ctx, "error executing githubClient.Actions.CancelWorkflowRunByID", "err", cancelErr, "response", cancelResponse)
 								break
 							}
 							cancelSent = true
 						}
-						time.Sleep(20 * time.Second)
+						time.Sleep(10 * time.Second)
 					}
 				}
 				_, _, err = ExecuteGitHubClientFunction[github.Response](ctx, logger, func() (*github.Response, *github.Response, error) {
