@@ -296,7 +296,6 @@ func Run(ctx context.Context, logger *slog.Logger) {
 		// See if VM Template existing already
 		templateTagExistsError := ankaCLI.EnsureVMTemplateExists(ctx, workflowRunJob.AnkaTemplate, workflowRunJob.AnkaTemplateTag)
 		if templateTagExistsError != nil {
-			logger.DebugContext(ctx, "error ensuring vm template exists", "err", templateTagExistsError)
 			return
 		}
 

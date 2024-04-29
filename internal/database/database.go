@@ -40,7 +40,7 @@ func NewClient(ctx context.Context, config config.Database) (*redis.Client, erro
 func GetDatabaseFromContext(ctx context.Context) (Database, error) {
 	database, ok := ctx.Value(config.ContextKey("database")).(Database)
 	if !ok {
-		return Database{}, errors.New("GetDatabaseFromContext failed (is your database running?)")
+		return Database{}, errors.New("GetDatabaseFromContext failed (is your database running and enabled in your config.yml?)")
 	}
 	return database, nil
 }
