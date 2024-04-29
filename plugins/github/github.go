@@ -346,25 +346,35 @@ func Run(ctx context.Context, logger *slog.Logger) {
 			logger.WarnContext(ctx, "context canceled before install runner")
 			return
 		}
-		ankaCLI.AnkaRun(ctx,
-			"./install-runner.bash",
-		)
+		installRunnerErr := ankaCLI.AnkaRun(ctx, "./install-runner.bash")
+		if installRunnerErr != nil {
+			logger.ErrorContext(ctx, "error executing install-runner.bash", "err", installRunnerErr)
+			return
+		}
 		// Register runner
 		if ctx.Err() != nil {
 			logger.WarnContext(ctx, "context canceled before register runner")
 			return
 		}
-		ankaCLI.AnkaRun(ctx,
+		registerRunnerErr := ankaCLI.AnkaRun(ctx,
 			"./register-runner.bash",
 			vm.Name, *repoRunnerRegistration.Token, repositoryURL, strings.Join(workflowRunJob.Job.Labels, ","),
 		)
+		if registerRunnerErr != nil {
+			logger.ErrorContext(ctx, "error executing register-runner.bash", "err", registerRunnerErr)
+			return
+		}
 		defer removeSelfHostedRunner(ctx, *vm, *workflowRunJob.Job.RunID)
 		// Install and Start runner
 		if ctx.Err() != nil {
 			logger.WarnContext(ctx, "context canceled before start runner")
 			return
 		}
-		ankaCLI.AnkaRun(ctx, "./start-runner.bash")
+		startRunnerErr := ankaCLI.AnkaRun(ctx, "./start-runner.bash")
+		if startRunnerErr != nil {
+			logger.ErrorContext(ctx, "error executing start-runner.bash", "err", startRunnerErr)
+			return
+		}
 		if ctx.Err() != nil {
 			logger.WarnContext(ctx, "context canceled before jobCompleted checks")
 			return
