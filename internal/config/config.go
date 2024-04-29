@@ -42,6 +42,7 @@ type Service struct {
 	Owner         string   `yaml:"owner"`
 	Database      Database `yaml:"database"`
 	RegistryURL   string   `yaml:"registry_url"`
+	PrivateKey    string   `yaml:"private_key"`
 }
 
 func LoadConfig(configPath string) (*Config, error) {
