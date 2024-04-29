@@ -136,7 +136,6 @@ func main() {
 func worker(parentCtx context.Context, logger *slog.Logger, rateLimiter *http.Client, loadedConfig config.Config) {
 	globals := config.GetGlobalsFromContext(parentCtx)
 	toRunOnce := globals.RunOnce
-	fmt.Println(toRunOnce)
 	workerCtx, cancel := context.WithCancel(parentCtx)
 	logger.InfoContext(workerCtx, "starting anklet")
 	var wg sync.WaitGroup
