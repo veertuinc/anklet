@@ -11,7 +11,7 @@ REPO="${3}"
 TRIGGER_RUN_COUNT="${4:-10}"
 
 for i in {1..${TRIGGER_RUN_COUNT}}; do
-    WORKFLOW_FILES=$(ls ./.github/workflows/*.yml)
+    WORKFLOW_FILES=$(ls ./.github/workflows/*.yml | grep -v "check-pr")
     for FILE in $WORKFLOW_FILES; do
         WORKFLOW_ID=$(basename $FILE)
         curl \

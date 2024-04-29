@@ -2,6 +2,7 @@ package github
 
 import (
 	"context"
+	"net/http"
 
 	"github.com/google/go-github/v58/github"
 	"github.com/veertuinc/anklet/internal/config"
@@ -23,4 +24,12 @@ func GetGitHubClientFromContext(ctx context.Context) *github.Client {
 		panic("GetGitHubClientFromContext failed")
 	}
 	return wrapper.client
+}
+
+func GetRateLimitWaiterClientFromContext(ctx context.Context) *http.Client {
+	rateLimiter, ok := ctx.Value(config.ContextKey("rateLimiter")).(*http.Client)
+	if !ok {
+		panic("GetRateLimitWaiterClientFromContext failed")
+	}
+	return rateLimiter
 }

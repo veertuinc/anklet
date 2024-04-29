@@ -222,6 +222,11 @@ func Run(ctx context.Context, logger *slog.Logger) {
 
 	service := config.GetServiceFromContext(ctx)
 
+	rateLimiter := internalGithub.GetRateLimitWaiterClientFromContext(ctx)
+	githubClient := github.NewClient(rateLimiter).WithAuthToken(service.Token)
+	githubWrapperClient := internalGithub.NewGitHubClientWrapper(githubClient)
+	ctx = context.WithValue(ctx, config.ContextKey("githubwrapperclient"), githubWrapperClient)
+
 	if service.Token == "" {
 		logging.Panic(ctx, "token is not set in ankalet.yaml:services:"+service.Name+":token")
 	}

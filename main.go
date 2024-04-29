@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log"
 	"log/slog"
-	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -15,12 +14,10 @@ import (
 	"time"
 
 	"github.com/gofri/go-github-ratelimit/github_ratelimit"
-	"github.com/google/go-github/v58/github"
 	"github.com/norsegaud/go-daemon"
 	"github.com/veertuinc/anklet/internal/anka"
 	"github.com/veertuinc/anklet/internal/config"
 	"github.com/veertuinc/anklet/internal/database"
-	internalGithub "github.com/veertuinc/anklet/internal/github"
 	"github.com/veertuinc/anklet/internal/logging"
 	"github.com/veertuinc/anklet/internal/run"
 )
@@ -110,10 +107,20 @@ func main() {
 		PluginsPath: pluginsPath,
 	})
 
-	rateLimiter, err := github_ratelimit.NewRateLimitWaiterClient(nil)
-	if err != nil {
-		logger.ErrorContext(parentCtx, "error creating github_ratelimit.NewRateLimitWaiterClient", "err", err)
-		return
+	githubServiceExists := false
+	for _, service := range loadedConfig.Services {
+		if service.Plugin == "github" {
+			githubServiceExists = true
+		}
+	}
+	if githubServiceExists {
+		rateLimiter, err := github_ratelimit.NewRateLimitWaiterClient(nil)
+		if err != nil {
+			logger.ErrorContext(parentCtx, "error creating github_ratelimit.NewRateLimitWaiterClient", "err", err)
+			return
+		}
+		fmt.Println("rateLimiter", rateLimiter)
+		parentCtx = context.WithValue(parentCtx, config.ContextKey("rateLimiter"), rateLimiter)
 	}
 
 	d, err := daemonContext.Reborn()
@@ -125,7 +132,7 @@ func main() {
 	}
 	defer daemonContext.Release()
 
-	go worker(parentCtx, logger, rateLimiter, *loadedConfig)
+	go worker(parentCtx, logger, *loadedConfig)
 
 	err = daemon.ServeSignals()
 	if err != nil {
@@ -133,7 +140,7 @@ func main() {
 	}
 }
 
-func worker(parentCtx context.Context, logger *slog.Logger, rateLimiter *http.Client, loadedConfig config.Config) {
+func worker(parentCtx context.Context, logger *slog.Logger, loadedConfig config.Config) {
 	globals := config.GetGlobalsFromContext(parentCtx)
 	toRunOnce := globals.RunOnce
 	workerCtx, cancel := context.WithCancel(parentCtx)
@@ -189,10 +196,6 @@ func worker(parentCtx context.Context, logger *slog.Logger, rateLimiter *http.Cl
 			}
 
 			serviceCtx = context.WithValue(serviceCtx, config.ContextKey("ankacli"), ankaCLI)
-
-			githubClient := github.NewClient(rateLimiter).WithAuthToken(service.Token)
-			githubWrapperClient := internalGithub.NewGitHubClientWrapper(githubClient)
-			serviceCtx = context.WithValue(serviceCtx, config.ContextKey("githubwrapperclient"), githubWrapperClient)
 
 			if service.Database.Enabled {
 				databaseClient, err := database.NewClient(serviceCtx, service.Database)
