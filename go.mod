@@ -3,6 +3,7 @@ module github.com/veertuinc/anklet
 go 1.22.2
 
 require (
+	github.com/bradleyfalzon/ghinstallation v1.1.1
 	github.com/gofri/go-github-ratelimit v1.1.0
 	github.com/google/go-github/v61 v61.0.0
 	github.com/google/uuid v1.6.0
@@ -13,9 +14,12 @@ require (
 
 require (
 	github.com/cespare/xxhash/v2 v2.2.0 // indirect
+	github.com/dgrijalva/jwt-go v3.2.0+incompatible // indirect
 	github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f // indirect
+	github.com/google/go-github/v29 v29.0.2 // indirect
 	github.com/google/go-querystring v1.1.0 // indirect
 	github.com/kardianos/osext v0.0.0-20190222173326-2bc1f35cddc0 // indirect
+	golang.org/x/crypto v0.0.0-20190308221718-c2843e01d9a2 // indirect
 	golang.org/x/sys v0.19.0 // indirect
 )
 
