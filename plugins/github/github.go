@@ -222,7 +222,10 @@ func Run(ctx context.Context, logger *slog.Logger) {
 
 	service := config.GetServiceFromContext(ctx)
 
+	// Shared transport to reuse TCP connections.
 	rateLimiter := internalGithub.GetRateLimitWaiterClientFromContext(ctx)
+	// httpTransport := config.GetHttpTransportFromContext(ctx) // will be used later for github app auth
+
 	githubClient := github.NewClient(rateLimiter).WithAuthToken(service.Token)
 	githubWrapperClient := internalGithub.NewGitHubClientWrapper(githubClient)
 	ctx = context.WithValue(ctx, config.ContextKey("githubwrapperclient"), githubWrapperClient)

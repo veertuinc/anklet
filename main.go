@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -107,6 +108,9 @@ func main() {
 		PluginsPath: pluginsPath,
 	})
 
+	httpTransport := http.DefaultTransport
+	parentCtx = context.WithValue(parentCtx, config.ContextKey("httpTransport"), httpTransport)
+
 	githubServiceExists := false
 	for _, service := range loadedConfig.Services {
 		if service.Plugin == "github" {
@@ -114,12 +118,11 @@ func main() {
 		}
 	}
 	if githubServiceExists {
-		rateLimiter, err := github_ratelimit.NewRateLimitWaiterClient(nil)
+		rateLimiter, err := github_ratelimit.NewRateLimitWaiterClient(httpTransport)
 		if err != nil {
 			logger.ErrorContext(parentCtx, "error creating github_ratelimit.NewRateLimitWaiterClient", "err", err)
 			return
 		}
-		fmt.Println("rateLimiter", rateLimiter)
 		parentCtx = context.WithValue(parentCtx, config.ContextKey("rateLimiter"), rateLimiter)
 	}
 

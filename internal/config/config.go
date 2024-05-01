@@ -1,6 +1,7 @@
 package config
 
 import (
+	"net/http"
 	"os"
 	"sync"
 
@@ -42,7 +43,6 @@ type Service struct {
 	Owner         string   `yaml:"owner"`
 	Database      Database `yaml:"database"`
 	RegistryURL   string   `yaml:"registry_url"`
-	PrivateKey    string   `yaml:"private_key"`
 }
 
 func LoadConfig(configPath string) (*Config, error) {
@@ -81,4 +81,12 @@ func GetGlobalsFromContext(ctx context.Context) Globals {
 		panic("GetGlobalsFromContext failed")
 	}
 	return globals
+}
+
+func GetHttpTransportFromContext(ctx context.Context) *http.Transport {
+	httpTransport, ok := ctx.Value(ContextKey("httpTransport")).(*http.Transport)
+	if !ok {
+		panic("GetHttpTransportFromContext failed")
+	}
+	return httpTransport
 }
