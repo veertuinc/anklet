@@ -224,16 +224,16 @@ func Run(ctx context.Context, logger *slog.Logger) {
 	service := config.GetServiceFromContext(ctx)
 
 	if service.Token == "" && service.PrivateKey == "" {
-		panic("token and private_key are not set in ankalet.yaml:services:" + service.Name + ":token/private_key")
+		logging.Panic(ctx, "token and private_key are not set in ankalet.yaml:services:"+service.Name+":token/private_key")
 	}
 	if service.PrivateKey != "" && (service.AppID == 0 || service.InstallationID == 0) {
-		panic("private_key, app_id, and installation_id must all be set in ankalet.yaml:services:" + service.Name + "")
+		logging.Panic(ctx, "private_key, app_id, and installation_id must all be set in ankalet.yaml:services:"+service.Name+"")
 	}
 	if service.Owner == "" {
-		panic("owner is not set in ankalet.yaml:services:" + service.Name + ":owner")
+		logging.Panic(ctx, "owner is not set in ankalet.yaml:services:"+service.Name+":owner")
 	}
 	if service.Repo == "" {
-		panic("repo is not set in anklet.yaml:services:" + service.Name + ":repo")
+		logging.Panic(ctx, "repo is not set in anklet.yaml:services:"+service.Name+":repo")
 	}
 
 	hostHasVmCapacity := anka.HostHasVmCapacity(ctx)
