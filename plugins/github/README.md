@@ -11,6 +11,10 @@ services:
   - name: RUNNER1
     plugin: github
     token: github_pat_XXX
+    # Instead of PAT, you can create a github app for your org/repo and use its credentials instead.
+    # private_key: /path/to/private/key
+    # app_id: 12345678
+    # installation_id: 12345678
     # can be org or repo
     registration: repo
     repo: anklet
@@ -25,8 +29,9 @@ services:
       database: 0
 ```
 
-- Your PAT must have **Actions** and **Administration** Read and Write permissions.
+- Your PAT or Github App must have **Actions** and **Administration** Read & Write permissions.
 - The `database` is required. You can find installation instructions in the anklet main [README.md](../../README.md#database-setup).
+
 
 In your workflow yml's `runs-on`, you need to add several labels. Here is the list and an example:
 
