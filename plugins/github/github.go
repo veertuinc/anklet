@@ -10,7 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/go-github/v58/github"
+	"github.com/bradleyfalzon/ghinstallation"
+	"github.com/google/go-github/v61/github"
 	"github.com/veertuinc/anklet/internal/anka"
 	"github.com/veertuinc/anklet/internal/config"
 	dbFunctions "github.com/veertuinc/anklet/internal/database"
@@ -53,25 +54,30 @@ func extractLabelValue(labels []string, prefix string) string {
 }
 
 // https://github.com/gofri/go-github-ratelimit has yet to support primary rate limits, so we have to do it ourselves.
-func ExecuteGitHubClientFunction[T any](ctx context.Context, logger *slog.Logger, executeFunc func() (*T, *github.Response, error)) (*T, *github.Response, error) {
+func ExecuteGitHubClientFunction[T any](ctx context.Context, logger *slog.Logger, executeFunc func() (*T, *github.Response, error)) (context.Context, *T, *github.Response, error) {
 	result, response, err := executeFunc()
-	if response != nil && response.Rate.Remaining <= 10 { // handle primary rate limiting
-		sleepDuration := time.Until(response.Rate.Reset.Time) + time.Second // Adding a second to ensure we're past the reset time
-		logger.WarnContext(ctx, "GitHub API rate limit exceeded, sleeping until reset", "resetTime", response.Rate.Reset.Time.Format(time.RFC3339))
-		select {
-		case <-time.After(sleepDuration):
-			return ExecuteGitHubClientFunction(ctx, logger, executeFunc) // Retry the function after waiting
-		case <-ctx.Done():
-			return nil, nil, ctx.Err()
+	if response != nil {
+		ctx = logging.AppendCtx(ctx, slog.Int("api_limit_remaining", response.Rate.Remaining))
+		ctx = logging.AppendCtx(ctx, slog.String("api_limit_reset_time", response.Rate.Reset.Time.Format(time.RFC3339)))
+		ctx = logging.AppendCtx(ctx, slog.Int("api_limit", response.Rate.Limit))
+		if response.Rate.Remaining <= 10 { // handle primary rate limiting
+			sleepDuration := time.Until(response.Rate.Reset.Time) + time.Second // Adding a second to ensure we're past the reset time
+			logger.WarnContext(ctx, "GitHub API rate limit exceeded, sleeping until reset")
+			select {
+			case <-time.After(sleepDuration):
+				return ExecuteGitHubClientFunction(ctx, logger, executeFunc) // Retry the function after waiting
+			case <-ctx.Done():
+				return ctx, nil, nil, ctx.Err()
+			}
 		}
 	}
 	if err != nil &&
 		err.Error() != "context canceled" &&
 		!strings.Contains(err.Error(), "try again later") {
 		logger.Error("error executing GitHub client function: " + err.Error())
-		return nil, nil, err
+		return ctx, nil, nil, err
 	}
-	return result, response, nil
+	return ctx, result, response, nil
 }
 
 func setLoggingContext(ctx context.Context, workflowRunJob WorkflowRunJobDetail) context.Context {
@@ -95,7 +101,7 @@ func getWorkflowRunJobs(ctx context.Context, logger *slog.Logger) ([]WorkflowRun
 	service := config.GetServiceFromContext(ctx)
 	var allWorkflowRunJobDetails []WorkflowRunJobDetail
 	// WORKFLOWS
-	workflows, _, err := ExecuteGitHubClientFunction[*github.Workflows](ctx, logger, func() (**github.Workflows, *github.Response, error) {
+	ctx, workflows, _, err := ExecuteGitHubClientFunction[*github.Workflows](ctx, logger, func() (**github.Workflows, *github.Response, error) {
 		workflows, resp, err := githubClient.Actions.ListWorkflows(context.Background(), service.Owner, service.Repo, &github.ListOptions{})
 		return &workflows, resp, err
 	})
@@ -110,7 +116,7 @@ func getWorkflowRunJobs(ctx context.Context, logger *slog.Logger) ([]WorkflowRun
 	for _, workflow := range (*workflows).Workflows {
 		if *workflow.State == "active" {
 			// WORKFLOW RUNS
-			workflow_runs, _, err := ExecuteGitHubClientFunction[*github.WorkflowRuns](ctx, logger, func() (**github.WorkflowRuns, *github.Response, error) {
+			ctx, workflow_runs, _, err := ExecuteGitHubClientFunction[*github.WorkflowRuns](ctx, logger, func() (**github.WorkflowRuns, *github.Response, error) {
 				workflow_runs, resp, err := githubClient.Actions.ListWorkflowRunsByID(context.Background(), service.Owner, service.Repo, *workflow.ID, &github.ListWorkflowRunsOptions{
 					// ListOptions: github.ListOptions{PerPage: 30},
 					Status: "queued",
@@ -126,7 +132,7 @@ func getWorkflowRunJobs(ctx context.Context, logger *slog.Logger) ([]WorkflowRun
 				return []WorkflowRunJobDetail{}, errors.New("error executing githubClient.Actions.ListWorkflowRunsByID")
 			}
 			for _, workflowRun := range (*workflow_runs).WorkflowRuns {
-				workflowRunJobs, _, err := ExecuteGitHubClientFunction[github.Jobs](ctx, logger, func() (*github.Jobs, *github.Response, error) {
+				ctx, workflowRunJobs, _, err := ExecuteGitHubClientFunction[github.Jobs](ctx, logger, func() (*github.Jobs, *github.Response, error) {
 					workflowRunJobs, resp, err := githubClient.Actions.ListWorkflowJobs(context.Background(), service.Owner, service.Repo, *workflowRun.ID, &github.ListWorkflowJobsOptions{})
 					return workflowRunJobs, resp, err
 				})
@@ -215,15 +221,13 @@ func getWorkflowRunJobs(ctx context.Context, logger *slog.Logger) ([]WorkflowRun
 
 func Run(ctx context.Context, logger *slog.Logger) {
 
-	hostHasVmCapacity := anka.HostHasVmCapacity(ctx)
-	if !hostHasVmCapacity {
-		return
-	}
-
 	service := config.GetServiceFromContext(ctx)
 
-	if service.Token == "" {
-		logging.Panic(ctx, "token is not set in ankalet.yaml:services:"+service.Name+":token")
+	if service.Token == "" && service.PrivateKey == "" {
+		logging.Panic(ctx, "token and private_key are not set in ankalet.yaml:services:"+service.Name+":token/private_key")
+	}
+	if service.PrivateKey != "" && (service.AppID == 0 || service.InstallationID == 0) {
+		logging.Panic(ctx, "private_key, app_id, and installation_id must all be set in ankalet.yaml:services:"+service.Name+"")
 	}
 	if service.Owner == "" {
 		logging.Panic(ctx, "owner is not set in ankalet.yaml:services:"+service.Name+":owner")
@@ -231,6 +235,30 @@ func Run(ctx context.Context, logger *slog.Logger) {
 	if service.Repo == "" {
 		logging.Panic(ctx, "repo is not set in anklet.yaml:services:"+service.Name+":repo")
 	}
+
+	hostHasVmCapacity := anka.HostHasVmCapacity(ctx)
+	if !hostHasVmCapacity {
+		return
+	}
+
+	rateLimiter := internalGithub.GetRateLimitWaiterClientFromContext(ctx)
+	httpTransport := config.GetHttpTransportFromContext(ctx)
+	var githubClient *github.Client
+	if service.PrivateKey != "" {
+		itr, err := ghinstallation.NewKeyFromFile(httpTransport, int64(service.AppID), int64(service.InstallationID), service.PrivateKey)
+		if err != nil {
+			logger.ErrorContext(ctx, "error creating github app installation token", "err", err)
+			return
+		}
+		rateLimiter.Transport = itr
+		githubClient = github.NewClient(rateLimiter)
+	} else {
+		githubClient = github.NewClient(rateLimiter).WithAuthToken(service.Token)
+	}
+
+	githubWrapperClient := internalGithub.NewGitHubClientWrapper(githubClient)
+	ctx = context.WithValue(ctx, config.ContextKey("githubwrapperclient"), githubWrapperClient)
+
 	ctx = logging.AppendCtx(ctx, slog.String("repo", service.Repo))
 	ctx = logging.AppendCtx(ctx, slog.String("owner", service.Owner))
 
@@ -302,8 +330,7 @@ func Run(ctx context.Context, logger *slog.Logger) {
 		logger.DebugContext(ctx, "handling job")
 
 		// Get runner registration token
-		githubClient := internalGithub.GetGitHubClientFromContext(ctx)
-		repoRunnerRegistration, response, err := ExecuteGitHubClientFunction[github.RegistrationToken](ctx, logger, func() (*github.RegistrationToken, *github.Response, error) {
+		ctx, repoRunnerRegistration, response, err := ExecuteGitHubClientFunction[github.RegistrationToken](ctx, logger, func() (*github.RegistrationToken, *github.Response, error) {
 			repoRunnerRegistration, resp, err := githubClient.Actions.CreateRegistrationToken(context.Background(), service.Owner, service.Repo)
 			return repoRunnerRegistration, resp, err
 		})
@@ -388,7 +415,7 @@ func Run(ctx context.Context, logger *slog.Logger) {
 				logger.WarnContext(ctx, "context canceled while watching for job completion")
 				break
 			}
-			currentJob, response, err := ExecuteGitHubClientFunction[github.WorkflowJob](ctx, logger, func() (*github.WorkflowJob, *github.Response, error) {
+			ctx, currentJob, response, err := ExecuteGitHubClientFunction[github.WorkflowJob](ctx, logger, func() (*github.WorkflowJob, *github.Response, error) {
 				currentJob, resp, err := githubClient.Actions.GetWorkflowJobByID(context.Background(), service.Owner, service.Repo, *workflowRunJob.Job.ID)
 				return currentJob, resp, err
 			})
@@ -423,7 +450,7 @@ func removeSelfHostedRunner(ctx context.Context, vm anka.VM, workflowRunID int64
 	logger := logging.GetLoggerFromContext(ctx)
 	service := config.GetServiceFromContext(ctx)
 	githubClient := internalGithub.GetGitHubClientFromContext(ctx)
-	runnersList, response, err := ExecuteGitHubClientFunction[github.Runners](ctx, logger, func() (*github.Runners, *github.Response, error) {
+	ctx, runnersList, response, err := ExecuteGitHubClientFunction[github.Runners](ctx, logger, func() (*github.Runners, *github.Response, error) {
 		runnersList, resp, err := githubClient.Actions.ListRunners(context.Background(), service.Owner, service.Repo, &github.ListOptions{})
 		return runnersList, resp, err
 	})
@@ -447,7 +474,7 @@ func removeSelfHostedRunner(ctx context.Context, vm anka.VM, workflowRunID int64
 				*/
 				cancelSent := false
 				for {
-					workflowRun, _, err := ExecuteGitHubClientFunction[github.WorkflowRun](ctx, logger, func() (*github.WorkflowRun, *github.Response, error) {
+					ctx, workflowRun, _, err := ExecuteGitHubClientFunction[github.WorkflowRun](ctx, logger, func() (*github.WorkflowRun, *github.Response, error) {
 						workflowRun, resp, err := githubClient.Actions.GetWorkflowRunByID(context.Background(), service.Owner, service.Repo, workflowRunID)
 						return workflowRun, resp, err
 					})
@@ -460,7 +487,7 @@ func removeSelfHostedRunner(ctx context.Context, vm anka.VM, workflowRunID int64
 					} else {
 						logger.WarnContext(ctx, "workflow run is still active... waiting for cancellation so we can clean up the runner...", "workflow_run_id", workflowRunID)
 						if !cancelSent { // this has to happen here so that it doesn't error with "409 Cannot cancel a workflow run that is completed. " if the job is already cancelled
-							cancelResponse, _, cancelErr := ExecuteGitHubClientFunction[github.Response](ctx, logger, func() (*github.Response, *github.Response, error) {
+							ctx, cancelResponse, _, cancelErr := ExecuteGitHubClientFunction[github.Response](ctx, logger, func() (*github.Response, *github.Response, error) {
 								resp, err := githubClient.Actions.CancelWorkflowRunByID(context.Background(), service.Owner, service.Repo, workflowRunID)
 								return resp, nil, err
 							})
@@ -474,7 +501,7 @@ func removeSelfHostedRunner(ctx context.Context, vm anka.VM, workflowRunID int64
 						time.Sleep(10 * time.Second)
 					}
 				}
-				_, _, err = ExecuteGitHubClientFunction[github.Response](ctx, logger, func() (*github.Response, *github.Response, error) {
+				ctx, _, _, err = ExecuteGitHubClientFunction[github.Response](ctx, logger, func() (*github.Response, *github.Response, error) {
 					response, err := githubClient.Actions.RemoveRunner(context.Background(), service.Owner, service.Repo, *runner.ID)
 					return response, nil, err
 				})

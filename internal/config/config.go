@@ -1,6 +1,7 @@
 package config
 
 import (
+	"net/http"
 	"os"
 	"sync"
 
@@ -33,15 +34,18 @@ type Database struct {
 }
 
 type Service struct {
-	SleepInterval int      `yaml:"sleep_interval" default:"2"`
-	Name          string   `yaml:"name"`
-	Plugin        string   `yaml:"plugin"`
-	Token         string   `yaml:"token"`
-	Registration  string   `yaml:"registration" default:"repo"`
-	Repo          string   `yaml:"repo"`
-	Owner         string   `yaml:"owner"`
-	Database      Database `yaml:"database"`
-	RegistryURL   string   `yaml:"registry_url"`
+	SleepInterval  int      `yaml:"sleep_interval" default:"2"`
+	Name           string   `yaml:"name"`
+	Plugin         string   `yaml:"plugin"`
+	Token          string   `yaml:"token"`
+	Registration   string   `yaml:"registration" default:"repo"`
+	Repo           string   `yaml:"repo"`
+	Owner          string   `yaml:"owner"`
+	Database       Database `yaml:"database"`
+	RegistryURL    string   `yaml:"registry_url"`
+	PrivateKey     string   `yaml:"private_key"`
+	AppID          int      `yaml:"app_id"`
+	InstallationID int64    `yaml:"installation_id"`
 }
 
 func LoadConfig(configPath string) (*Config, error) {
@@ -80,4 +84,12 @@ func GetGlobalsFromContext(ctx context.Context) Globals {
 		panic("GetGlobalsFromContext failed")
 	}
 	return globals
+}
+
+func GetHttpTransportFromContext(ctx context.Context) *http.Transport {
+	httpTransport, ok := ctx.Value(ContextKey("httpTransport")).(*http.Transport)
+	if !ok {
+		panic("GetHttpTransportFromContext failed")
+	}
+	return httpTransport
 }
