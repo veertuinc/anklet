@@ -11,7 +11,6 @@ services:
   - name: RUNNER1
     plugin: github
     token: github_pat_XXX
-    # can be org or repo
     registration: repo
     repo: anklet
     owner: veertuinc
