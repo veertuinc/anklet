@@ -101,7 +101,7 @@ At the moment we support `redis` 7.x for the database. It can be installed on ma
 ```bash
 brew install redis
 sudo sysctl kern.ipc.somaxconn=511 # you can also add to /etc/sysctl.conf and reboot
-brew services start redis
+brew services start redis # use sudo on ec2
 tail -fF /opt/homebrew/var/log/redis.log
 ```
 
