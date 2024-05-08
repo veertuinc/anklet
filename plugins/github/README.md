@@ -13,8 +13,8 @@ services:
     token: github_pat_XXX
     # Instead of PAT, you can create a github app for your org/repo and use its credentials instead.
     # private_key: /path/to/private/key
-    # app_id: 12345678
-    # installation_id: 12345678
+    # app_id: 12345678 # Settings > Developer > settings > GitHub App > About item
+    # installation_id: 12345678 # Settings > Developer > settings > GitHub Apps > Advanced > Payload in Request tab
     registration: repo
     repo: anklet
     owner: veertuinc
