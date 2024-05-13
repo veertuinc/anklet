@@ -111,6 +111,118 @@ While you can run it anywhere you want, its likely going to be less latency to h
 
 - #### [**`Github Actions`**](./plugins/github/README.md)
 
+
+---
+
+### Metrics
+
+Metrics for monitoring are available at `http://127.0.0.1:8080/metrics?format=json` or `http://127.0.0.1:8080/metrics?format=prometheus`.
+
+- You can change the port in the `config.yml` under `metrics`, like so:
+
+    ```yaml
+    metrics:
+      port: 8080
+    ```
+
+#### Key Names and Descriptions
+
+| JSON | Prometheus | Description | 
+| ------ | ----------- | ----------- |
+| TotalRunningVMs | total_running_vms | Total number of running VMs |
+| TotalSuccessfulRunsSinceStart | total_successful_runs_since_start | Total number of successful runs since start |
+| TotalFailedRunsSinceStart | total_failed_runs_since_start | Total number of failed runs since start |
+| Service::Name | service_name | Name of the service |
+| Service::PluginName | service_plugin_name | Name of the plugin |
+| Service::OwnerName | service_owner_name | Name of the owner |
+| Service::RepoName | service_repo_name | Name of the repo |
+| Service::Status | service_status | Status of the service |
+| Service::LastSuccessfulRunJobUrl | service_last_successful_run_job_url | Last successful run job url of the service |
+| Service::LastFailedRunJobUrl | service_last_failed_run_job_url | Last failed run job url of the service |
+| Service::LastSuccessfulRun | service_last_successful_run | Timestamp of last successful run of the service (RFC3339) |
+| Service::LastFailedRun | service_last_failed_run | Timestamp of last failed run of the service (RFC3339) |
+| HostCPUCount | host_cpu_count | Total CPU count of the host |
+| HostCPUUsedCount | host_cpu_used_count | Total in use CPU count of the host |
+| HostCPUUsagePercentage | host_cpu_usage_percentage | CPU usage percentage of the host |
+| HostMemoryTotal | host_memory_total | Total memory of the host (bytes) |
+| HostMemoryUsed | host_memory_used | Used memory of the host (bytes) |
+| HostMemoryAvailable | host_memory_available | Available memory of the host (bytes) |
+| HostMemoryUsagePercentage | host_memory_usage_percentage | Memory usage percentage of the host |
+| HostDiskTotal | host_disk_total | Total disk space of the host (bytes) |
+| HostDiskUsed | host_disk_used | Used disk space of the host (bytes) |
+| HostDiskAvailable | host_disk_available | Available disk space of the host (bytes) |
+| HostDiskUsagePercentage | host_disk_usage_percentage | Disk usage percentage of the host |
+
+#### JSON
+
+```json
+{
+  "TotalRunningVMs": 0,
+  "TotalSuccessfulRunsSinceStart": 2,
+  "TotalFailedRunsSinceStart": 2,
+  "HostCPUCount": 12,
+  "HostCPUUsedCount": 0,
+  "HostCPUUsagePercentage": 5.572289151578012,
+  "HostMemoryTotal": 38654705664,
+  "HostMemoryUsed": 23025205248,
+  "HostMemoryAvailable": 15629500416,
+  "HostMemoryUsagePercentage": 59.56637064615885,
+  "HostDiskTotal": 994662584320,
+  "HostDiskUsed": 459045515264,
+  "HostDiskAvailable": 535617069056,
+  "HostDiskUsagePercentage": 46.150877945994715,
+  "Services": [
+    {
+      "Name": "RUNNER2",
+      "PluginName": "github",
+      "RepoName": "anklet",
+      "OwnerName": "veertuinc",
+      "Status": "idle",
+      "LastSuccessfulRunJobUrl": "https://github.com/veertuinc/anklet/actions/runs/9180172013/job/25243983121",
+      "LastFailedRunJobUrl": "https://github.com/veertuinc/anklet/actions/runs/9180170811/job/25243979917",
+      "LastSuccessfulRun": "2024-05-21T14:16:06.300971-05:00",
+      "LastFailedRun": "2024-05-21T14:15:10.994464-05:00"
+    },
+    {
+      "Name": "RUNNER1",
+      "PluginName": "github",
+      "RepoName": "anklet",
+      "OwnerName": "veertuinc",
+      "Status": "idle",
+      "LastSuccessfulRunJobUrl": "https://github.com/veertuinc/anklet/actions/runs/9180172546/job/25243984537",
+      "LastFailedRunJobUrl": "https://github.com/veertuinc/anklet/actions/runs/9180171228/job/25243980930",
+      "LastSuccessfulRun": "2024-05-21T14:16:35.532016-05:00",
+      "LastFailedRun": "2024-05-21T14:15:45.930051-05:00"
+    }
+  ]
+}
+```
+
+#### Prometheus
+
+```
+total_running_vms 0
+total_successful_runs_since_start 2
+total_failed_runs_since_start 2
+service_status{service_name=RUNNER2,plugin=github,owner=veertuinc,repo=anklet} idle
+service_last_successful_run{service_name=RUNNER2,plugin=github,owner=veertuinc,repo=anklet,job_url=https://github.com/veertuinc/anklet/actions/runs/9180172013/job/25243983121} 2024-05-21T14:16:06-05:00
+service_last_failed_run{service_name=RUNNER2,plugin=github,owner=veertuinc,repo=anklet,job_url=https://github.com/veertuinc/anklet/actions/runs/9180170811/job/25243979917} 2024-05-21T14:15:10-05:00
+service_status{service_name=RUNNER1,plugin=github,owner=veertuinc,repo=anklet} idle
+service_last_successful_run{service_name=RUNNER1,plugin=github,owner=veertuinc,repo=anklet,job_url=https://github.com/veertuinc/anklet/actions/runs/9180172546/job/25243984537} 2024-05-21T14:16:35-05:00
+service_last_failed_run{service_name=RUNNER1,plugin=github,owner=veertuinc,repo=anklet,job_url=https://github.com/veertuinc/anklet/actions/runs/9180171228/job/25243980930} 2024-05-21T14:15:45-05:00
+host_cpu_count 12
+host_cpu_used_count 1
+host_cpu_usage_percentage 10.674157
+host_memory_total 38654705664
+host_memory_used 22701359104
+host_memory_available 15953346560
+host_memory_usage_percentage 58.728578
+host_disk_total 994662584320
+host_disk_used 459042254848
+host_disk_available 535620329472
+host_disk_usage_percentage 46.150550
+```
+
 ---
 
 ## Development
@@ -180,3 +292,11 @@ The `Run` function should be designed to run multiple times in parallel. It shou
     - Always `return` out of `Run` so the sleep interval and main.go can handle the next run properly with new context. Never loop inside of the plugin code.
     - Should never panic but instead throw an ERROR and return.
     - It's critical that you check for context cancellation before important logic that could orphan resources.
+
+### Handling Metrics
+
+Any of the services you run are done from within worker context. Each service also has a separate service context storing its Name, etc. The metrics for the anklet instance is stored in the worker context so they can be accessed by any of the services. Plugins should update the metrics for the service they are running in at the various phases.
+
+For example, the `github` plugin will update the metrics for the service it is running in to be `running`, `pulling`, and `idle` when it is done or has yet to pick up a new job. To do this, it uses `metrics.UpdateService` with the worker and service context. See `github` plugin for an example.
+
+But metrics.UpdateService can also update things like `LastSuccess`, and `LastFailure`. See `metrics.UpdateService` for more information.

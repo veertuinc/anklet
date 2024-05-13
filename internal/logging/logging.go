@@ -5,8 +5,10 @@ import (
 	"log/slog"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/veertuinc/anklet/internal/config"
+	"github.com/veertuinc/anklet/internal/metrics"
 )
 
 func New() *slog.Logger {
@@ -69,9 +71,13 @@ func AppendCtx(parent context.Context, attr slog.Attr) context.Context {
 	return context.WithValue(parent, slogFields, v)
 }
 
-func Panic(ctx context.Context, errorMessage string) {
-	logger := GetLoggerFromContext(ctx)
-	logger.ErrorContext(ctx, errorMessage)
+func Panic(workerCtx context.Context, serviceCtx context.Context, errorMessage string) {
+	logger := GetLoggerFromContext(serviceCtx)
+	logger.ErrorContext(serviceCtx, errorMessage)
+	metrics.UpdateService(workerCtx, serviceCtx, logger, metrics.Service{
+		Status:        "failed",
+		LastFailedRun: time.Now(),
+	})
 	panic(errorMessage)
 }
 
