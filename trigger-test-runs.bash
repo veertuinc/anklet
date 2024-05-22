@@ -10,7 +10,8 @@ REPO="${3}"
 
 TRIGGER_RUN_COUNT="${4:-10}"
 
-for i in {1..${TRIGGER_RUN_COUNT}}; do
+for ((i=1; i<=TRIGGER_RUN_COUNT; i++)); do
+    echo "Triggering run $i"
     WORKFLOW_FILES=$(ls ./.github/workflows/*.yml | grep -v "check-pr")
     for FILE in $WORKFLOW_FILES; do
         WORKFLOW_ID=$(basename $FILE)

@@ -18,10 +18,15 @@ type Config struct {
 	PidFileDir string    `yaml:"pid_file_dir" default:"/tmp/"`
 	LogFileDir string    `yaml:"log_file_dir"`
 	WorkDir    string    `yaml:"work_dir" default:"/tmp/"`
+	Metrics    Metrics   `yaml:"metrics"`
 }
 
 type Log struct {
 	FileDir string `yaml:"file_dir" default:"/dev/null"`
+}
+
+type Metrics struct {
+	Port string `yaml:"port" default:"8080"` // default set in main.go
 }
 
 type Database struct {

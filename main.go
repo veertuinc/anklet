@@ -20,13 +20,15 @@ import (
 	"github.com/veertuinc/anklet/internal/config"
 	"github.com/veertuinc/anklet/internal/database"
 	"github.com/veertuinc/anklet/internal/logging"
+	"github.com/veertuinc/anklet/internal/metrics"
 	"github.com/veertuinc/anklet/internal/run"
 )
 
 var (
-	version    = "dev"
-	runOnce    = "false"
-	signalFlag = flag.String("s", "", `Send signal to the daemon:
+	version     = "dev"
+	runOnce     = "false"
+	versionFlag = flag.Bool("version", false, "Print the version")
+	signalFlag  = flag.String("s", "", `Send signal to the daemon:
   drain — graceful shutdown, will wait until all jobs finish before exiting
   stop — best effort graceful shutdown, interrupting the job as soon as possible`)
 	stop            = make(chan struct{})
@@ -55,6 +57,10 @@ func main() {
 	}
 
 	flag.Parse()
+	if *versionFlag {
+		fmt.Println(version)
+		os.Exit(0)
+	}
 	daemon.AddCommand(daemon.StringFlag(signalFlag, "drain"), syscall.SIGQUIT, termHandler(parentCtx, logger))
 	daemon.AddCommand(daemon.StringFlag(signalFlag, "stop"), syscall.SIGTERM, termHandler(parentCtx, logger))
 
@@ -165,6 +171,18 @@ func worker(parentCtx context.Context, logger *slog.Logger, loadedConfig config.
 			}
 		}
 	}()
+	// Setup Metrics Server and context
+	metricsData := &metrics.MetricsData{}
+	workerCtx = context.WithValue(workerCtx, config.ContextKey("metrics"), metricsData)
+	metricsPort := "8080"
+	if loadedConfig.Metrics.Port != "" {
+		metricsPort = loadedConfig.Metrics.Port
+	}
+	metricsServer := metrics.NewServer(metricsPort)
+	go metricsServer.Start(workerCtx)
+	logger.InfoContext(workerCtx, "metrics server started on port "+metricsPort)
+	/////////////
+	// MAIN LOGIC
 	for _, service := range loadedConfig.Services {
 		wg.Add(1)
 		go func(service config.Service) {
@@ -211,20 +229,40 @@ func worker(parentCtx context.Context, logger *slog.Logger, loadedConfig config.
 			}
 
 			logger.InfoContext(serviceCtx, "started service")
+			metricsData.AddService(metrics.Service{
+				Name:       service.Name,
+				PluginName: service.Plugin,
+				RepoName:   service.Repo,
+				OwnerName:  service.Owner,
+				Status:     "idle",
+			})
 
 			for {
 				select {
 				case <-serviceCtx.Done():
 					serviceCancel()
 					logger.WarnContext(serviceCtx, shutDownMessage)
+					metrics.UpdateService(workerCtx, serviceCtx, logger, metrics.Service{
+						Status: "stopped",
+					})
 					return
 				default:
-					run.Plugin(serviceCtx, logger)
+					metrics.UpdateService(workerCtx, serviceCtx, logger, metrics.Service{
+						Status: "checking",
+					})
+					run.Plugin(workerCtx, serviceCtx, logger)
 					if workerCtx.Err() != nil || toRunOnce == "true" {
 						serviceCancel()
 						break
 					}
-					time.Sleep(time.Duration(service.SleepInterval) * time.Second)
+					metrics.UpdateService(workerCtx, serviceCtx, logger, metrics.Service{
+						Status: "idle",
+					})
+					select {
+					case <-time.After(time.Duration(service.SleepInterval) * time.Second):
+					case <-serviceCtx.Done():
+						break
+					}
 				}
 			}
 		}(service)
