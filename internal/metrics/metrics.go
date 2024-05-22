@@ -40,13 +40,13 @@ type MetricsData struct {
 	HostCPUCount                  int
 	HostCPUUsedCount              int
 	HostCPUUsagePercentage        float64
-	HostMemoryTotal               uint64
-	HostMemoryUsed                uint64
-	HostMemoryAvailable           uint64
+	HostMemoryTotalBytes          uint64
+	HostMemoryUsedBytes           uint64
+	HostMemoryAvailableBytes      uint64
 	HostMemoryUsagePercentage     float64
-	HostDiskTotal                 uint64
-	HostDiskUsed                  uint64
-	HostDiskAvailable             uint64
+	HostDiskTotalBytes            uint64
+	HostDiskUsedBytes             uint64
+	HostDiskAvailableBytes        uint64
 	HostDiskUsagePercentage       float64
 	Services                      []Service
 }
@@ -133,12 +133,12 @@ func UpdateSystemMetrics(serviceCtx context.Context, logger *slog.Logger, metric
 	memStat, err := mem.VirtualMemory()
 	if err != nil {
 		logger.ErrorContext(serviceCtx, "Error getting memory usage", "error", err)
-		metricsData.HostMemoryTotal = 0
+		metricsData.HostMemoryTotalBytes = 0
 	}
-	metricsData.HostMemoryTotal = uint64(memStat.Total)
-	metricsData.HostMemoryAvailable = uint64(memStat.Available)
+	metricsData.HostMemoryTotalBytes = uint64(memStat.Total)
+	metricsData.HostMemoryAvailableBytes = uint64(memStat.Available)
 	metricsData.HostMemoryUsagePercentage = memStat.UsedPercent
-	metricsData.HostMemoryUsed = uint64(memStat.Used)
+	metricsData.HostMemoryUsedBytes = uint64(memStat.Used)
 	// DISK
 	diskStat, err := disk.Usage("/")
 	if err != nil {
@@ -146,9 +146,9 @@ func UpdateSystemMetrics(serviceCtx context.Context, logger *slog.Logger, metric
 		metricsData.HostDiskUsagePercentage = 0
 	}
 	metricsData.HostDiskUsagePercentage = diskStat.UsedPercent
-	metricsData.HostDiskTotal = uint64(diskStat.Total)
-	metricsData.HostDiskAvailable = uint64(diskStat.Free)
-	metricsData.HostDiskUsed = uint64(diskStat.Used)
+	metricsData.HostDiskTotalBytes = uint64(diskStat.Total)
+	metricsData.HostDiskAvailableBytes = uint64(diskStat.Free)
+	metricsData.HostDiskUsedBytes = uint64(diskStat.Used)
 }
 
 func UpdateService(workerCtx context.Context, serviceCtx context.Context, logger *slog.Logger, updatedService Service) {
@@ -234,13 +234,13 @@ func (s *Server) handlePrometheusMetrics(ctx context.Context) http.HandlerFunc {
 		w.Write([]byte(fmt.Sprintf("host_cpu_count %d\n", metricsData.HostCPUCount)))
 		w.Write([]byte(fmt.Sprintf("host_cpu_used_count %d\n", metricsData.HostCPUUsedCount)))
 		w.Write([]byte(fmt.Sprintf("host_cpu_usage_percentage %f\n", metricsData.HostCPUUsagePercentage)))
-		w.Write([]byte(fmt.Sprintf("host_memory_total %d\n", metricsData.HostMemoryTotal)))
-		w.Write([]byte(fmt.Sprintf("host_memory_used %d\n", metricsData.HostMemoryUsed)))
-		w.Write([]byte(fmt.Sprintf("host_memory_available %d\n", metricsData.HostMemoryAvailable)))
+		w.Write([]byte(fmt.Sprintf("host_memory_total_bytes %d\n", metricsData.HostMemoryTotalBytes)))
+		w.Write([]byte(fmt.Sprintf("host_memory_used_bytes %d\n", metricsData.HostMemoryUsedBytes)))
+		w.Write([]byte(fmt.Sprintf("host_memory_available_bytes %d\n", metricsData.HostMemoryAvailableBytes)))
 		w.Write([]byte(fmt.Sprintf("host_memory_usage_percentage %f\n", metricsData.HostMemoryUsagePercentage)))
-		w.Write([]byte(fmt.Sprintf("host_disk_total %d\n", metricsData.HostDiskTotal)))
-		w.Write([]byte(fmt.Sprintf("host_disk_used %d\n", metricsData.HostDiskUsed)))
-		w.Write([]byte(fmt.Sprintf("host_disk_available %d\n", metricsData.HostDiskAvailable)))
+		w.Write([]byte(fmt.Sprintf("host_disk_total_bytes %d\n", metricsData.HostDiskTotalBytes)))
+		w.Write([]byte(fmt.Sprintf("host_disk_used_bytes %d\n", metricsData.HostDiskUsedBytes)))
+		w.Write([]byte(fmt.Sprintf("host_disk_available_bytes %d\n", metricsData.HostDiskAvailableBytes)))
 		w.Write([]byte(fmt.Sprintf("host_disk_usage_percentage %f\n", metricsData.HostDiskUsagePercentage)))
 	}
 }
