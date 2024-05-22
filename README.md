@@ -144,13 +144,13 @@ Metrics for monitoring are available at `http://127.0.0.1:8080/metrics?format=js
 | HostCPUCount | host_cpu_count | Total CPU count of the host |
 | HostCPUUsedCount | host_cpu_used_count | Total in use CPU count of the host |
 | HostCPUUsagePercentage | host_cpu_usage_percentage | CPU usage percentage of the host |
-| HostMemoryTotal | host_memory_total | Total memory of the host (bytes) |
-| HostMemoryUsed | host_memory_used | Used memory of the host (bytes) |
-| HostMemoryAvailable | host_memory_available | Available memory of the host (bytes) |
+| HostMemoryTotalBytes | host_memory_total_bytes | Total memory of the host (bytes) |
+| HostMemoryUsedBytes | host_memory_used_bytes | Used memory of the host (bytes) |
+| HostMemoryAvailableBytes | host_memory_available_bytes | Available memory of the host (bytes) |
 | HostMemoryUsagePercentage | host_memory_usage_percentage | Memory usage percentage of the host |
-| HostDiskTotal | host_disk_total | Total disk space of the host (bytes) |
-| HostDiskUsed | host_disk_used | Used disk space of the host (bytes) |
-| HostDiskAvailable | host_disk_available | Available disk space of the host (bytes) |
+| HostDiskTotalBytes | host_disk_total_bytes | Total disk space of the host (bytes) |
+| HostDiskUsedBytes | host_disk_used_bytes | Used disk space of the host (bytes) |
+| HostDiskAvailableBytes | host_disk_available_bytes | Available disk space of the host (bytes) |
 | HostDiskUsagePercentage | host_disk_usage_percentage | Disk usage percentage of the host |
 
 #### JSON
@@ -213,13 +213,13 @@ service_last_failed_run{service_name=RUNNER1,plugin=github,owner=veertuinc,repo=
 host_cpu_count 12
 host_cpu_used_count 1
 host_cpu_usage_percentage 10.674157
-host_memory_total 38654705664
-host_memory_used 22701359104
-host_memory_available 15953346560
+host_memory_total_bytes 38654705664
+host_memory_used_bytes 22701359104
+host_memory_available_bytes 15953346560
 host_memory_usage_percentage 58.728578
-host_disk_total 994662584320
-host_disk_used 459042254848
-host_disk_available 535620329472
+host_disk_total_bytes 994662584320
+host_disk_used_bytes 459042254848
+host_disk_available_bytes 535620329472
 host_disk_usage_percentage 46.150550
 ```
 
