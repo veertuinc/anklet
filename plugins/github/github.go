@@ -118,7 +118,7 @@ func getWorkflowRunJobs(serviceCtx context.Context, logger *slog.Logger) ([]Work
 	})
 	if serviceCtx.Err() != nil {
 		logger.WarnContext(serviceCtx, "context canceled during workflows listing")
-		return []WorkflowRunJobDetail{}, errors.New("context canceled during workflows listing")
+		return []WorkflowRunJobDetail{}, nil
 	}
 	if err != nil {
 		logger.ErrorContext(serviceCtx, "error executing githubClient.Actions.ListWorkflows", "err", err)
@@ -150,10 +150,11 @@ func getWorkflowRunJobs(serviceCtx context.Context, logger *slog.Logger) ([]Work
 				if err != nil {
 					if strings.Contains(err.Error(), "context canceled") {
 						logger.WarnContext(serviceCtx, "context canceled during githubClient.Actions.ListWorkflowJobs", "err", err)
+						return []WorkflowRunJobDetail{}, nil
 					} else {
 						logger.ErrorContext(serviceCtx, "error executing githubClient.Actions.ListWorkflowJobs", "err", err)
+						return []WorkflowRunJobDetail{}, errors.New("error executing githubClient.Actions.ListWorkflowJobs")
 					}
-					return []WorkflowRunJobDetail{}, errors.New("error executing githubClient.Actions.ListWorkflowJobs")
 				}
 				for _, job := range workflowRunJobs.Jobs {
 					if *job.Status == "queued" { // I don't know why, but we'll get completed jobs back in the list
@@ -197,10 +198,11 @@ func getWorkflowRunJobs(serviceCtx context.Context, logger *slog.Logger) ([]Work
 							if err != nil {
 								if strings.Contains(err.Error(), "context canceled") {
 									logger.WarnContext(serviceCtx, "context was canceled while checking if key exists in database", "err", err)
+									return []WorkflowRunJobDetail{}, nil
 								} else {
 									logger.ErrorContext(serviceCtx, "error checking if key exists in database", "err", err)
+									return []WorkflowRunJobDetail{}, errors.New("error checking if key exists in database")
 								}
-								return []WorkflowRunJobDetail{}, errors.New("error checking if key exists in database")
 							}
 
 							if !exists {
@@ -249,6 +251,7 @@ func Run(workerCtx context.Context, serviceCtx context.Context, logger *slog.Log
 
 	hostHasVmCapacity := anka.HostHasVmCapacity(serviceCtx)
 	if !hostHasVmCapacity {
+		logger.DebugContext(serviceCtx, "host does not have vm capacity")
 		return
 	}
 
@@ -278,6 +281,11 @@ func Run(workerCtx context.Context, serviceCtx context.Context, logger *slog.Log
 	// obtain all queued workflow runs and jobs
 	allWorkflowRunJobDetails, err := getWorkflowRunJobs(serviceCtx, logger)
 	if err != nil {
+		logger.ErrorContext(serviceCtx, "error getting workflow run jobs", "err", err)
+		return
+	}
+	if serviceCtx.Err() != nil {
+		logger.WarnContext(serviceCtx, "context canceled after getWorkflowRunJobs")
 		return
 	}
 
