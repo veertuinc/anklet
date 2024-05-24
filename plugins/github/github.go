@@ -116,6 +116,7 @@ func getWorkflowRunJobs(serviceCtx context.Context, logger *slog.Logger) ([]Work
 		workflows, resp, err := githubClient.Actions.ListWorkflows(context.Background(), service.Owner, service.Repo, &github.ListOptions{})
 		return &workflows, resp, err
 	})
+
 	if serviceCtx.Err() != nil {
 		logger.WarnContext(serviceCtx, "context canceled during workflows listing")
 		return []WorkflowRunJobDetail{}, nil
@@ -124,13 +125,14 @@ func getWorkflowRunJobs(serviceCtx context.Context, logger *slog.Logger) ([]Work
 		logger.ErrorContext(serviceCtx, "error executing githubClient.Actions.ListWorkflows", "err", err)
 		return []WorkflowRunJobDetail{}, errors.New("error executing githubClient.Actions.ListWorkflows")
 	}
+
 	for _, workflow := range (*workflows).Workflows {
 		if *workflow.State == "active" {
 			// WORKFLOW RUNS
 			serviceCtx, workflow_runs, _, err := ExecuteGitHubClientFunction[*github.WorkflowRuns](serviceCtx, logger, func() (**github.WorkflowRuns, *github.Response, error) {
 				workflow_runs, resp, err := githubClient.Actions.ListWorkflowRunsByID(context.Background(), service.Owner, service.Repo, *workflow.ID, &github.ListWorkflowRunsOptions{
-					// ListOptions: github.ListOptions{PerPage: 30},
-					Status: "queued",
+					ListOptions: github.ListOptions{PerPage: 30},
+					Status:      "queued",
 				})
 				return &workflow_runs, resp, err // Adjusted to return the direct result
 			})
@@ -318,10 +320,11 @@ func Run(workerCtx context.Context, serviceCtx context.Context, logger *slog.Log
 			logger.ErrorContext(serviceCtx, "error checking if already in db", "err", err)
 			return
 		} else if already {
-			// logger.DebugContext(serviceCtx, "job already running, skipping")
+			logger.DebugContext(serviceCtx, "job already running, skipping")
 			// this would cause a double run problem if a job finished on hostA and hostB had an array of workflowRunJobs with queued still for the same job
 			// we get the latest workflow run jobs each run to prevent this
-			return
+			// also, we don't return and use continue below so that we can just use the next job in the list and not have to re-parse the entire thing or make more api calls
+			continue
 		} else if !already {
 			added, err := dbFunctions.AddUniqueRunKey(serviceCtx)
 			if added && err != nil {
