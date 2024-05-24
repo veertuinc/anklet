@@ -64,8 +64,18 @@ func ExecuteGitHubClientFunction[T any](serviceCtx context.Context, logger *slog
 		if response.Rate.Remaining <= 10 { // handle primary rate limiting
 			sleepDuration := time.Until(response.Rate.Reset.Time) + time.Second // Adding a second to ensure we're past the reset time
 			logger.WarnContext(serviceCtx, "GitHub API rate limit exceeded, sleeping until reset")
+			metricsData := metrics.GetMetricsDataFromContext(serviceCtx)
+			service := config.GetServiceFromContext(serviceCtx)
+			metricsData.UpdateService(serviceCtx, logger, metrics.Service{
+				Name:   service.Name,
+				Status: "limit_paused",
+			})
 			select {
 			case <-time.After(sleepDuration):
+				metricsData.UpdateService(serviceCtx, logger, metrics.Service{
+					Name:   service.Name,
+					Status: "running",
+				})
 				return ExecuteGitHubClientFunction(serviceCtx, logger, executeFunc) // Retry the function after waiting
 			case <-serviceCtx.Done():
 				return serviceCtx, nil, nil, serviceCtx.Err()
