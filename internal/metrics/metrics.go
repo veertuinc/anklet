@@ -30,6 +30,7 @@ type Service struct {
 	LastFailedRunJobUrl     string
 	LastSuccessfulRun       time.Time
 	LastFailedRun           time.Time
+	StatusRunningSince      time.Time
 }
 
 type MetricsData struct {
@@ -98,6 +99,9 @@ func CompareAndUpdateMetrics(currentService Service, updatedService Service) Ser
 		currentService.PluginName = updatedService.PluginName
 	}
 	if updatedService.Status != "" {
+		if currentService.Status != updatedService.Status { // make sure we don't update the time if nothing has changed
+			currentService.StatusRunningSince = time.Now()
+		}
 		currentService.Status = updatedService.Status
 	}
 	if !updatedService.LastSuccessfulRun.IsZero() {
@@ -166,12 +170,12 @@ func UpdateService(workerCtx context.Context, serviceCtx context.Context, logger
 				LastFailedRun:           metricsData.Services[i].LastFailedRun,
 				LastSuccessfulRunJobUrl: metricsData.Services[i].LastSuccessfulRunJobUrl,
 				LastFailedRunJobUrl:     metricsData.Services[i].LastFailedRunJobUrl,
+				StatusRunningSince:      metricsData.Services[i].StatusRunningSince,
 			}
 			newService = CompareAndUpdateMetrics(newService, updatedService)
 			metricsData.Services[i] = newService
 		}
 	}
-	UpdateSystemMetrics(serviceCtx, logger, metricsData)
 }
 
 func (m *MetricsData) UpdateService(serviceCtx context.Context, logger *slog.Logger, updatedService Service) {
@@ -183,7 +187,6 @@ func (m *MetricsData) UpdateService(serviceCtx context.Context, logger *slog.Log
 	for i, svc := range m.Services {
 		if svc.Name == updatedService.Name {
 			m.Services[i] = CompareAndUpdateMetrics(svc, updatedService)
-			UpdateSystemMetrics(serviceCtx, logger, m)
 		}
 	}
 }
@@ -196,14 +199,18 @@ func NewServer(port string) *Server {
 }
 
 // Start runs the HTTP server
-func (s *Server) Start(parentCtx context.Context) {
+func (s *Server) Start(parentCtx context.Context, logger *slog.Logger) {
 	http.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
+		// update system metrics each call
+		metricsData := GetMetricsDataFromContext(parentCtx)
+		UpdateSystemMetrics(parentCtx, logger, metricsData)
+		//
 		if r.URL.Query().Get("format") == "json" {
 			s.handleJsonMetrics(parentCtx)(w, r)
 		} else if r.URL.Query().Get("format") == "prometheus" {
 			s.handlePrometheusMetrics(parentCtx)(w, r)
 		} else {
-			http.Error(w, "Unsupported format", http.StatusBadRequest)
+			http.Error(w, "unsupported format, please use '?format=json' or '?format=prometheus'", http.StatusBadRequest)
 		}
 	})
 	http.ListenAndServe(":"+s.Port, nil)
@@ -230,6 +237,7 @@ func (s *Server) handlePrometheusMetrics(ctx context.Context) http.HandlerFunc {
 			w.Write([]byte(fmt.Sprintf("service_status{service_name=%s,plugin=%s,owner=%s,repo=%s} %s\n", service.Name, service.PluginName, service.OwnerName, service.RepoName, service.Status)))
 			w.Write([]byte(fmt.Sprintf("service_last_successful_run{service_name=%s,plugin=%s,owner=%s,repo=%s,job_url=%s} %s\n", service.Name, service.PluginName, service.OwnerName, service.RepoName, service.LastSuccessfulRunJobUrl, service.LastSuccessfulRun.Format(time.RFC3339))))
 			w.Write([]byte(fmt.Sprintf("service_last_failed_run{service_name=%s,plugin=%s,owner=%s,repo=%s,job_url=%s} %s\n", service.Name, service.PluginName, service.OwnerName, service.RepoName, service.LastFailedRunJobUrl, service.LastFailedRun.Format(time.RFC3339))))
+			w.Write([]byte(fmt.Sprintf("service_status_running_since{service_name=%s,plugin=%s,owner=%s,repo=%s} %s\n", service.Name, service.PluginName, service.OwnerName, service.RepoName, service.StatusRunningSince.Format(time.RFC3339))))
 		}
 		w.Write([]byte(fmt.Sprintf("host_cpu_count %d\n", metricsData.HostCPUCount)))
 		w.Write([]byte(fmt.Sprintf("host_cpu_used_count %d\n", metricsData.HostCPUUsedCount)))

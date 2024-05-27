@@ -179,8 +179,10 @@ func worker(parentCtx context.Context, logger *slog.Logger, loadedConfig config.
 		metricsPort = loadedConfig.Metrics.Port
 	}
 	metricsServer := metrics.NewServer(metricsPort)
-	go metricsServer.Start(workerCtx)
+	go metricsServer.Start(workerCtx, logger)
 	logger.InfoContext(workerCtx, "metrics server started on port "+metricsPort)
+	metrics.UpdateSystemMetrics(workerCtx, logger, metricsData)
+
 	/////////////
 	// MAIN LOGIC
 	for _, service := range loadedConfig.Services {
@@ -230,11 +232,12 @@ func worker(parentCtx context.Context, logger *slog.Logger, loadedConfig config.
 
 			logger.InfoContext(serviceCtx, "started service")
 			metricsData.AddService(metrics.Service{
-				Name:       service.Name,
-				PluginName: service.Plugin,
-				RepoName:   service.Repo,
-				OwnerName:  service.Owner,
-				Status:     "idle",
+				Name:               service.Name,
+				PluginName:         service.Plugin,
+				RepoName:           service.Repo,
+				OwnerName:          service.Owner,
+				Status:             "idle",
+				StatusRunningSince: time.Now(),
 			})
 
 			for {
@@ -247,9 +250,6 @@ func worker(parentCtx context.Context, logger *slog.Logger, loadedConfig config.
 					})
 					return
 				default:
-					metrics.UpdateService(workerCtx, serviceCtx, logger, metrics.Service{
-						Status: "checking",
-					})
 					run.Plugin(workerCtx, serviceCtx, logger)
 					if workerCtx.Err() != nil || toRunOnce == "true" {
 						serviceCancel()

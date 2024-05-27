@@ -80,7 +80,7 @@ func CheckIfKeyExists(ctx context.Context, key string) (bool, error) {
 	// introduce a random millisecond sleep to prevent concurrent executions from colliding
 	src := rand.NewSource(time.Now().UnixNano())
 	r := rand.New(src)
-	randomSleep := time.Duration(r.Intn(200)) * time.Millisecond
+	randomSleep := time.Duration(r.Intn(100)) * time.Millisecond
 	time.Sleep(randomSleep)
 	exists, err := database.Client.Exists(ctx, key).Result()
 	if err != nil {

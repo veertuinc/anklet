@@ -136,11 +136,12 @@ Metrics for monitoring are available at `http://127.0.0.1:8080/metrics?format=js
 | Service::PluginName | service_plugin_name | Name of the plugin |
 | Service::OwnerName | service_owner_name | Name of the owner |
 | Service::RepoName | service_repo_name | Name of the repo |
-| Service::Status | service_status | Status of the service |
+| Service::Status | service_status | Status of the service (idle, running, limit_paused, stopped) |
 | Service::LastSuccessfulRunJobUrl | service_last_successful_run_job_url | Last successful run job url of the service |
 | Service::LastFailedRunJobUrl | service_last_failed_run_job_url | Last failed run job url of the service |
 | Service::LastSuccessfulRun | service_last_successful_run | Timestamp of last successful run of the service (RFC3339) |
 | Service::LastFailedRun | service_last_failed_run | Timestamp of last failed run of the service (RFC3339) |
+| Service::StatusRunningSince | service_status_running_since | Timestamp of when the service was last started (RFC3339) |
 | HostCPUCount | host_cpu_count | Total CPU count of the host |
 | HostCPUUsedCount | host_cpu_used_count | Total in use CPU count of the host |
 | HostCPUUsagePercentage | host_cpu_usage_percentage | CPU usage percentage of the host |
@@ -181,7 +182,8 @@ Metrics for monitoring are available at `http://127.0.0.1:8080/metrics?format=js
       "LastSuccessfulRunJobUrl": "https://github.com/veertuinc/anklet/actions/runs/9180172013/job/25243983121",
       "LastFailedRunJobUrl": "https://github.com/veertuinc/anklet/actions/runs/9180170811/job/25243979917",
       "LastSuccessfulRun": "2024-05-21T14:16:06.300971-05:00",
-      "LastFailedRun": "2024-05-21T14:15:10.994464-05:00"
+      "LastFailedRun": "2024-05-21T14:15:10.994464-05:00",
+      "StatusRunningSince": "2024-05-21T14:16:06.300971-05:00"
     },
     {
       "Name": "RUNNER1",
@@ -192,7 +194,8 @@ Metrics for monitoring are available at `http://127.0.0.1:8080/metrics?format=js
       "LastSuccessfulRunJobUrl": "https://github.com/veertuinc/anklet/actions/runs/9180172546/job/25243984537",
       "LastFailedRunJobUrl": "https://github.com/veertuinc/anklet/actions/runs/9180171228/job/25243980930",
       "LastSuccessfulRun": "2024-05-21T14:16:35.532016-05:00",
-      "LastFailedRun": "2024-05-21T14:15:45.930051-05:00"
+      "LastFailedRun": "2024-05-21T14:15:45.930051-05:00",
+      "StatusRunningSince": "2024-05-21T14:16:35.532016-05:00"
     }
   ]
 }
@@ -207,9 +210,11 @@ total_failed_runs_since_start 2
 service_status{service_name=RUNNER2,plugin=github,owner=veertuinc,repo=anklet} idle
 service_last_successful_run{service_name=RUNNER2,plugin=github,owner=veertuinc,repo=anklet,job_url=https://github.com/veertuinc/anklet/actions/runs/9180172013/job/25243983121} 2024-05-21T14:16:06-05:00
 service_last_failed_run{service_name=RUNNER2,plugin=github,owner=veertuinc,repo=anklet,job_url=https://github.com/veertuinc/anklet/actions/runs/9180170811/job/25243979917} 2024-05-21T14:15:10-05:00
+service_status_running_since{service_name=RUNNER2,plugin=github,owner=veertuinc,repo=anklet} 2024-05-21T14:16:06-05:00
 service_status{service_name=RUNNER1,plugin=github,owner=veertuinc,repo=anklet} idle
 service_last_successful_run{service_name=RUNNER1,plugin=github,owner=veertuinc,repo=anklet,job_url=https://github.com/veertuinc/anklet/actions/runs/9180172546/job/25243984537} 2024-05-21T14:16:35-05:00
 service_last_failed_run{service_name=RUNNER1,plugin=github,owner=veertuinc,repo=anklet,job_url=https://github.com/veertuinc/anklet/actions/runs/9180171228/job/25243980930} 2024-05-21T14:15:45-05:00
+service_status_running_since{service_name=RUNNER1,plugin=github,owner=veertuinc,repo=anklet} 2024-05-21T14:16:35-05:00
 host_cpu_count 12
 host_cpu_used_count 1
 host_cpu_usage_percentage 10.674157
