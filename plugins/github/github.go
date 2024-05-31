@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -29,13 +31,73 @@ type WorkflowRunJobDetail struct {
 	UniqueID        string
 }
 
-func exists_in_array(array_to_search_in []string, desired []string) bool {
+func exists_in_array_exact(array_to_search_in []string, desired []string) bool {
 	for _, desired_string := range desired {
 		found := false
 		for _, item := range array_to_search_in {
 			if item == desired_string {
 				found = true
 				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
+}
+
+func exists_in_array_regex(array_to_search_in []string, desired []string) bool {
+	if len(desired) == 0 || desired[0] == "" {
+		return false
+	}
+	for _, desired_string := range desired {
+		// fmt.Printf("  desired_string: %s\n", desired_string)
+		found := false
+		for _, item := range array_to_search_in {
+			// fmt.Printf("    item: %s\n", item)
+			// Check if the desired_string is a valid regex pattern
+			if rege, err := regexp.Compile(desired_string); err == nil {
+				// If it's a valid regex, check for a regex match
+				sanitizedSplit := slices.DeleteFunc(rege.Split(item, -1), func(e string) bool {
+					return e == ""
+				})
+				// fmt.Printf("    sanitizedSplit: %+v\n", sanitizedSplit)
+				if len(sanitizedSplit) == 0 {
+					// fmt.Println("      regex match")
+					found = true
+					break
+				}
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
+}
+
+func does_not_exist_in_array_regex(array_to_search_in []string, excluded []string) bool {
+	if len(excluded) == 0 || excluded[0] == "" {
+		return true
+	}
+	for _, excluded_string := range excluded {
+		// fmt.Printf("  excluded_string: %s\n", excluded_string)
+		found := false
+		for _, item := range array_to_search_in {
+			// fmt.Printf("    item: %s\n", item)
+			// Check if the desired_string is a valid regex pattern
+			if rege, err := regexp.Compile(excluded_string); err == nil {
+				// If it's a valid regex, check for a regex match
+				sanitizedSplit := slices.DeleteFunc(rege.Split(item, -1), func(e string) bool {
+					return e == ""
+				})
+				// fmt.Printf("    sanitizedSplit: %+v\n", sanitizedSplit)
+				if len(sanitizedSplit) > 0 {
+					// fmt.Println("      regex match")
+					found = true
+					break
+				}
 			}
 		}
 		if !found {
@@ -104,9 +166,9 @@ func setLoggingContext(serviceCtx context.Context, workflowRunJob WorkflowRunJob
 	return serviceCtx
 }
 
-func getWorkflowRunJobs(serviceCtx context.Context, logger *slog.Logger) ([]WorkflowRunJobDetail, error) {
+func getWorkflowRunJobs(serviceCtx context.Context, logger *slog.Logger) ([]WorkflowRunJobDetail, []string, context.Context, error) {
 	if serviceCtx.Err() != nil {
-		return nil, fmt.Errorf("context canceled before getWorkflowRunJobs")
+		return nil, nil, serviceCtx, fmt.Errorf("context canceled before getWorkflowRunJobs")
 	}
 	githubClient := internalGithub.GetGitHubClientFromContext(serviceCtx)
 	service := config.GetServiceFromContext(serviceCtx)
@@ -119,15 +181,27 @@ func getWorkflowRunJobs(serviceCtx context.Context, logger *slog.Logger) ([]Work
 
 	if serviceCtx.Err() != nil {
 		logger.WarnContext(serviceCtx, "context canceled during workflows listing")
-		return []WorkflowRunJobDetail{}, nil
+		return []WorkflowRunJobDetail{}, nil, serviceCtx, nil
 	}
 	if err != nil {
 		logger.ErrorContext(serviceCtx, "error executing githubClient.Actions.ListWorkflows", "err", err)
-		return []WorkflowRunJobDetail{}, errors.New("error executing githubClient.Actions.ListWorkflows")
+		return []WorkflowRunJobDetail{}, nil, serviceCtx, errors.New("error executing githubClient.Actions.ListWorkflows")
 	}
-
+	// fmt.Printf("%+v\n", service.Workflows)
+	var workflowsToScan []string
 	for _, workflow := range (*workflows).Workflows {
 		if *workflow.State == "active" {
+
+			// fmt.Printf("1: %s\n", *workflow.Name)
+			// check service.Workflows.Include and Exclude
+			if exists_in_array_regex([]string{*workflow.Name}, service.Workflows.Exclude) {
+				if does_not_exist_in_array_regex([]string{*workflow.Name}, service.Workflows.Include) {
+					continue
+				}
+			}
+
+			workflowsToScan = append(workflowsToScan, *workflow.Name)
+
 			// WORKFLOW RUNS
 			serviceCtx, workflow_runs, _, err := ExecuteGitHubClientFunction[*github.WorkflowRuns](serviceCtx, logger, func() (**github.WorkflowRuns, *github.Response, error) {
 				workflow_runs, resp, err := githubClient.Actions.ListWorkflowRunsByID(context.Background(), service.Owner, service.Repo, *workflow.ID, &github.ListWorkflowRunsOptions{
@@ -142,25 +216,27 @@ func getWorkflowRunJobs(serviceCtx context.Context, logger *slog.Logger) ([]Work
 				} else {
 					logger.ErrorContext(serviceCtx, "error executing githubClient.Actions.ListWorkflowRunsByID", "err", err)
 				}
-				return []WorkflowRunJobDetail{}, errors.New("error executing githubClient.Actions.ListWorkflowRunsByID")
+				return []WorkflowRunJobDetail{}, nil, serviceCtx, errors.New("error executing githubClient.Actions.ListWorkflowRunsByID")
 			}
 			for _, workflowRun := range (*workflow_runs).WorkflowRuns {
 				serviceCtx, workflowRunJobs, _, err := ExecuteGitHubClientFunction[github.Jobs](serviceCtx, logger, func() (*github.Jobs, *github.Response, error) {
-					workflowRunJobs, resp, err := githubClient.Actions.ListWorkflowJobs(context.Background(), service.Owner, service.Repo, *workflowRun.ID, &github.ListWorkflowJobsOptions{})
+					workflowRunJobs, resp, err := githubClient.Actions.ListWorkflowJobs(context.Background(), service.Owner, service.Repo, *workflowRun.ID, &github.ListWorkflowJobsOptions{
+						ListOptions: github.ListOptions{PerPage: 30},
+					})
 					return workflowRunJobs, resp, err
 				})
 				if err != nil {
 					if strings.Contains(err.Error(), "context canceled") {
 						logger.WarnContext(serviceCtx, "context canceled during githubClient.Actions.ListWorkflowJobs", "err", err)
-						return []WorkflowRunJobDetail{}, nil
+						return []WorkflowRunJobDetail{}, nil, serviceCtx, nil
 					} else {
 						logger.ErrorContext(serviceCtx, "error executing githubClient.Actions.ListWorkflowJobs", "err", err)
-						return []WorkflowRunJobDetail{}, errors.New("error executing githubClient.Actions.ListWorkflowJobs")
+						return []WorkflowRunJobDetail{}, nil, serviceCtx, errors.New("error executing githubClient.Actions.ListWorkflowJobs")
 					}
 				}
 				for _, job := range workflowRunJobs.Jobs {
 					if *job.Status == "queued" { // I don't know why, but we'll get completed jobs back in the list
-						if exists_in_array(job.Labels, []string{"self-hosted", "anka"}) {
+						if exists_in_array_exact(job.Labels, []string{"self-hosted", "anka"}) {
 							serviceCtx = setLoggingContext(serviceCtx, WorkflowRunJobDetail{
 								Job:             *job,
 								WorkflowRunName: *workflowRun.Name,
@@ -200,10 +276,10 @@ func getWorkflowRunJobs(serviceCtx context.Context, logger *slog.Logger) ([]Work
 							if err != nil {
 								if strings.Contains(err.Error(), "context canceled") {
 									logger.WarnContext(serviceCtx, "context was canceled while checking if key exists in database", "err", err)
-									return []WorkflowRunJobDetail{}, nil
+									return []WorkflowRunJobDetail{}, nil, serviceCtx, nil
 								} else {
 									logger.ErrorContext(serviceCtx, "error checking if key exists in database", "err", err)
-									return []WorkflowRunJobDetail{}, errors.New("error checking if key exists in database")
+									return []WorkflowRunJobDetail{}, nil, serviceCtx, errors.New("error checking if key exists in database")
 								}
 							}
 
@@ -231,7 +307,7 @@ func getWorkflowRunJobs(serviceCtx context.Context, logger *slog.Logger) ([]Work
 		return allWorkflowRunJobDetails[i].Job.CreatedAt.Time.Before(allWorkflowRunJobDetails[j].Job.CreatedAt.Time)
 	})
 
-	return allWorkflowRunJobDetails, nil
+	return allWorkflowRunJobDetails, workflowsToScan, serviceCtx, nil
 }
 
 func Run(workerCtx context.Context, serviceCtx context.Context, logger *slog.Logger) {
@@ -281,7 +357,7 @@ func Run(workerCtx context.Context, serviceCtx context.Context, logger *slog.Log
 	repositoryURL := fmt.Sprintf("https://github.com/%s/%s", service.Owner, service.Repo)
 
 	// obtain all queued workflow runs and jobs
-	allWorkflowRunJobDetails, err := getWorkflowRunJobs(serviceCtx, logger)
+	allWorkflowRunJobDetails, workflowsToScan, serviceCtx, err := getWorkflowRunJobs(serviceCtx, logger)
 	if err != nil {
 		logger.ErrorContext(serviceCtx, "error getting workflow run jobs", "err", err)
 		return
@@ -290,6 +366,7 @@ func Run(workerCtx context.Context, serviceCtx context.Context, logger *slog.Log
 		logger.WarnContext(serviceCtx, "context canceled after getWorkflowRunJobs")
 		return
 	}
+	logger.DebugContext(serviceCtx, "workflows to scan", "workflows", workflowsToScan)
 
 	// simplifiedWorkflowRuns := make([]map[string]interface{}, 0)
 	// for _, workflowRunJob := range allWorkflowRunJobDetails {
