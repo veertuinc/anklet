@@ -18,6 +18,27 @@ services:
     registration: repo
     repo: anklet
     owner: veertuinc
+    workflows: # optional, if not specified, all workflows will be scanned (this will quickly consume your api limits)
+      include: # takes priority over exclude
+        - "t1.*" # this will match all workflows that start with t1 in their name
+      exclude:
+        - ".*" # exclude everything (except for what's included above)
+    # workflows:
+    #   include:
+    #     - "Check PR"
+    #   exclude:
+    #     - ".*"
+    # workflows:
+    #   include:
+    #     - "" # must be empty string to exclude specific workflows and match all others; do not use .*
+    #   exclude:
+    #     - "Check PR"
+    # workflows:
+    #   include: # include multiple workflows based on regex pattern and exact string match
+    #     - "t1.*"
+    #     - "Check PR"
+    #   exclude:
+    #     - ".*"
     registry_url: http://anka.registry:8089
     database:
       enabled: true

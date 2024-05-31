@@ -38,6 +38,11 @@ type Database struct {
 	Enabled  bool   `yaml:"enabled" default:"true"`
 }
 
+type Workflow struct {
+	Include []string `yaml:"include"`
+	Exclude []string `yaml:"exclude"`
+}
+
 type Service struct {
 	SleepInterval  int      `yaml:"sleep_interval" default:"2"`
 	Name           string   `yaml:"name"`
@@ -51,6 +56,7 @@ type Service struct {
 	PrivateKey     string   `yaml:"private_key"`
 	AppID          int      `yaml:"app_id"`
 	InstallationID int64    `yaml:"installation_id"`
+	Workflows      Workflow `yaml:"workflows"`
 }
 
 func LoadConfig(configPath string) (*Config, error) {
