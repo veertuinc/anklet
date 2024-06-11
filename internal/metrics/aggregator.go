@@ -35,7 +35,7 @@ func (s *Server) StartAggregatorServer(workerCtx context.Context, logger *slog.L
 
 func (s *Server) handleAggregatorJsonMetrics(workerCtx context.Context, logger *slog.Logger, databaseContainer *database.Database, loadedConfig *config.Config) func(w http.ResponseWriter, r *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
-		var combinedMetrics []map[string]MetricsData
+		combinedMetrics := make(map[string]MetricsData)
 		for _, metricsURL := range loadedConfig.Metrics.MetricsURLs {
 			value, err := databaseContainer.Client.Get(workerCtx, metricsURL).Result()
 			if err != nil {
@@ -48,7 +48,7 @@ func (s *Server) handleAggregatorJsonMetrics(workerCtx context.Context, logger *
 				logger.ErrorContext(workerCtx, "error unmarshalling metrics data", "error", err)
 				return
 			}
-			combinedMetrics = append(combinedMetrics, map[string]MetricsData{metricsURL: metricsData})
+			combinedMetrics[metricsURL] = metricsData
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(combinedMetrics)

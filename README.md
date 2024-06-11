@@ -228,6 +228,133 @@ host_disk_available_bytes 535620329472
 host_disk_usage_percentage 46.150550
 ```
 
+### Metrics Aggregator
+
+In most cases each individual Anklet serving up their own metrics is good enough for your monitoring needs. However, there are situations where you may need to consume them from a single source instead. The Anklet Aggregator service is designed to do just that.
+
+In order to enable the aggregator, you will want to run an Anklet with the `aggregator` flag set to `true`. This will start an Anklet Aggregator service that will collect metrics from all Anklets defined in `metrics_urls` and make them available at `http://{aggregator_url}:{port}/metrics?format=json` or `http://{aggregator_url}:{port}/metrics?format=prometheus`. Here is an example config:
+
+```yaml
+---
+work_dir: /Users/nathanpierce/anklet/
+pid_file_dir: /tmp/
+log:
+  # if file_dir is not set, it will be set to current directory you execute anklet in
+  file_dir: /Users/nathanpierce/Library/Logs/
+metrics:
+  aggregator: true
+  metrics_urls:
+    - http://192.168.1.201:8080/metrics
+    - http://192.168.1.202:8080/metrics
+    - http://192.168.1.203:8080/metrics
+  port: 8081 # port to serve aggregator on
+  sleep_interval: 10 # how often to fetch metrics from each Anklet defined
+  database:
+    enabled: true
+    url: localhost
+    port: 6379
+    user: ""
+    password: ""
+    database: 0
+```
+
+You can see that this requires a local database to be running. The aggregator will store the metrics in Redis so that it can serve them up without delay.
+
+The format of each reply is as follows:
+
+#### JSON
+
+```json
+{
+  "http://127.0.0.1:8080/metrics": {
+    "TotalRunningVMs": 0,
+    "TotalSuccessfulRunsSinceStart": 0,
+    "TotalFailedRunsSinceStart": 0,
+    "HostCPUCount": 12,
+    "HostCPUUsedCount": 1,
+    "HostCPUUsagePercentage": 11.765251850227692,
+    "HostMemoryTotalBytes": 38654705664,
+    "HostMemoryUsedBytes": 27379499008,
+    "HostMemoryAvailableBytes": 11275206656,
+    "HostMemoryUsagePercentage": 70.83095974392361,
+    "HostDiskTotalBytes": 994662584320,
+    "HostDiskUsedBytes": 540768464896,
+    "HostDiskAvailableBytes": 453894119424,
+    "HostDiskUsagePercentage": 54.367025906146424,
+    "Services": [
+      {
+        "Name": "RUNNER1",
+        "PluginName": "github",
+        "RepoName": "anklet",
+        "OwnerName": "veertuinc",
+        "Status": "idle",
+        "LastSuccessfulRunJobUrl": "",
+        "LastFailedRunJobUrl": "",
+        "LastSuccessfulRun": "0001-01-01T00:00:00Z",
+        "LastFailedRun": "0001-01-01T00:00:00Z",
+        "StatusRunningSince": "2024-06-11T13:57:43.332009-05:00"
+      }
+    ]
+  },
+  "http://192.168.1.183:8080/metrics": {
+    "TotalRunningVMs": 0,
+    "TotalSuccessfulRunsSinceStart": 0,
+    "TotalFailedRunsSinceStart": 0,
+    "HostCPUCount": 8,
+    "HostCPUUsedCount": 1,
+    "HostCPUUsagePercentage": 20.964819937820444,
+    "HostMemoryTotalBytes": 25769803776,
+    "HostMemoryUsedBytes": 18017533952,
+    "HostMemoryAvailableBytes": 7752269824,
+    "HostMemoryUsagePercentage": 69.91723378499348,
+    "HostDiskTotalBytes": 994662584320,
+    "HostDiskUsedBytes": 629847568384,
+    "HostDiskAvailableBytes": 364815015936,
+    "HostDiskUsagePercentage": 63.32273660565956,
+    "Services": [
+      {
+        "Name": "RUNNER3",
+        "PluginName": "github",
+        "RepoName": "anklet",
+        "OwnerName": "veertuinc",
+        "Status": "idle",
+        "LastSuccessfulRunJobUrl": "",
+        "LastFailedRunJobUrl": "",
+        "LastSuccessfulRun": "0001-01-01T00:00:00Z",
+        "LastFailedRun": "0001-01-01T00:00:00Z",
+        "StatusRunningSince": "2024-06-11T14:16:42.324542-05:00"
+      }
+    ]
+  }
+}
+```
+
+#### Prometheus
+
+Turns a list of metrics for prometheus to consume, differentiating metrics by `metricsUrl`.
+
+```
+total_running_vms{metricsUrl=http://127.0.0.1:8080/metrics} 0
+total_successful_runs_since_start{metricsUrl=http://127.0.0.1:8080/metrics} 0
+total_failed_runs_since_start{metricsUrl=http://127.0.0.1:8080/metrics} 0
+service_status{service_name=RUNNER1,plugin=github,owner=veertuinc,repo=anklet,metricsUrl=http://127.0.0.1:8080/metrics} idle
+service_last_successful_run{service_name=RUNNER1,plugin=github,owner=veertuinc,repo=anklet,job_url=,metricsUrl=http://127.0.0.1:8080/metrics} 0001-01-01T00:00:00Z
+service_last_failed_run{service_name=RUNNER1,plugin=github,owner=veertuinc,repo=anklet,job_url=,metricsUrl=http://127.0.0.1:8080/metrics} 0001-01-01T00:00:00Z
+service_status_running_since{service_name=RUNNER1,plugin=github,owner=veertuinc,repo=anklet,metricsUrl=http://127.0.0.1:8080/metrics} 2024-06-11T13:57:43-05:00
+host_cpu_count{metricsUrl=http://127.0.0.1:8080/metrics} 12
+host_cpu_used_count{metricsUrl=http://127.0.0.1:8080/metrics} 1
+host_cpu_usage_percentage{metricsUrl=http://127.0.0.1:8080/metrics} 12.743779
+host_memory_total_bytes{metricsUrl=http://127.0.0.1:8080/metrics} 38654705664
+host_memory_used_bytes{metricsUrl=http://127.0.0.1:8080/metrics} 27168161792
+host_memory_available_bytes{metricsUrl=http://127.0.0.1:8080/metrics} 11486543872
+host_memory_usage_percentage{metricsUrl=http://127.0.0.1:8080/metrics} 70.284229
+host_disk_total_bytes{metricsUrl=http://127.0.0.1:8080/metrics} 994662584320
+host_disk_used_bytes{metricsUrl=http://127.0.0.1:8080/metrics} 540290322432
+host_disk_available_bytes{metricsUrl=http://127.0.0.1:8080/metrics} 454372261888
+host_disk_usage_percentage{metricsUrl=http://127.0.0.1:8080/metrics} 54.318955
+```
+
+
 ---
 
 ## Development
