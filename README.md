@@ -232,7 +232,7 @@ host_disk_usage_percentage 46.150550
 
 In most cases each individual Anklet serving up their own metrics is good enough for your monitoring needs. However, there are situations where you may need to consume them from a single source instead. The Anklet Aggregator service is designed to do just that.
 
-In order to enable the aggregator, you will want to run an Anklet with the `aggregator` flag set to `true`. This will start an Anklet Aggregator service that will collect metrics from all Anklets defined in `metrics_urls` and make them available at `http://{aggregator_url}:{port}/metrics?format=json` or `http://{aggregator_url}:{port}/metrics?format=prometheus`. Here is an example config:
+In order to enable the aggregator, you will want to run an Anklet with the `aggregator` flag set to `true`. **You want to run this separate from any services/plugins.** This will start an Anklet Aggregator service that will collect metrics from all Anklets defined in `metrics_urls` and make them available at `http://{aggregator_url}:{port}/metrics?format=json` or `http://{aggregator_url}:{port}/metrics?format=prometheus`. Here is an example config:
 
 ```yaml
 ---
@@ -342,16 +342,34 @@ service_last_successful_run{service_name=RUNNER1,plugin=github,owner=veertuinc,r
 service_last_failed_run{service_name=RUNNER1,plugin=github,owner=veertuinc,repo=anklet,job_url=,metricsUrl=http://127.0.0.1:8080/metrics} 0001-01-01T00:00:00Z
 service_status_running_since{service_name=RUNNER1,plugin=github,owner=veertuinc,repo=anklet,metricsUrl=http://127.0.0.1:8080/metrics} 2024-06-11T13:57:43-05:00
 host_cpu_count{metricsUrl=http://127.0.0.1:8080/metrics} 12
-host_cpu_used_count{metricsUrl=http://127.0.0.1:8080/metrics} 1
-host_cpu_usage_percentage{metricsUrl=http://127.0.0.1:8080/metrics} 12.743779
+host_cpu_used_count{metricsUrl=http://127.0.0.1:8080/metrics} 0
+host_cpu_usage_percentage{metricsUrl=http://127.0.0.1:8080/metrics} 7.300310
 host_memory_total_bytes{metricsUrl=http://127.0.0.1:8080/metrics} 38654705664
-host_memory_used_bytes{metricsUrl=http://127.0.0.1:8080/metrics} 27168161792
-host_memory_available_bytes{metricsUrl=http://127.0.0.1:8080/metrics} 11486543872
-host_memory_usage_percentage{metricsUrl=http://127.0.0.1:8080/metrics} 70.284229
+host_memory_used_bytes{metricsUrl=http://127.0.0.1:8080/metrics} 27103789056
+host_memory_available_bytes{metricsUrl=http://127.0.0.1:8080/metrics} 11550916608
+host_memory_usage_percentage{metricsUrl=http://127.0.0.1:8080/metrics} 70.117696
 host_disk_total_bytes{metricsUrl=http://127.0.0.1:8080/metrics} 994662584320
-host_disk_used_bytes{metricsUrl=http://127.0.0.1:8080/metrics} 540290322432
-host_disk_available_bytes{metricsUrl=http://127.0.0.1:8080/metrics} 454372261888
-host_disk_usage_percentage{metricsUrl=http://127.0.0.1:8080/metrics} 54.318955
+host_disk_used_bytes{metricsUrl=http://127.0.0.1:8080/metrics} 540769202176
+host_disk_available_bytes{metricsUrl=http://127.0.0.1:8080/metrics} 453893382144
+host_disk_usage_percentage{metricsUrl=http://127.0.0.1:8080/metrics} 54.367100
+total_running_vms{metricsUrl=http://192.168.1.183:8080/metrics} 0
+total_successful_runs_since_start{metricsUrl=http://192.168.1.183:8080/metrics} 0
+total_failed_runs_since_start{metricsUrl=http://192.168.1.183:8080/metrics} 0
+service_status{service_name=RUNNER3,plugin=github,owner=veertuinc,repo=anklet,metricsUrl=http://192.168.1.183:8080/metrics} idle
+service_last_successful_run{service_name=RUNNER3,plugin=github,owner=veertuinc,repo=anklet,job_url=,metricsUrl=http://192.168.1.183:8080/metrics} 0001-01-01T00:00:00Z
+service_last_failed_run{service_name=RUNNER3,plugin=github,owner=veertuinc,repo=anklet,job_url=,metricsUrl=http://192.168.1.183:8080/metrics} 0001-01-01T00:00:00Z
+service_status_running_since{service_name=RUNNER3,plugin=github,owner=veertuinc,repo=anklet,metricsUrl=http://192.168.1.183:8080/metrics} 2024-06-11T14:16:42-05:00
+host_cpu_count{metricsUrl=http://192.168.1.183:8080/metrics} 8
+host_cpu_used_count{metricsUrl=http://192.168.1.183:8080/metrics} 1
+host_cpu_usage_percentage{metricsUrl=http://192.168.1.183:8080/metrics} 20.760717
+host_memory_total_bytes{metricsUrl=http://192.168.1.183:8080/metrics} 25769803776
+host_memory_used_bytes{metricsUrl=http://192.168.1.183:8080/metrics} 17975410688
+host_memory_available_bytes{metricsUrl=http://192.168.1.183:8080/metrics} 7794393088
+host_memory_usage_percentage{metricsUrl=http://192.168.1.183:8080/metrics} 69.753774
+host_disk_total_bytes{metricsUrl=http://192.168.1.183:8080/metrics} 994662584320
+host_disk_used_bytes{metricsUrl=http://192.168.1.183:8080/metrics} 629849382912
+host_disk_available_bytes{metricsUrl=http://192.168.1.183:8080/metrics} 364813201408
+host_disk_usage_percentage{metricsUrl=http://192.168.1.183:8080/metrics} 63.322919
 ```
 
 
