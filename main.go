@@ -196,7 +196,7 @@ func worker(parentCtx context.Context, logger *slog.Logger, loadedConfig config.
 	}
 	metricsService := metrics.NewServer(metricsPort)
 	if loadedConfig.Metrics.Aggregator {
-		workerCtx = logging.AppendCtx(workerCtx, slog.Any("endpoints", loadedConfig.Metrics.Endpoints))
+		workerCtx = logging.AppendCtx(workerCtx, slog.Any("metrics_urls", loadedConfig.Metrics.MetricsURLs))
 		databaseContainer, err := database.NewClient(workerCtx, loadedConfig.Metrics.Database)
 		if err != nil {
 			panic(fmt.Sprintf("unable to access database: %v", err))
@@ -204,14 +204,14 @@ func worker(parentCtx context.Context, logger *slog.Logger, loadedConfig config.
 		workerCtx = context.WithValue(workerCtx, config.ContextKey("database"), databaseContainer)
 		go metricsService.StartAggregatorServer(workerCtx, logger)
 		logger.InfoContext(workerCtx, "metrics aggregator started on port "+metricsPort)
-		for _, endpoint := range loadedConfig.Metrics.Endpoints {
+		for _, metricsURL := range loadedConfig.Metrics.MetricsURLs {
 			wg.Add(1)
-			go func(endpoint string) {
+			go func(metricsURL string) {
 				defer wg.Done()
 				serviceCtx, serviceCancel := context.WithCancel(workerCtx) // Inherit from parent context
-				serviceCtx = logging.AppendCtx(serviceCtx, slog.String("endpoint", endpoint))
+				serviceCtx = logging.AppendCtx(serviceCtx, slog.String("metrics_url", metricsURL))
 				// check if valid URL
-				_, err := url.Parse(endpoint)
+				_, err := url.Parse(metricsURL)
 				if err != nil {
 					logger.ErrorContext(serviceCtx, "invalid URL", "error", err)
 					serviceCancel()
@@ -225,8 +225,7 @@ func worker(parentCtx context.Context, logger *slog.Logger, loadedConfig config.
 						return
 					default:
 						// get metrics from endpoint and update the main list
-						logger.InfoContext(serviceCtx, "updating metrics for endpoint")
-						metrics.UpdateEndpointMetrics(serviceCtx, logger, endpoint)
+						metrics.UpdatemetricsURLDBEntry(serviceCtx, logger, metricsURL)
 						if workerCtx.Err() != nil || toRunOnce == "true" {
 							serviceCancel()
 							break
@@ -238,7 +237,7 @@ func worker(parentCtx context.Context, logger *slog.Logger, loadedConfig config.
 						}
 					}
 				}
-			}(endpoint)
+			}(metricsURL)
 		}
 	} else {
 		metricsData := &metrics.MetricsDataLock{}

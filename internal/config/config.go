@@ -28,7 +28,7 @@ type Log struct {
 type Metrics struct {
 	Aggregator    bool     `yaml:"aggregator" default:"false"`
 	Port          string   `yaml:"port" default:"8080"` // default set in main.go
-	Endpoints     []string `yaml:"endpoints"`
+	MetricsURLs   []string `yaml:"metrics_urls"`
 	SleepInterval int      `yaml:"sleep_interval" default:"10"`
 	Database      Database `yaml:"database"`
 }
