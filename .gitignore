@@ -1,4 +1,4 @@
 *.rdb
-config.y*
+*config.y*
 dist
 .DS_Store

@@ -34,7 +34,6 @@ type Service struct {
 }
 
 type MetricsData struct {
-	sync.RWMutex
 	TotalRunningVMs               int
 	TotalSuccessfulRunsSinceStart int
 	TotalFailedRunsSinceStart     int
@@ -52,7 +51,12 @@ type MetricsData struct {
 	Services                      []Service
 }
 
-func (m *MetricsData) AddService(service Service) {
+type MetricsDataLock struct {
+	sync.RWMutex
+	MetricsData
+}
+
+func (m *MetricsDataLock) AddService(service Service) {
 	m.Lock()
 	defer m.Unlock()
 	found := false
@@ -68,13 +72,13 @@ func (m *MetricsData) AddService(service Service) {
 	}
 }
 
-func (m *MetricsData) IncrementTotalRunningVMs() {
+func (m *MetricsDataLock) IncrementTotalRunningVMs() {
 	m.Lock()
 	defer m.Unlock()
 	m.TotalRunningVMs++
 }
 
-func (m *MetricsData) DecrementTotalRunningVMs() {
+func (m *MetricsDataLock) DecrementTotalRunningVMs() {
 	m.Lock()
 	defer m.Unlock()
 	if m.TotalRunningVMs > 0 {
@@ -82,13 +86,13 @@ func (m *MetricsData) DecrementTotalRunningVMs() {
 	}
 }
 
-func (m *MetricsData) IncrementTotalSuccessfulRunsSinceStart() {
+func (m *MetricsDataLock) IncrementTotalSuccessfulRunsSinceStart() {
 	m.Lock()
 	defer m.Unlock()
 	m.TotalSuccessfulRunsSinceStart++
 }
 
-func (m *MetricsData) IncrementTotalFailedRunsSinceStart() {
+func (m *MetricsDataLock) IncrementTotalFailedRunsSinceStart() {
 	m.Lock()
 	defer m.Unlock()
 	m.TotalFailedRunsSinceStart++
@@ -119,7 +123,7 @@ func CompareAndUpdateMetrics(currentService Service, updatedService Service) Ser
 	return currentService
 }
 
-func UpdateSystemMetrics(serviceCtx context.Context, logger *slog.Logger, metricsData *MetricsData) {
+func UpdateSystemMetrics(serviceCtx context.Context, logger *slog.Logger, metricsData *MetricsDataLock) {
 	cpuCount, err := cpu.Counts(false)
 	if err != nil {
 		logger.ErrorContext(serviceCtx, "Error getting CPU count", "error", err)
@@ -178,7 +182,7 @@ func UpdateService(workerCtx context.Context, serviceCtx context.Context, logger
 	}
 }
 
-func (m *MetricsData) UpdateService(serviceCtx context.Context, logger *slog.Logger, updatedService Service) {
+func (m *MetricsDataLock) UpdateService(serviceCtx context.Context, logger *slog.Logger, updatedService Service) {
 	m.Lock()
 	defer m.Unlock()
 	if updatedService.Name == "" {
@@ -219,7 +223,7 @@ func (s *Server) Start(parentCtx context.Context, logger *slog.Logger) {
 // handleMetrics processes the /metrics endpoint
 func (s *Server) handleJsonMetrics(ctx context.Context) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		metricsData := ctx.Value(config.ContextKey("metrics")).(*MetricsData)
+		metricsData := ctx.Value(config.ContextKey("metrics")).(*MetricsDataLock)
 		// services := metricsData.GetServices()
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(metricsData)
@@ -228,7 +232,7 @@ func (s *Server) handleJsonMetrics(ctx context.Context) http.HandlerFunc {
 
 func (s *Server) handlePrometheusMetrics(ctx context.Context) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		metricsData := ctx.Value(config.ContextKey("metrics")).(*MetricsData)
+		metricsData := ctx.Value(config.ContextKey("metrics")).(*MetricsDataLock)
 		w.Header().Set("Content-Type", "text/plain")
 		w.Write([]byte(fmt.Sprintf("total_running_vms %d\n", metricsData.TotalRunningVMs)))
 		w.Write([]byte(fmt.Sprintf("total_successful_runs_since_start %d\n", metricsData.TotalSuccessfulRunsSinceStart)))
@@ -253,8 +257,8 @@ func (s *Server) handlePrometheusMetrics(ctx context.Context) http.HandlerFunc {
 	}
 }
 
-func GetMetricsDataFromContext(ctx context.Context) *MetricsData {
-	metricsData, ok := ctx.Value(config.ContextKey("metrics")).(*MetricsData)
+func GetMetricsDataFromContext(ctx context.Context) *MetricsDataLock {
+	metricsData, ok := ctx.Value(config.ContextKey("metrics")).(*MetricsDataLock)
 	if !ok {
 		panic("GetHttpTransportFromContext failed")
 	}

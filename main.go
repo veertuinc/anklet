@@ -7,6 +7,7 @@ import (
 	"log"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -28,6 +29,7 @@ var (
 	version     = "dev"
 	runOnce     = "false"
 	versionFlag = flag.Bool("version", false, "Print the version")
+	configFlag  = flag.String("c", "", "Path to the config file (defaults to ~/.config/anklet/config.yml)")
 	signalFlag  = flag.String("s", "", `Send signal to the daemon:
   drain — graceful shutdown, will wait until all jobs finish before exiting
   stop — best effort graceful shutdown, interrupting the job as soon as possible`)
@@ -68,7 +70,12 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	configPath := filepath.Join(homeDir, ".config", "anklet", "config.yml")
+	var configPath string
+	if *configFlag != "" {
+		configPath = *configFlag
+	} else {
+		configPath = filepath.Join(homeDir, ".config", "anklet", "config.yml")
+	}
 
 	// obtain config
 	loadedConfig, err := config.LoadConfig(configPath)
@@ -78,14 +85,20 @@ func main() {
 
 	parentCtx = logging.AppendCtx(parentCtx, slog.String("ankletVersion", version))
 
+	var suffix string
+	if loadedConfig.Metrics.Aggregator {
+		suffix = "-aggregator"
+	}
+	parentCtx = context.WithValue(parentCtx, config.ContextKey("suffix"), suffix)
+
 	daemonContext := &daemon.Context{
-		PidFileName: loadedConfig.PidFileDir + "anklet.pid",
+		PidFileName: loadedConfig.PidFileDir + "anklet" + suffix + ".pid",
 		PidFilePerm: 0644,
-		LogFileName: loadedConfig.Log.FileDir + "anklet.log",
+		LogFileName: loadedConfig.Log.FileDir + "anklet" + suffix + ".log",
 		LogFilePerm: 0640,
 		WorkDir:     loadedConfig.WorkDir,
 		Umask:       027,
-		Args:        []string{"anklet"},
+		Args:        []string{"anklet", "-c", configPath},
 	}
 
 	if len(daemon.ActiveFlags()) > 0 {
@@ -101,6 +114,7 @@ func main() {
 	}
 
 	logger.DebugContext(parentCtx, "loaded config", slog.Any("config", loadedConfig))
+	parentCtx = context.WithValue(parentCtx, config.ContextKey("config"), loadedConfig)
 
 	if loadedConfig.Log.FileDir == "" {
 		logger.ErrorContext(parentCtx, "log > file_dir is not set in the configuration; be sure to use an absolute path")
@@ -117,19 +131,21 @@ func main() {
 	httpTransport := http.DefaultTransport
 	parentCtx = context.WithValue(parentCtx, config.ContextKey("httpTransport"), httpTransport)
 
-	githubServiceExists := false
-	for _, service := range loadedConfig.Services {
-		if service.Plugin == "github" {
-			githubServiceExists = true
+	if !loadedConfig.Metrics.Aggregator {
+		githubServiceExists := false
+		for _, service := range loadedConfig.Services {
+			if service.Plugin == "github" {
+				githubServiceExists = true
+			}
 		}
-	}
-	if githubServiceExists {
-		rateLimiter, err := github_ratelimit.NewRateLimitWaiterClient(httpTransport)
-		if err != nil {
-			logger.ErrorContext(parentCtx, "error creating github_ratelimit.NewRateLimitWaiterClient", "err", err)
-			return
+		if githubServiceExists {
+			rateLimiter, err := github_ratelimit.NewRateLimitWaiterClient(httpTransport)
+			if err != nil {
+				logger.ErrorContext(parentCtx, "error creating github_ratelimit.NewRateLimitWaiterClient", "err", err)
+				return
+			}
+			parentCtx = context.WithValue(parentCtx, config.ContextKey("rateLimiter"), rateLimiter)
 		}
-		parentCtx = context.WithValue(parentCtx, config.ContextKey("rateLimiter"), rateLimiter)
 	}
 
 	d, err := daemonContext.Reborn()
@@ -152,8 +168,9 @@ func main() {
 func worker(parentCtx context.Context, logger *slog.Logger, loadedConfig config.Config) {
 	globals := config.GetGlobalsFromContext(parentCtx)
 	toRunOnce := globals.RunOnce
-	workerCtx, cancel := context.WithCancel(parentCtx)
-	logger.InfoContext(workerCtx, "starting anklet")
+	workerCtx, workerCancel := context.WithCancel(parentCtx)
+	suffix := parentCtx.Value(config.ContextKey("suffix")).(string)
+	logger.InfoContext(workerCtx, "starting anklet"+suffix)
 	var wg sync.WaitGroup
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGTERM, syscall.SIGQUIT)
@@ -164,108 +181,153 @@ func worker(parentCtx context.Context, logger *slog.Logger, loadedConfig config.
 			switch sig {
 			case syscall.SIGTERM:
 				logger.WarnContext(workerCtx, "best effort graceful shutdown, interrupting the job as soon as possible...")
-				cancel()
+				workerCancel()
 			case syscall.SIGQUIT:
 				logger.WarnContext(workerCtx, "graceful shutdown, waiting for jobs to finish...")
 				toRunOnce = "true"
 			}
 		}
 	}()
+
 	// Setup Metrics Server and context
-	metricsData := &metrics.MetricsData{}
-	workerCtx = context.WithValue(workerCtx, config.ContextKey("metrics"), metricsData)
 	metricsPort := "8080"
 	if loadedConfig.Metrics.Port != "" {
 		metricsPort = loadedConfig.Metrics.Port
 	}
-	metricsServer := metrics.NewServer(metricsPort)
-	go metricsServer.Start(workerCtx, logger)
-	logger.InfoContext(workerCtx, "metrics server started on port "+metricsPort)
-	metrics.UpdateSystemMetrics(workerCtx, logger, metricsData)
-
-	/////////////
-	// MAIN LOGIC
-	for _, service := range loadedConfig.Services {
-		wg.Add(1)
-		go func(service config.Service) {
-			defer wg.Done()
-			serviceCtx, serviceCancel := context.WithCancel(workerCtx) // Inherit from parent context
-			// sigChan := make(chan os.Signal, 1)
-			// signal.Notify(sigChan, syscall.SIGTERM, syscall.SIGQUIT)
-			// go func() {
-			// 	defer signal.Stop(sigChan)
-			// 	defer close(sigChan)
-			// 	for sig := range sigChan {
-			// 		switch sig {
-			// 		case syscall.SIGTERM:
-			// 			serviceCancel()
-			// 		case syscall.SIGQUIT:
-			// 			runOnce = "true"
-			// 		}
-			// 	}
-			// }()
-
-			if service.Name == "" {
-				panic("name is required for services")
-			}
-
-			serviceCtx = context.WithValue(serviceCtx, config.ContextKey("service"), service)
-			serviceCtx = logging.AppendCtx(serviceCtx, slog.String("serviceName", service.Name))
-			serviceCtx = context.WithValue(serviceCtx, config.ContextKey("logger"), logger)
-
-			ankaCLI, err := anka.NewCLI(serviceCtx)
-			if err != nil {
-				panic(fmt.Sprintf("unable to create anka cli: %v", err))
-			}
-
-			serviceCtx = context.WithValue(serviceCtx, config.ContextKey("ankacli"), ankaCLI)
-
-			if service.Database.Enabled {
-				databaseClient, err := database.NewClient(serviceCtx, service.Database)
+	metricsService := metrics.NewServer(metricsPort)
+	if loadedConfig.Metrics.Aggregator {
+		workerCtx = logging.AppendCtx(workerCtx, slog.Any("endpoints", loadedConfig.Metrics.Endpoints))
+		databaseContainer, err := database.NewClient(workerCtx, loadedConfig.Metrics.Database)
+		if err != nil {
+			panic(fmt.Sprintf("unable to access database: %v", err))
+		}
+		workerCtx = context.WithValue(workerCtx, config.ContextKey("database"), databaseContainer)
+		go metricsService.StartAggregatorServer(workerCtx, logger)
+		logger.InfoContext(workerCtx, "metrics aggregator started on port "+metricsPort)
+		for _, endpoint := range loadedConfig.Metrics.Endpoints {
+			wg.Add(1)
+			go func(endpoint string) {
+				defer wg.Done()
+				serviceCtx, serviceCancel := context.WithCancel(workerCtx) // Inherit from parent context
+				serviceCtx = logging.AppendCtx(serviceCtx, slog.String("endpoint", endpoint))
+				// check if valid URL
+				_, err := url.Parse(endpoint)
 				if err != nil {
-					panic(fmt.Sprintf("unable to access database: %v", err))
-				}
-				serviceCtx = context.WithValue(serviceCtx, config.ContextKey("database"), database.Database{
-					Client: databaseClient,
-				})
-			}
-
-			logger.InfoContext(serviceCtx, "started service")
-			metricsData.AddService(metrics.Service{
-				Name:               service.Name,
-				PluginName:         service.Plugin,
-				RepoName:           service.Repo,
-				OwnerName:          service.Owner,
-				Status:             "idle",
-				StatusRunningSince: time.Now(),
-			})
-
-			for {
-				select {
-				case <-serviceCtx.Done():
+					logger.ErrorContext(serviceCtx, "invalid URL", "error", err)
 					serviceCancel()
-					logger.WarnContext(serviceCtx, shutDownMessage)
-					metrics.UpdateService(workerCtx, serviceCtx, logger, metrics.Service{
-						Status: "stopped",
-					})
 					return
-				default:
-					run.Plugin(workerCtx, serviceCtx, logger)
-					if workerCtx.Err() != nil || toRunOnce == "true" {
-						serviceCancel()
-						break
-					}
-					metrics.UpdateService(workerCtx, serviceCtx, logger, metrics.Service{
-						Status: "idle",
-					})
+				}
+				for {
 					select {
-					case <-time.After(time.Duration(service.SleepInterval) * time.Second):
-					case <-serviceCtx.Done():
-						break
+					case <-workerCtx.Done():
+						serviceCancel()
+						logger.WarnContext(serviceCtx, shutDownMessage)
+						return
+					default:
+						// get metrics from endpoint and update the main list
+						logger.InfoContext(serviceCtx, "updating metrics for endpoint")
+						metrics.UpdateEndpointMetrics(serviceCtx, logger, endpoint)
+						if workerCtx.Err() != nil || toRunOnce == "true" {
+							serviceCancel()
+							break
+						}
+						select {
+						case <-time.After(time.Duration(loadedConfig.Metrics.SleepInterval) * time.Second):
+						case <-serviceCtx.Done():
+							break
+						}
 					}
 				}
-			}
-		}(service)
+			}(endpoint)
+		}
+	} else {
+		metricsData := &metrics.MetricsDataLock{}
+		workerCtx = context.WithValue(workerCtx, config.ContextKey("metrics"), metricsData)
+		go metricsService.Start(workerCtx, logger)
+		logger.InfoContext(workerCtx, "metrics server started on port "+metricsPort)
+		metrics.UpdateSystemMetrics(workerCtx, logger, metricsData)
+		/////////////
+		// Services
+		for _, service := range loadedConfig.Services {
+			wg.Add(1)
+			go func(service config.Service) {
+				defer wg.Done()
+				serviceCtx, serviceCancel := context.WithCancel(workerCtx) // Inherit from parent context
+				// sigChan := make(chan os.Signal, 1)
+				// signal.Notify(sigChan, syscall.SIGTERM, syscall.SIGQUIT)
+				// go func() {
+				// 	defer signal.Stop(sigChan)
+				// 	defer close(sigChan)
+				// 	for sig := range sigChan {
+				// 		switch sig {
+				// 		case syscall.SIGTERM:
+				// 			serviceCancel()
+				// 		case syscall.SIGQUIT:
+				// 			runOnce = "true"
+				// 		}
+				// 	}
+				// }()
+
+				if service.Name == "" {
+					panic("name is required for services")
+				}
+
+				serviceCtx = context.WithValue(serviceCtx, config.ContextKey("service"), service)
+				serviceCtx = logging.AppendCtx(serviceCtx, slog.String("serviceName", service.Name))
+				serviceCtx = context.WithValue(serviceCtx, config.ContextKey("logger"), logger)
+
+				ankaCLI, err := anka.NewCLI(serviceCtx)
+				if err != nil {
+					panic(fmt.Sprintf("unable to create anka cli: %v", err))
+				}
+
+				serviceCtx = context.WithValue(serviceCtx, config.ContextKey("ankacli"), ankaCLI)
+
+				if service.Database.Enabled {
+					databaseClient, err := database.NewClient(serviceCtx, service.Database)
+					if err != nil {
+						panic(fmt.Sprintf("unable to access database: %v", err))
+					}
+					serviceCtx = context.WithValue(serviceCtx, config.ContextKey("database"), databaseClient)
+				}
+
+				logger.InfoContext(serviceCtx, "started service")
+				metricsData.AddService(metrics.Service{
+					Name:               service.Name,
+					PluginName:         service.Plugin,
+					RepoName:           service.Repo,
+					OwnerName:          service.Owner,
+					Status:             "idle",
+					StatusRunningSince: time.Now(),
+				})
+
+				for {
+					select {
+					case <-serviceCtx.Done():
+						serviceCancel()
+						logger.WarnContext(serviceCtx, shutDownMessage)
+						metrics.UpdateService(workerCtx, serviceCtx, logger, metrics.Service{
+							Status: "stopped",
+						})
+						return
+					default:
+						run.Plugin(workerCtx, serviceCtx, logger)
+						if workerCtx.Err() != nil || toRunOnce == "true" {
+							serviceCancel()
+							break
+						}
+						metrics.UpdateService(workerCtx, serviceCtx, logger, metrics.Service{
+							Status: "idle",
+						})
+						select {
+						case <-time.After(time.Duration(service.SleepInterval) * time.Second):
+						case <-serviceCtx.Done():
+							break
+						}
+					}
+				}
+			}(service)
+		}
 	}
 	wg.Wait()
 	logger.WarnContext(workerCtx, "anklet (and all services) shut down")

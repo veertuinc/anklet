@@ -26,7 +26,11 @@ type Log struct {
 }
 
 type Metrics struct {
-	Port string `yaml:"port" default:"8080"` // default set in main.go
+	Aggregator    bool     `yaml:"aggregator" default:"false"`
+	Port          string   `yaml:"port" default:"8080"` // default set in main.go
+	Endpoints     []string `yaml:"endpoints"`
+	SleepInterval int      `yaml:"sleep_interval" default:"10"`
+	Database      Database `yaml:"database"`
 }
 
 type Database struct {
@@ -103,4 +107,12 @@ func GetHttpTransportFromContext(ctx context.Context) *http.Transport {
 		panic("GetHttpTransportFromContext failed")
 	}
 	return httpTransport
+}
+
+func GetLoadedConfigFromContext(ctx context.Context) *Config {
+	config, ok := ctx.Value(ContextKey("config")).(*Config)
+	if !ok {
+		panic("GetLoadedConfigFromContext failed")
+	}
+	return config
 }
