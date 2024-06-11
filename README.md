@@ -258,7 +258,7 @@ metrics:
     database: 0
 ```
 
-You can see that this requires a local database to be running. The aggregator will store the metrics in Redis so that it can serve them up without delay.
+You can see that this requires a database to be running. The aggregator will store the metrics in Redis so that it can serve them up without delay.
 
 The format of each reply is as follows:
 
