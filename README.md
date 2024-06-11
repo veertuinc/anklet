@@ -331,7 +331,7 @@ An example response of each format is as follows:
 
 #### Prometheus
 
-Turns a list of metrics for prometheus to consume, differentiating metrics by `metricsUrl`.
+This will be a text list, differentiating metrics by `metricsUrl`.
 
 ```
 total_running_vms{metricsUrl=http://127.0.0.1:8080/metrics} 0
