@@ -18,7 +18,7 @@ func (s *Server) StartAggregatorServer(workerCtx context.Context, logger *slog.L
 	http.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
 		databaseContainer, err := database.GetDatabaseFromContext(workerCtx)
 		if err != nil {
-			logger.ErrorContext(workerCtx, "Error getting database client from context", "error", err)
+			logger.ErrorContext(workerCtx, "error getting database client from context", "error", err)
 			return
 		}
 		loadedConfig := config.GetLoadedConfigFromContext(workerCtx)
@@ -39,13 +39,13 @@ func (s *Server) handleAggregatorJsonMetrics(workerCtx context.Context, logger *
 		for _, metricsURL := range loadedConfig.Metrics.MetricsURLs {
 			value, err := databaseContainer.Client.Get(workerCtx, metricsURL).Result()
 			if err != nil {
-				logger.ErrorContext(workerCtx, "Error getting value from Redis", "key", metricsURL, "error", err)
+				logger.ErrorContext(workerCtx, "error getting value from Redis", "key", metricsURL, "error", err)
 				return
 			}
 			var metricsData MetricsData
 			err = json.Unmarshal([]byte(value), &metricsData)
 			if err != nil {
-				logger.ErrorContext(workerCtx, "Error unmarshalling metrics data", "error", err)
+				logger.ErrorContext(workerCtx, "error unmarshalling metrics data", "error", err)
 				return
 			}
 			combinedMetrics = append(combinedMetrics, map[string]MetricsData{metricsURL: metricsData})
@@ -61,13 +61,13 @@ func (s *Server) handleAggregatorPrometheusMetrics(workerCtx context.Context, lo
 		for _, metricsURL := range loadedConfig.Metrics.MetricsURLs {
 			value, err := databaseContainer.Client.Get(workerCtx, metricsURL).Result()
 			if err != nil {
-				logger.ErrorContext(workerCtx, "Error getting value from Redis", "key", metricsURL, "error", err)
+				logger.ErrorContext(workerCtx, "error getting value from Redis", "key", metricsURL, "error", err)
 				return
 			}
 			var metricsData MetricsDataLock
 			err = json.Unmarshal([]byte(value), &metricsData)
 			if err != nil {
-				logger.ErrorContext(workerCtx, "Error unmarshalling metrics data", "error", err)
+				logger.ErrorContext(workerCtx, "error unmarshalling metrics data", "error", err)
 				return
 			}
 			w.Write([]byte(fmt.Sprintf("total_running_vms{metricsUrl=%s} %d\n", metricsURL, metricsData.TotalRunningVMs)))
@@ -95,39 +95,39 @@ func (s *Server) handleAggregatorPrometheusMetrics(workerCtx context.Context, lo
 }
 
 func UpdatemetricsURLDBEntry(serviceCtx context.Context, logger *slog.Logger, metricsURL string) {
-	resp, err := http.Get(metricsURL + "/metrics?format=json")
+	resp, err := http.Get(metricsURL + "?format=json")
 	if err != nil {
-		logger.ErrorContext(serviceCtx, "Error fetching metrics from url", "metrics_url", metricsURL, "error", err)
+		logger.ErrorContext(serviceCtx, "error fetching metrics from url", "metrics_url", metricsURL, "error", err)
 		return
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		logger.ErrorContext(serviceCtx, "Error reading response body", "metrics_url", metricsURL, "error", err)
+		logger.ErrorContext(serviceCtx, "error reading response body", "metrics_url", metricsURL, "error", err)
 		return
 	}
 	var metricsData MetricsData
 	err = json.Unmarshal(body, &metricsData)
 	if err != nil {
-		logger.ErrorContext(serviceCtx, "Error unmarshalling metrics data", "metrics_url", metricsURL, "error", err)
+		logger.ErrorContext(serviceCtx, "error unmarshalling metrics data", "metrics_url", metricsURL, "error", err)
 		return
 	}
-	logger.InfoContext(serviceCtx, "obtained metrics from url", "metrics", metricsData)
+	logger.DebugContext(serviceCtx, "obtained metrics from url", "metrics", metricsData)
 	databaseContainer, err := database.GetDatabaseFromContext(serviceCtx)
 	if err != nil {
-		logger.ErrorContext(serviceCtx, "Error getting database client from context", "error", err)
+		logger.ErrorContext(serviceCtx, "error getting database client from context", "error", err)
 		return
 	}
 	// Store the JSON data in Redis
 	setting := databaseContainer.Client.Set(serviceCtx, metricsURL, body, 0)
 	if setting.Err() != nil {
-		logger.ErrorContext(serviceCtx, "Error storing metrics data in Redis", "error", setting.Err())
+		logger.ErrorContext(serviceCtx, "error storing metrics data in Redis", "error", setting.Err())
 		return
 	}
 	exists, err := databaseContainer.Client.Exists(serviceCtx, metricsURL).Result()
 	if err != nil {
-		logger.ErrorContext(serviceCtx, "Error checking if key exists in Redis", "key", metricsURL, "error", err)
+		logger.ErrorContext(serviceCtx, "error checking if key exists in Redis", "key", metricsURL, "error", err)
 		return
 	}
-	logger.InfoContext(serviceCtx, "Successfully stored metrics data in Redis", "key", metricsURL, "exists", exists)
+	logger.DebugContext(serviceCtx, "successfully stored metrics data in Redis", "key", metricsURL, "exists", exists)
 }
