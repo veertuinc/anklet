@@ -260,7 +260,7 @@ metrics:
 
 You can see that this requires a database to be running. The aggregator will store the metrics in Redis so that it can serve them up without delay.
 
-The format of each reply is as follows:
+An example response of each format is as follows:
 
 #### JSON
 
