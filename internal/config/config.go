@@ -24,7 +24,7 @@ type Config struct {
 }
 
 type Log struct {
-	FileDir string `yaml:"file_dir" default:"/dev/null"`
+	FileDir string `yaml:"file_dir"`
 }
 
 type Metrics struct {
