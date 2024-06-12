@@ -94,7 +94,7 @@ Anklet handles VM [Templates/Tags](https://docs.veertu.com/anka/anka-virtualizat
     - `anklet -s stop` to stop the services semi-gracefully (interrupt the plugin at the next context cancellation definition, and still try to cleanup gracefully). This requires that the plugin has properly defined context cancellation checks.
     - `anklet -s drain` to stop services, but wait for all jobs to finish gracefully.
 
-It is also possible to use ENVs for several of the items in the config. Here is a list of ENVs that you can use:
+It is also possible to use ENVs for several of the items in the config. They override anything set in the yml. Here is a list of ENVs that you can use:
 
 | ENV | Description |
 | --- | --- |
