@@ -3,6 +3,8 @@ package config
 import (
 	"net/http"
 	"os"
+	"strconv"
+	"strings"
 	"sync"
 
 	"context"
@@ -15,9 +17,9 @@ type ContextKey string
 type Config struct {
 	Services   []Service `yaml:"services"`
 	Log        Log       `yaml:"log"`
-	PidFileDir string    `yaml:"pid_file_dir" default:"/tmp/"`
+	PidFileDir string    `yaml:"pid_file_dir"`
 	LogFileDir string    `yaml:"log_file_dir"`
-	WorkDir    string    `yaml:"work_dir" default:"/tmp/"`
+	WorkDir    string    `yaml:"work_dir"`
 	Metrics    Metrics   `yaml:"metrics"`
 }
 
@@ -26,20 +28,20 @@ type Log struct {
 }
 
 type Metrics struct {
-	Aggregator    bool     `yaml:"aggregator" default:"false"`
-	Port          string   `yaml:"port" default:"8080"` // default set in main.go
+	Aggregator    bool     `yaml:"aggregator"`
+	Port          string   `yaml:"port"`
 	MetricsURLs   []string `yaml:"metrics_urls"`
-	SleepInterval int      `yaml:"sleep_interval" default:"10"`
+	SleepInterval int      `yaml:"sleep_interval"`
 	Database      Database `yaml:"database"`
 }
 
 type Database struct {
-	URL      string `yaml:"url" default:"localhost"`
-	Port     int    `yaml:"port" default:"6379"`
-	User     string `yaml:"user" default:""`
-	Password string `yaml:"password" default:""`
-	Database int    `yaml:"database" default:"0"`
-	Enabled  bool   `yaml:"enabled" default:"true"`
+	URL      string `yaml:"url"`
+	Port     int    `yaml:"port"`
+	User     string `yaml:"user"`
+	Password string `yaml:"password"`
+	Database int    `yaml:"database"`
+	Enabled  bool   `yaml:"enabled"`
 }
 
 type Workflow struct {
@@ -48,11 +50,11 @@ type Workflow struct {
 }
 
 type Service struct {
-	SleepInterval  int      `yaml:"sleep_interval" default:"2"`
+	SleepInterval  int      `yaml:"sleep_interval"`
 	Name           string   `yaml:"name"`
 	Plugin         string   `yaml:"plugin"`
 	Token          string   `yaml:"token"`
-	Registration   string   `yaml:"registration" default:"repo"`
+	Registration   string   `yaml:"registration"`
 	Repo           string   `yaml:"repo"`
 	Owner          string   `yaml:"owner"`
 	Database       Database `yaml:"database"`
@@ -77,6 +79,83 @@ func LoadConfig(configPath string) (*Config, error) {
 		return nil, err
 	}
 	return &config, nil
+}
+
+func LoadInEnvs(config *Config) (*Config, error) {
+	envAggregator := os.Getenv("ANKLET_METRICS_AGGREGATOR")
+	if envAggregator != "" {
+		config.Metrics.Aggregator = envAggregator == "true"
+	}
+
+	envPort := os.Getenv("ANKLET_METRICS_PORT")
+	if envPort != "" {
+		config.Metrics.Port = envPort
+	}
+
+	envMetricsURLs := os.Getenv("ANKLET_METRICS_URLS")
+	if envMetricsURLs != "" {
+		config.Metrics.MetricsURLs = strings.Split(envMetricsURLs, ",")
+	}
+
+	envSleepInterval := os.Getenv("ANKLET_METRICS_SLEEP_INTERVAL")
+	if envSleepInterval != "" {
+		value, err := strconv.Atoi(envSleepInterval)
+		if err != nil {
+			return nil, err
+		}
+		config.Metrics.SleepInterval = value
+	}
+
+	envDBEnabled := os.Getenv("ANKLET_METRICS_DATABASE_ENABLED")
+	if envDBEnabled != "" {
+		config.Metrics.Database.Enabled = envDBEnabled == "true"
+	}
+
+	envDBUser := os.Getenv("ANKLET_METRICS_DATABASE_USER")
+	if envDBUser != "" {
+		config.Metrics.Database.User = envDBUser
+	}
+
+	envDBPassword := os.Getenv("ANKLET_METRICS_DATABASE_PASSWORD")
+	if envDBPassword != "" {
+		config.Metrics.Database.Password = envDBPassword
+	}
+
+	envDBURL := os.Getenv("ANKLET_METRICS_DATABASE_URL")
+	if envDBURL != "" {
+		config.Metrics.Database.URL = envDBURL
+	}
+
+	envDBPort := os.Getenv("ANKLET_METRICS_DATABASE_PORT")
+	if envDBPort != "" {
+		port, err := strconv.Atoi(envDBPort)
+		if err != nil {
+			return nil, err
+		}
+		config.Metrics.Database.Port = port
+	}
+
+	envDBDatabase := os.Getenv("ANKLET_METRICS_DATABASE_DATABASE")
+	if envDBDatabase != "" {
+		database, err := strconv.Atoi(envDBDatabase)
+		if err != nil {
+			return nil, err
+		}
+		config.Metrics.Database.Database = database
+	}
+	workDir := os.Getenv("ANKLET_WORK_DIR")
+	if workDir != "" {
+		config.WorkDir = workDir
+	}
+	pidFileDir := os.Getenv("ANKLET_PID_FILE_DIR")
+	if pidFileDir != "" {
+		config.PidFileDir = pidFileDir
+	}
+	logFileDir := os.Getenv("ANKLET_LOG_FILE_DIR")
+	if logFileDir != "" {
+		config.LogFileDir = logFileDir
+	}
+	return config, nil
 }
 
 func GetServiceFromContext(ctx context.Context) Service {

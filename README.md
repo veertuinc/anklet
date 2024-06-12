@@ -94,6 +94,20 @@ Anklet handles VM [Templates/Tags](https://docs.veertu.com/anka/anka-virtualizat
     - `anklet -s stop` to stop the services semi-gracefully (interrupt the plugin at the next context cancellation definition, and still try to cleanup gracefully). This requires that the plugin has properly defined context cancellation checks.
     - `anklet -s drain` to stop services, but wait for all jobs to finish gracefully.
 
+It is also possible to use ENVs for several of the items in the config. Here is a list of ENVs that you can use:
+
+| ENV | Description |
+| --- | --- |
+| ANKLET_WORK_DIR | Absolute path to work directory for anklet (ex: /tmp/) (defaults to `./`) |
+| ANKLET_PID_FILE_DIR | Absolute path to pid file directory for anklet (ex: /tmp/) (defaults to `./`) |
+| ANKLET_LOG_FILE_DIR | Absolute path to log file directory for anklet (ex: /Users/myUser/Library/Logs/) (defaults to `./`) |
+| ANKLET_DATABASE_ENABLED | Whether to enable the database (ex: true) (defaults to `false`) |
+| ANKLET_DATABASE_URL | URL of the database (ex: localhost) |
+| ANKLET_DATABASE_PORT | Port of the database (ex: 6379) |
+| ANKLET_DATABASE_USER | User to use (ex: "") |
+| ANKLET_DATABASE_PASSWORD | Password to use (ex: "") |
+| ANKLET_DATABASE_DATABASE | Database to use (ex: 0) |
+
 ### Database Setup
 
 At the moment we support `redis` 7.x for the database. It can be installed on macOS using homebrew:
@@ -259,6 +273,21 @@ metrics:
 ```
 
 You can see that this requires a database to be running. The aggregator will store the metrics in Redis so that it can serve them up without delay.
+
+It's possible to use ENVs instead of the yml file. This is useful if you want to running anklet metrics aggregator in kubernetes. Here is a list of ENVs that you can use:
+
+| ENV | Description |
+| --- | --- |
+| ANKLET_METRICS_AGGREGATOR | Whether to enable the aggregator (ex: true) |
+| ANKLET_METRICS_PORT | Port to serve aggregator on (ex: 8081) |
+| ANKLET_METRICS_URLS | Comma separated list of metrics urls to aggregate (ex: http://127.0.0.1:8080/metrics,http://192.168.1.202:8080/metrics) |
+| ANKLET_METRICS_SLEEP_INTERVAL | How many seconds between fetching metrics from each Anklet url defined |
+| ANKLET_METRICS_DATABASE_ENABLED | Whether to enable the database (ex: true) |
+| ANKLET_METRICS_DATABASE_URL | URL of the database (ex: localhost) |
+| ANKLET_METRICS_DATABASE_PORT | Port of the database (ex: 6379) |
+| ANKLET_METRICS_DATABASE_DATABASE | Database to use (ex: 0) |
+| ANKLET_METRICS_DATABASE_USER | User to use (ex: "") |
+| ANKLET_METRICS_DATABASE_PASSWORD | Password to use (ex: "") |
 
 An example response of each format is as follows:
 

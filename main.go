@@ -82,6 +82,10 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+	loadedConfig, err = config.LoadInEnvs(loadedConfig)
+	if err != nil {
+		panic(err)
+	}
 
 	parentCtx = logging.AppendCtx(parentCtx, slog.String("ankletVersion", version))
 
@@ -90,6 +94,19 @@ func main() {
 		suffix = "-aggregator"
 	}
 	parentCtx = context.WithValue(parentCtx, config.ContextKey("suffix"), suffix)
+
+	logger.DebugContext(parentCtx, "loaded config", slog.Any("config", loadedConfig))
+	parentCtx = context.WithValue(parentCtx, config.ContextKey("config"), loadedConfig)
+
+	if loadedConfig.Log.FileDir == "" {
+		loadedConfig.Log.FileDir = "./"
+	}
+	if loadedConfig.PidFileDir == "" {
+		loadedConfig.PidFileDir = "./"
+	}
+	if loadedConfig.WorkDir == "" {
+		loadedConfig.WorkDir = "./"
+	}
 
 	daemonContext := &daemon.Context{
 		PidFileName: loadedConfig.PidFileDir + "anklet" + suffix + ".pid",
@@ -110,14 +127,6 @@ func main() {
 		if err != nil {
 			log.Fatalln(err.Error())
 		}
-		return
-	}
-
-	logger.DebugContext(parentCtx, "loaded config", slog.Any("config", loadedConfig))
-	parentCtx = context.WithValue(parentCtx, config.ContextKey("config"), loadedConfig)
-
-	if loadedConfig.Log.FileDir == "" {
-		logger.ErrorContext(parentCtx, "log > file_dir is not set in the configuration; be sure to use an absolute path")
 		return
 	}
 
