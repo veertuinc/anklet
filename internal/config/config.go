@@ -153,7 +153,7 @@ func LoadInEnvs(config *Config) (*Config, error) {
 	}
 	logFileDir := os.Getenv("ANKLET_LOG_FILE_DIR")
 	if logFileDir != "" {
-		config.LogFileDir = logFileDir
+		config.Log.FileDir = logFileDir
 	}
 	return config, nil
 }
