@@ -56,35 +56,35 @@ Anklet handles VM [Templates/Tags](https://docs.veertu.com/anka/anka-virtualizat
         # if file_dir is not set, it will be set to current directory you execute anklet in
         file_dir: /Users/myUser/Library/Logs/
     services:
-    - name: RUNNER1
-        plugin: github
-        token: github_pat_1XXXXX
-        registration: repo
-        repo: anklet
-        owner: veertuinc
-        registry_url: http://anka.registry:8089
-        sleep_interval: 10 # sleep 10 seconds between checks for new jobs
-        database:
-            enabled: true
-            url: localhost
-            port: 6379
-            user: ""
-            password: ""
-            database: 0
-    - name: RUNNER2
-        plugin: github
-        token: github_pat_1XXXXX
-        registration: repo
-        repo: anklet
-        owner: veertuinc
-        registry_url: http://anka.registry:8089
-        database:
-            enabled: true
-            url: localhost
-            port: 6379
-            user: ""
-            password: ""
-            database: 0
+      - name: RUNNER1
+          plugin: github
+          token: github_pat_1XXXXX
+          registration: repo
+          repo: anklet
+          owner: veertuinc
+          registry_url: http://anka.registry:8089
+          sleep_interval: 10 # sleep 10 seconds between checks for new jobs
+          database:
+              enabled: true
+              url: localhost
+              port: 6379
+              user: ""
+              password: ""
+              database: 0
+      - name: RUNNER2
+          plugin: github
+          token: github_pat_1XXXXX
+          registration: repo
+          repo: anklet
+          owner: veertuinc
+          registry_url: http://anka.registry:8089
+          database:
+              enabled: true
+              url: localhost
+              port: 6379
+              user: ""
+              password: ""
+              database: 0
 
     ```
     > Note: You can only ever run two VMs per host per the Apple macOS SLA. While you can specify more than two services, only two will ever be running a VM at one time. `sleep_interval` can be used to control the frequency/priority of a service and increase the odds that a job will be picked up.
