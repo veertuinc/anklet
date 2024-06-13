@@ -101,12 +101,6 @@ It is also possible to use ENVs for several of the items in the config. They ove
 | ANKLET_WORK_DIR | Absolute path to work directory for anklet (ex: /tmp/) (defaults to `./`) |
 | ANKLET_PID_FILE_DIR | Absolute path to pid file directory for anklet (ex: /tmp/) (defaults to `./`) |
 | ANKLET_LOG_FILE_DIR | Absolute path to log file directory for anklet (ex: /Users/myUser/Library/Logs/) (defaults to `./`) |
-| ANKLET_DATABASE_ENABLED | Whether to enable the database (ex: true) (defaults to `false`) |
-| ANKLET_DATABASE_URL | URL of the database (ex: localhost) |
-| ANKLET_DATABASE_PORT | Port of the database (ex: 6379) |
-| ANKLET_DATABASE_USER | User to use (ex: "") |
-| ANKLET_DATABASE_PASSWORD | Password to use (ex: "") |
-| ANKLET_DATABASE_DATABASE | Database to use (ex: 0) |
 
 ### Database Setup
 
