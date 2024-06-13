@@ -18,7 +18,7 @@ type Database struct {
 	Client       *redis.Client
 }
 
-func NewClient(ctx context.Context, config config.Database) (*redis.Client, error) {
+func NewClient(ctx context.Context, config config.Database) (*Database, error) {
 	rdb := redis.NewClient(&redis.Options{
 		Addr:     fmt.Sprintf("%s:%d", config.URL, config.Port),
 		Username: config.User,
@@ -34,13 +34,15 @@ func NewClient(ctx context.Context, config config.Database) (*redis.Client, erro
 		return nil, fmt.Errorf("unable to connect to Redis, received: %s", pong)
 	}
 
-	return rdb, nil
+	return &Database{
+		Client: rdb,
+	}, nil
 }
 
-func GetDatabaseFromContext(ctx context.Context) (Database, error) {
-	database, ok := ctx.Value(config.ContextKey("database")).(Database)
+func GetDatabaseFromContext(ctx context.Context) (*Database, error) {
+	database, ok := ctx.Value(config.ContextKey("database")).(*Database)
 	if !ok {
-		return Database{}, errors.New("GetDatabaseFromContext failed (is your database running and enabled in your config.yml?)")
+		return nil, errors.New("GetDatabaseFromContext failed (is your database running and enabled in your config.yml?)")
 	}
 	return database, nil
 }

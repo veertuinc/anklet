@@ -56,35 +56,35 @@ Anklet handles VM [Templates/Tags](https://docs.veertu.com/anka/anka-virtualizat
         # if file_dir is not set, it will be set to current directory you execute anklet in
         file_dir: /Users/myUser/Library/Logs/
     services:
-    - name: RUNNER1
-        plugin: github
-        token: github_pat_1XXXXX
-        registration: repo
-        repo: anklet
-        owner: veertuinc
-        registry_url: http://anka.registry:8089
-        sleep_interval: 10 # sleep 10 seconds between checks for new jobs
-        database:
-            enabled: true
-            url: localhost
-            port: 6379
-            user: ""
-            password: ""
-            database: 0
-    - name: RUNNER2
-        plugin: github
-        token: github_pat_1XXXXX
-        registration: repo
-        repo: anklet
-        owner: veertuinc
-        registry_url: http://anka.registry:8089
-        database:
-            enabled: true
-            url: localhost
-            port: 6379
-            user: ""
-            password: ""
-            database: 0
+      - name: RUNNER1
+          plugin: github
+          token: github_pat_1XXXXX
+          registration: repo
+          repo: anklet
+          owner: veertuinc
+          registry_url: http://anka.registry:8089
+          sleep_interval: 10 # sleep 10 seconds between checks for new jobs
+          database:
+              enabled: true
+              url: localhost
+              port: 6379
+              user: ""
+              password: ""
+              database: 0
+      - name: RUNNER2
+          plugin: github
+          token: github_pat_1XXXXX
+          registration: repo
+          repo: anklet
+          owner: veertuinc
+          registry_url: http://anka.registry:8089
+          database:
+              enabled: true
+              url: localhost
+              port: 6379
+              user: ""
+              password: ""
+              database: 0
 
     ```
     > Note: You can only ever run two VMs per host per the Apple macOS SLA. While you can specify more than two services, only two will ever be running a VM at one time. `sleep_interval` can be used to control the frequency/priority of a service and increase the odds that a job will be picked up.
@@ -93,6 +93,14 @@ Anklet handles VM [Templates/Tags](https://docs.veertu.com/anka/anka-virtualizat
 3. To stop, you have two options:
     - `anklet -s stop` to stop the services semi-gracefully (interrupt the plugin at the next context cancellation definition, and still try to cleanup gracefully). This requires that the plugin has properly defined context cancellation checks.
     - `anklet -s drain` to stop services, but wait for all jobs to finish gracefully.
+
+It is also possible to use ENVs for several of the items in the config. They override anything set in the yml. Here is a list of ENVs that you can use:
+
+| ENV | Description |
+| --- | --- |
+| ANKLET_WORK_DIR | Absolute path to work directory for anklet (ex: /tmp/) (defaults to `./`) |
+| ANKLET_PID_FILE_DIR | Absolute path to pid file directory for anklet (ex: /tmp/) (defaults to `./`) |
+| ANKLET_LOG_FILE_DIR | Absolute path to log file directory for anklet (ex: /Users/myUser/Library/Logs/) (defaults to `./`) |
 
 ### Database Setup
 
@@ -227,6 +235,166 @@ host_disk_used_bytes 459042254848
 host_disk_available_bytes 535620329472
 host_disk_usage_percentage 46.150550
 ```
+
+### Metrics Aggregator
+
+In most cases each individual Anklet serving up their own metrics is good enough for your monitoring needs. However, there are situations where you may need to consume them from a single source instead. The Anklet Aggregator service is designed to do just that.
+
+In order to enable the aggregator, you will want to run an Anklet with the `aggregator` flag set to `true`. **You want to run this separate from any services/plugins.** This will start an Anklet Aggregator service that will collect metrics from all Anklets defined in `metrics_urls` and make them available at `http://{aggregator_url}:{port}/metrics?format=json` or `http://{aggregator_url}:{port}/metrics?format=prometheus`. Here is an example config:
+
+```yaml
+---
+work_dir: /Users/nathanpierce/anklet/
+pid_file_dir: /tmp/
+log:
+  # if file_dir is not set, it will be set to current directory you execute anklet in
+  file_dir: /Users/nathanpierce/Library/Logs/
+metrics:
+  aggregator: true
+  metrics_urls:
+    - http://192.168.1.201:8080/metrics
+    - http://192.168.1.202:8080/metrics
+    - http://192.168.1.203:8080/metrics
+  port: 8081 # port to serve aggregator on
+  sleep_interval: 10 # how often to fetch metrics from each Anklet defined
+  database:
+    enabled: true
+    url: localhost
+    port: 6379
+    user: ""
+    password: ""
+    database: 0
+```
+
+You can see that this requires a database to be running. The aggregator will store the metrics in Redis so that it can serve them up without delay.
+
+It's possible to use ENVs instead of the yml file. This is useful if you want to running anklet metrics aggregator in kubernetes. Here is a list of ENVs that you can use:
+
+| ENV | Description |
+| --- | --- |
+| ANKLET_METRICS_AGGREGATOR | Whether to enable the aggregator (ex: true) |
+| ANKLET_METRICS_PORT | Port to serve aggregator on (ex: 8081) |
+| ANKLET_METRICS_URLS | Comma separated list of metrics urls to aggregate (ex: http://127.0.0.1:8080/metrics,http://192.168.1.202:8080/metrics) |
+| ANKLET_METRICS_SLEEP_INTERVAL | How many seconds between fetching metrics from each Anklet url defined |
+| ANKLET_METRICS_DATABASE_ENABLED | Whether to enable the database (ex: true) |
+| ANKLET_METRICS_DATABASE_URL | URL of the database (ex: localhost) |
+| ANKLET_METRICS_DATABASE_PORT | Port of the database (ex: 6379) |
+| ANKLET_METRICS_DATABASE_DATABASE | Database to use (ex: 0) |
+| ANKLET_METRICS_DATABASE_USER | User to use (ex: "") |
+| ANKLET_METRICS_DATABASE_PASSWORD | Password to use (ex: "") |
+
+An example response of each format is as follows:
+
+#### JSON
+
+```json
+{
+  "http://127.0.0.1:8080/metrics": {
+    "TotalRunningVMs": 0,
+    "TotalSuccessfulRunsSinceStart": 0,
+    "TotalFailedRunsSinceStart": 0,
+    "HostCPUCount": 12,
+    "HostCPUUsedCount": 1,
+    "HostCPUUsagePercentage": 11.765251850227692,
+    "HostMemoryTotalBytes": 38654705664,
+    "HostMemoryUsedBytes": 27379499008,
+    "HostMemoryAvailableBytes": 11275206656,
+    "HostMemoryUsagePercentage": 70.83095974392361,
+    "HostDiskTotalBytes": 994662584320,
+    "HostDiskUsedBytes": 540768464896,
+    "HostDiskAvailableBytes": 453894119424,
+    "HostDiskUsagePercentage": 54.367025906146424,
+    "Services": [
+      {
+        "Name": "RUNNER1",
+        "PluginName": "github",
+        "RepoName": "anklet",
+        "OwnerName": "veertuinc",
+        "Status": "idle",
+        "LastSuccessfulRunJobUrl": "",
+        "LastFailedRunJobUrl": "",
+        "LastSuccessfulRun": "0001-01-01T00:00:00Z",
+        "LastFailedRun": "0001-01-01T00:00:00Z",
+        "StatusRunningSince": "2024-06-11T13:57:43.332009-05:00"
+      }
+    ]
+  },
+  "http://192.168.1.183:8080/metrics": {
+    "TotalRunningVMs": 0,
+    "TotalSuccessfulRunsSinceStart": 0,
+    "TotalFailedRunsSinceStart": 0,
+    "HostCPUCount": 8,
+    "HostCPUUsedCount": 1,
+    "HostCPUUsagePercentage": 20.964819937820444,
+    "HostMemoryTotalBytes": 25769803776,
+    "HostMemoryUsedBytes": 18017533952,
+    "HostMemoryAvailableBytes": 7752269824,
+    "HostMemoryUsagePercentage": 69.91723378499348,
+    "HostDiskTotalBytes": 994662584320,
+    "HostDiskUsedBytes": 629847568384,
+    "HostDiskAvailableBytes": 364815015936,
+    "HostDiskUsagePercentage": 63.32273660565956,
+    "Services": [
+      {
+        "Name": "RUNNER3",
+        "PluginName": "github",
+        "RepoName": "anklet",
+        "OwnerName": "veertuinc",
+        "Status": "idle",
+        "LastSuccessfulRunJobUrl": "",
+        "LastFailedRunJobUrl": "",
+        "LastSuccessfulRun": "0001-01-01T00:00:00Z",
+        "LastFailedRun": "0001-01-01T00:00:00Z",
+        "StatusRunningSince": "2024-06-11T14:16:42.324542-05:00"
+      }
+    ]
+  }
+}
+```
+
+#### Prometheus
+
+This will be a text list, differentiating metrics by `metricsUrl`.
+
+```
+total_running_vms{metricsUrl=http://127.0.0.1:8080/metrics} 0
+total_successful_runs_since_start{metricsUrl=http://127.0.0.1:8080/metrics} 0
+total_failed_runs_since_start{metricsUrl=http://127.0.0.1:8080/metrics} 0
+service_status{service_name=RUNNER1,plugin=github,owner=veertuinc,repo=anklet,metricsUrl=http://127.0.0.1:8080/metrics} idle
+service_last_successful_run{service_name=RUNNER1,plugin=github,owner=veertuinc,repo=anklet,job_url=,metricsUrl=http://127.0.0.1:8080/metrics} 0001-01-01T00:00:00Z
+service_last_failed_run{service_name=RUNNER1,plugin=github,owner=veertuinc,repo=anklet,job_url=,metricsUrl=http://127.0.0.1:8080/metrics} 0001-01-01T00:00:00Z
+service_status_running_since{service_name=RUNNER1,plugin=github,owner=veertuinc,repo=anklet,metricsUrl=http://127.0.0.1:8080/metrics} 2024-06-11T13:57:43-05:00
+host_cpu_count{metricsUrl=http://127.0.0.1:8080/metrics} 12
+host_cpu_used_count{metricsUrl=http://127.0.0.1:8080/metrics} 0
+host_cpu_usage_percentage{metricsUrl=http://127.0.0.1:8080/metrics} 7.300310
+host_memory_total_bytes{metricsUrl=http://127.0.0.1:8080/metrics} 38654705664
+host_memory_used_bytes{metricsUrl=http://127.0.0.1:8080/metrics} 27103789056
+host_memory_available_bytes{metricsUrl=http://127.0.0.1:8080/metrics} 11550916608
+host_memory_usage_percentage{metricsUrl=http://127.0.0.1:8080/metrics} 70.117696
+host_disk_total_bytes{metricsUrl=http://127.0.0.1:8080/metrics} 994662584320
+host_disk_used_bytes{metricsUrl=http://127.0.0.1:8080/metrics} 540769202176
+host_disk_available_bytes{metricsUrl=http://127.0.0.1:8080/metrics} 453893382144
+host_disk_usage_percentage{metricsUrl=http://127.0.0.1:8080/metrics} 54.367100
+total_running_vms{metricsUrl=http://192.168.1.183:8080/metrics} 0
+total_successful_runs_since_start{metricsUrl=http://192.168.1.183:8080/metrics} 0
+total_failed_runs_since_start{metricsUrl=http://192.168.1.183:8080/metrics} 0
+service_status{service_name=RUNNER3,plugin=github,owner=veertuinc,repo=anklet,metricsUrl=http://192.168.1.183:8080/metrics} idle
+service_last_successful_run{service_name=RUNNER3,plugin=github,owner=veertuinc,repo=anklet,job_url=,metricsUrl=http://192.168.1.183:8080/metrics} 0001-01-01T00:00:00Z
+service_last_failed_run{service_name=RUNNER3,plugin=github,owner=veertuinc,repo=anklet,job_url=,metricsUrl=http://192.168.1.183:8080/metrics} 0001-01-01T00:00:00Z
+service_status_running_since{service_name=RUNNER3,plugin=github,owner=veertuinc,repo=anklet,metricsUrl=http://192.168.1.183:8080/metrics} 2024-06-11T14:16:42-05:00
+host_cpu_count{metricsUrl=http://192.168.1.183:8080/metrics} 8
+host_cpu_used_count{metricsUrl=http://192.168.1.183:8080/metrics} 1
+host_cpu_usage_percentage{metricsUrl=http://192.168.1.183:8080/metrics} 20.760717
+host_memory_total_bytes{metricsUrl=http://192.168.1.183:8080/metrics} 25769803776
+host_memory_used_bytes{metricsUrl=http://192.168.1.183:8080/metrics} 17975410688
+host_memory_available_bytes{metricsUrl=http://192.168.1.183:8080/metrics} 7794393088
+host_memory_usage_percentage{metricsUrl=http://192.168.1.183:8080/metrics} 69.753774
+host_disk_total_bytes{metricsUrl=http://192.168.1.183:8080/metrics} 994662584320
+host_disk_used_bytes{metricsUrl=http://192.168.1.183:8080/metrics} 629849382912
+host_disk_available_bytes{metricsUrl=http://192.168.1.183:8080/metrics} 364813201408
+host_disk_usage_percentage{metricsUrl=http://192.168.1.183:8080/metrics} 63.322919
+```
+
 
 ---
 
