@@ -65,23 +65,23 @@ type Service struct {
 	Workflows      Workflow `yaml:"workflows"`
 }
 
-func LoadConfig(configPath string) (*Config, error) {
+func LoadConfig(configPath string) (Config, error) {
+	config := Config{}
 	file, err := os.Open(configPath)
 	if err != nil {
-		return nil, err
+		return config, err
 	}
 	defer file.Close()
 
 	decoder := yaml.NewDecoder(file)
-	var config Config
 	err = decoder.Decode(&config)
 	if err != nil {
-		return nil, err
+		return config, err
 	}
-	return &config, nil
+	return config, nil
 }
 
-func LoadInEnvs(config *Config) (*Config, error) {
+func LoadInEnvs(config Config) (Config, error) {
 	envAggregator := os.Getenv("ANKLET_METRICS_AGGREGATOR")
 	if envAggregator != "" {
 		config.Metrics.Aggregator = envAggregator == "true"
@@ -91,17 +91,15 @@ func LoadInEnvs(config *Config) (*Config, error) {
 	if envPort != "" {
 		config.Metrics.Port = envPort
 	}
-
 	envMetricsURLs := os.Getenv("ANKLET_METRICS_URLS")
 	if envMetricsURLs != "" {
 		config.Metrics.MetricsURLs = strings.Split(envMetricsURLs, ",")
 	}
-
 	envSleepInterval := os.Getenv("ANKLET_METRICS_SLEEP_INTERVAL")
 	if envSleepInterval != "" {
 		value, err := strconv.Atoi(envSleepInterval)
 		if err != nil {
-			return nil, err
+			return Config{}, err
 		}
 		config.Metrics.SleepInterval = value
 	}
@@ -130,7 +128,7 @@ func LoadInEnvs(config *Config) (*Config, error) {
 	if envDBPort != "" {
 		port, err := strconv.Atoi(envDBPort)
 		if err != nil {
-			return nil, err
+			return Config{}, err
 		}
 		config.Metrics.Database.Port = port
 	}
@@ -139,7 +137,7 @@ func LoadInEnvs(config *Config) (*Config, error) {
 	if envDBDatabase != "" {
 		database, err := strconv.Atoi(envDBDatabase)
 		if err != nil {
-			return nil, err
+			return Config{}, err
 		}
 		config.Metrics.Database.Database = database
 	}

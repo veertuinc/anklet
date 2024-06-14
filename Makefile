@@ -3,8 +3,11 @@ LATEST-GIT-SHA := $(shell git rev-parse HEAD)
 VERSION := $(shell cat VERSION)
 FLAGS := -X main.version=$(VERSION) -X main.commit=$(LATEST-GIT-SHA)
 BIN := anklet
-ARCH := $(shell arch)
+ARCH ?= $(shell arch)
 ifeq ($(ARCH), i386)
+	ARCH = amd64
+endif
+ifeq ($(ARCH), x86_64)
 	ARCH = amd64
 endif
 OS_TYPE ?= $(shell uname -s | tr '[:upper:]' '[:lower:]')
@@ -40,3 +43,9 @@ install:
 	mkdir -p ~/bin
 	cp -f dist/$(BIN)_v$(VERSION)_$(OS_TYPE)_$(ARCH) ~/bin/$(BIN)
 
+go.build:
+	GOARCH=$(ARCH) go build $(RACE) -ldflags "-X main.version=$(VERSION)" -o docker/$(BIN)_$(OS_TYPE)_$(ARCH)
+	chmod +x docker/$(BIN)_$(OS_TYPE)_$(ARCH)
+
+build-linux:
+	GOOS=linux OS_TYPE=linux $(MAKE) go.build

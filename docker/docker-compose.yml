@@ -1,0 +1,25 @@
+version: '3.1'
+services:
+  anklet-metrics-aggregator:
+    # build:
+    #   context: ./
+    #   dockerfile: Dockerfile
+    image: veertu/anklet:latest
+    container_name: anklet-metrics-aggregator
+    # volumes:
+    #   - /Users/nathanpierce/.config/anklet:/root/.config/anklet/
+    ports: 
+      - "8081:8081"
+    environment:
+      # - LOG_LEVEL=dev
+      - ANKLET_METRICS_AGGREGATOR=true
+      - ANKLET_METRICS_PORT=8081
+      # - ANKLET_METRICS_URLS=http://anklet1:8080/metrics,http://anklet2:8081/metrics
+      - ANKLET_METRICS_URLS=http://host.docker.internal:8080/metrics
+      - ANKLET_METRICS_SLEEP_INTERVAL=10
+      - ANKLET_METRICS_DATABASE_ENABLED=true
+      - ANKLET_METRICS_DATABASE_URL=host.docker.internal
+      - ANKLET_METRICS_DATABASE_PORT=6379
+      - ANKLET_METRICS_DATABASE_USER=
+      - ANKLET_METRICS_DATABASE_PASSWORD=
+      - ANKLET_METRICS_DATABASE_DATABASE=0

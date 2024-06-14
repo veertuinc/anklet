@@ -33,6 +33,7 @@ var (
 	signalFlag  = flag.String("s", "", `Send signal to the daemon:
   drain — graceful shutdown, will wait until all jobs finish before exiting
   stop — best effort graceful shutdown, interrupting the job as soon as possible`)
+	attachFlag      = flag.Bool("attach", false, "Attach to the anklet and don't background it (useful for containers)")
 	stop            = make(chan struct{})
 	done            = make(chan struct{})
 	shutDownMessage = "anklet service shut down"
@@ -80,8 +81,10 @@ func main() {
 	// obtain config
 	loadedConfig, err := config.LoadConfig(configPath)
 	if err != nil {
-		panic(err)
+		logger.InfoContext(parentCtx, "unable to load config.yml", "error", err)
+		// panic(err)
 	}
+	logger.InfoContext(parentCtx, "loaded config", slog.Any("config", loadedConfig))
 	loadedConfig, err = config.LoadInEnvs(loadedConfig)
 	if err != nil {
 		panic(err)
@@ -95,9 +98,6 @@ func main() {
 	}
 	parentCtx = context.WithValue(parentCtx, config.ContextKey("suffix"), suffix)
 
-	logger.DebugContext(parentCtx, "loaded config", slog.Any("config", loadedConfig))
-	parentCtx = context.WithValue(parentCtx, config.ContextKey("config"), loadedConfig)
-
 	if loadedConfig.Log.FileDir == "" {
 		loadedConfig.Log.FileDir = "./"
 	}
@@ -107,6 +107,9 @@ func main() {
 	if loadedConfig.WorkDir == "" {
 		loadedConfig.WorkDir = "./"
 	}
+
+	logger.DebugContext(parentCtx, "loaded config", slog.Any("config", loadedConfig))
+	parentCtx = context.WithValue(parentCtx, config.ContextKey("config"), &loadedConfig)
 
 	daemonContext := &daemon.Context{
 		PidFileName: loadedConfig.PidFileDir + "anklet" + suffix + ".pid",
@@ -157,16 +160,18 @@ func main() {
 		}
 	}
 
-	d, err := daemonContext.Reborn()
-	if err != nil {
-		log.Fatalln(err)
+	if !*attachFlag {
+		d, err := daemonContext.Reborn()
+		if err != nil {
+			log.Fatalln(err)
+		}
+		if d != nil {
+			return
+		}
+		defer daemonContext.Release()
 	}
-	if d != nil {
-		return
-	}
-	defer daemonContext.Release()
 
-	go worker(parentCtx, logger, *loadedConfig)
+	go worker(parentCtx, logger, loadedConfig)
 
 	err = daemon.ServeSignals()
 	if err != nil {
