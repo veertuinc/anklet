@@ -204,7 +204,7 @@ func NewServer(port string) *Server {
 
 // Start runs the HTTP server
 func (s *Server) Start(parentCtx context.Context, logger *slog.Logger) {
-	http.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
+	http.HandleFunc("/metrics/v1", func(w http.ResponseWriter, r *http.Request) {
 		// update system metrics each call
 		metricsData := GetMetricsDataFromContext(parentCtx)
 		UpdateSystemMetrics(parentCtx, logger, metricsData)
@@ -216,6 +216,10 @@ func (s *Server) Start(parentCtx context.Context, logger *slog.Logger) {
 		} else {
 			http.Error(w, "unsupported format, please use '?format=json' or '?format=prometheus'", http.StatusBadRequest)
 		}
+	})
+	http.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotImplemented)
+		w.Write([]byte("please use /metrics/v1"))
 	})
 	http.ListenAndServe(":"+s.Port, nil)
 }
