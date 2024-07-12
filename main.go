@@ -19,7 +19,6 @@ import (
 	"github.com/norsegaud/go-daemon"
 	"github.com/veertuinc/anklet/internal/anka"
 	"github.com/veertuinc/anklet/internal/config"
-	"github.com/veertuinc/anklet/internal/controller"
 	"github.com/veertuinc/anklet/internal/database"
 	"github.com/veertuinc/anklet/internal/logging"
 	"github.com/veertuinc/anklet/internal/metrics"
@@ -97,9 +96,6 @@ func main() {
 	if loadedConfig.Metrics.Aggregator {
 		suffix = "-aggregator"
 	}
-	if loadedConfig.Controller.Enabled {
-		suffix = "-controller"
-	}
 	parentCtx = context.WithValue(parentCtx, config.ContextKey("suffix"), suffix)
 
 	if loadedConfig.Log.FileDir == "" {
@@ -147,21 +143,19 @@ func main() {
 	httpTransport := http.DefaultTransport
 	parentCtx = context.WithValue(parentCtx, config.ContextKey("httpTransport"), httpTransport)
 
-	if !loadedConfig.Metrics.Aggregator && !loadedConfig.Controller.Enabled {
-		githubServiceExists := false
-		for _, service := range loadedConfig.Services {
-			if service.Plugin == "github" {
-				githubServiceExists = true
-			}
+	githubServiceExists := false
+	for _, service := range loadedConfig.Services {
+		if service.Plugin == "github" {
+			githubServiceExists = true
 		}
-		if githubServiceExists {
-			rateLimiter, err := github_ratelimit.NewRateLimitWaiterClient(httpTransport)
-			if err != nil {
-				logger.ErrorContext(parentCtx, "error creating github_ratelimit.NewRateLimitWaiterClient", "err", err)
-				return
-			}
-			parentCtx = context.WithValue(parentCtx, config.ContextKey("rateLimiter"), rateLimiter)
+	}
+	if githubServiceExists {
+		rateLimiter, err := github_ratelimit.NewRateLimitWaiterClient(httpTransport)
+		if err != nil {
+			logger.ErrorContext(parentCtx, "error creating github_ratelimit.NewRateLimitWaiterClient", "err", err)
+			return
 		}
+		parentCtx = context.WithValue(parentCtx, config.ContextKey("rateLimiter"), rateLimiter)
 	}
 
 	if !*attachFlag {
@@ -213,34 +207,7 @@ func worker(parentCtx context.Context, logger *slog.Logger, loadedConfig config.
 		metricsPort = loadedConfig.Metrics.Port
 	}
 	metricsService := metrics.NewServer(metricsPort)
-	if loadedConfig.Controller.Enabled {
-		controllerDatabaseContainer, err := database.NewClient(workerCtx, loadedConfig.Controller.Database)
-		if err != nil {
-			panic(fmt.Sprintf("unable to access database: %v", err))
-		}
-		workerCtx = context.WithValue(workerCtx, config.ContextKey("database"), controllerDatabaseContainer)
-		controllerServer := controller.NewServer(loadedConfig.Controller.Port)
-		go controllerServer.Start(workerCtx, logger)
-		logger.InfoContext(workerCtx, "controller server started on port "+loadedConfig.Controller.Port)
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for {
-				select {
-				case <-workerCtx.Done():
-					workerCancel()
-					logger.WarnContext(workerCtx, shutDownMessage)
-					return
-				default:
-					select {
-					case <-time.After(time.Duration(loadedConfig.Metrics.SleepInterval) * time.Second):
-					case <-workerCtx.Done():
-						break
-					}
-				}
-			}
-		}()
-	} else if loadedConfig.Metrics.Aggregator {
+	if loadedConfig.Metrics.Aggregator {
 		workerCtx = logging.AppendCtx(workerCtx, slog.Any("metrics_urls", loadedConfig.Metrics.MetricsURLs))
 		databaseContainer, err := database.NewClient(workerCtx, loadedConfig.Metrics.Database)
 		if err != nil {

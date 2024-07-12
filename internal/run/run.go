@@ -6,6 +6,7 @@ import (
 
 	"github.com/veertuinc/anklet/internal/config"
 	"github.com/veertuinc/anklet/internal/logging"
+	github_controller "github.com/veertuinc/anklet/plugins/controllers"
 	"github.com/veertuinc/anklet/plugins/github"
 )
 
@@ -18,6 +19,8 @@ func Plugin(workerCtx context.Context, serviceCtx context.Context, logger *slog.
 	}
 	if service.Plugin == "github" {
 		github.Run(workerCtx, serviceCtx, logger)
+	} else if service.Plugin == "github_controller" {
+		github_controller.Run(workerCtx, serviceCtx, logger)
 	} else {
 		panic("plugin not found: " + service.Plugin)
 	}

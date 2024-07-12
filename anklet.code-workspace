@@ -5,6 +5,9 @@
 		},
 		{
 			"path": "../ci-tools"
+		},
+		{
+			"path": "../webhooks"
 		}
 	],
 	"settings": {}

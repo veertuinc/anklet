@@ -15,13 +15,12 @@ import (
 type ContextKey string
 
 type Config struct {
-	Services   []Service  `yaml:"services"`
-	Log        Log        `yaml:"log"`
-	PidFileDir string     `yaml:"pid_file_dir"`
-	LogFileDir string     `yaml:"log_file_dir"`
-	WorkDir    string     `yaml:"work_dir"`
-	Metrics    Metrics    `yaml:"metrics"`
-	Controller Controller `yaml:"controller"`
+	Services   []Service `yaml:"services"`
+	Log        Log       `yaml:"log"`
+	PidFileDir string    `yaml:"pid_file_dir"`
+	LogFileDir string    `yaml:"log_file_dir"`
+	WorkDir    string    `yaml:"work_dir"`
+	Metrics    Metrics   `yaml:"metrics"`
 }
 
 type Log struct {
@@ -34,12 +33,6 @@ type Metrics struct {
 	MetricsURLs   []string `yaml:"metrics_urls"`
 	SleepInterval int      `yaml:"sleep_interval"`
 	Database      Database `yaml:"database"`
-}
-
-type Controller struct {
-	Enabled  bool     `yaml:"enabled"`
-	Port     string   `yaml:"port"`
-	Database Database `yaml:"database"`
 }
 
 type Database struct {
@@ -70,6 +63,8 @@ type Service struct {
 	AppID          int      `yaml:"app_id"`
 	InstallationID int64    `yaml:"installation_id"`
 	Workflows      Workflow `yaml:"workflows"`
+	Port           string   `yaml:"port"`
+	Secret         string   `yaml:"secret"`
 }
 
 func LoadConfig(configPath string) (Config, error) {
