@@ -75,7 +75,21 @@ func Run(workerCtx context.Context, serviceCtx context.Context, logger *slog.Log
 						logger.ErrorContext(serviceCtx, "error pushing job to queue", "error", push.Err())
 						return
 					}
-					logger.InfoContext(serviceCtx, "job pushed to queue", "json", string(payloadJSON))
+					logger.InfoContext(serviceCtx, "job pushed to queued queue", "json", string(payloadJSON))
+				}
+			} else if workflow.Action == "completed" {
+				if exists_in_array_exact(workflow.WorkflowJob.Labels, []string{"self-hosted", "anka"}) {
+					payloadJSON, err := json.Marshal(payload)
+					if err != nil {
+						logger.ErrorContext(serviceCtx, "error converting payload to JSON", "error", err)
+						return
+					}
+					push := databaseContainer.Client.LPush(serviceCtx, "jobs/github/completed", payloadJSON)
+					if push.Err() != nil {
+						logger.ErrorContext(serviceCtx, "error pushing job to queue", "error", push.Err())
+						return
+					}
+					logger.InfoContext(serviceCtx, "job pushed to completed queue", "json", string(payloadJSON))
 				}
 			}
 		}
