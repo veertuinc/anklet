@@ -10,7 +10,7 @@ import (
 	"github.com/veertuinc/anklet/plugins/github"
 )
 
-func Plugin(workerCtx context.Context, serviceCtx context.Context, logger *slog.Logger) {
+func Plugin(workerCtx context.Context, serviceCtx context.Context, serviceCancel context.CancelFunc, logger *slog.Logger) {
 	service := config.GetServiceFromContext(serviceCtx)
 	// fmt.Printf("%+v\n", service)
 	serviceCtx = logging.AppendCtx(serviceCtx, slog.String("plugin", service.Plugin))
@@ -18,9 +18,9 @@ func Plugin(workerCtx context.Context, serviceCtx context.Context, logger *slog.
 		panic("plugin is not set in yaml:services:" + service.Name + ":plugin")
 	}
 	if service.Plugin == "github" {
-		github.Run(workerCtx, serviceCtx, logger)
+		github.Run(workerCtx, serviceCtx, serviceCancel, logger)
 	} else if service.Plugin == "github_controller" {
-		github_controller.Run(workerCtx, serviceCtx, logger)
+		github_controller.Run(workerCtx, serviceCtx, serviceCancel, logger)
 	} else {
 		panic("plugin not found: " + service.Plugin)
 	}

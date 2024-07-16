@@ -40,7 +40,7 @@ func exists_in_array_exact(array_to_search_in []string, desired []string) bool {
 }
 
 // Start runs the HTTP server
-func Run(workerCtx context.Context, serviceCtx context.Context, logger *slog.Logger) {
+func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel context.CancelFunc, logger *slog.Logger) {
 	service := config.GetServiceFromContext(serviceCtx)
 	hook, _ := github.New(github.Options.Secret(service.Secret))
 	server := &http.Server{Addr: ":" + service.Port}
@@ -70,7 +70,7 @@ func Run(workerCtx context.Context, serviceCtx context.Context, logger *slog.Log
 						logger.ErrorContext(serviceCtx, "error converting payload to JSON", "error", err)
 						return
 					}
-					push := databaseContainer.Client.LPush(serviceCtx, "jobs/github/queued", payloadJSON)
+					push := databaseContainer.Client.LPush(serviceCtx, "anklet/jobs/github/queued", payloadJSON)
 					if push.Err() != nil {
 						logger.ErrorContext(serviceCtx, "error pushing job to queue", "error", push.Err())
 						return
@@ -84,7 +84,7 @@ func Run(workerCtx context.Context, serviceCtx context.Context, logger *slog.Log
 						logger.ErrorContext(serviceCtx, "error converting payload to JSON", "error", err)
 						return
 					}
-					push := databaseContainer.Client.LPush(serviceCtx, "jobs/github/completed", payloadJSON)
+					push := databaseContainer.Client.LPush(serviceCtx, "anklet/jobs/github/completed", payloadJSON)
 					if push.Err() != nil {
 						logger.ErrorContext(serviceCtx, "error pushing job to queue", "error", push.Err())
 						return

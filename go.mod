@@ -10,7 +10,7 @@ require (
 	github.com/norsegaud/go-daemon v0.1.10
 	github.com/redis/go-redis/v9 v9.5.1
 	github.com/shirou/gopsutil/v3 v3.24.4
-	github.com/veertuinc/webhooks/v6 v6.0.1
+	github.com/veertuinc/webhooks/v6 v6.1.0
 	gopkg.in/yaml.v2 v2.4.0
 )
 

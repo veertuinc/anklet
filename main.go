@@ -322,7 +322,7 @@ func worker(parentCtx context.Context, logger *slog.Logger, loadedConfig config.
 						})
 						return
 					default:
-						run.Plugin(workerCtx, serviceCtx, logger)
+						run.Plugin(workerCtx, serviceCtx, serviceCancel, logger)
 						if workerCtx.Err() != nil || toRunOnce == "true" {
 							serviceCancel()
 							break
