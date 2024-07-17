@@ -107,7 +107,7 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 	}()
 	<-serviceCtx.Done()
 	logger.InfoContext(serviceCtx, "shutting down controller")
-	if err := server.Shutdown(context.Background()); err != nil {
+	if err := server.Shutdown(serviceCtx); err != nil {
 		logger.ErrorContext(serviceCtx, "controller shutdown error", "error", err)
 	}
 }
