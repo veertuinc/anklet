@@ -315,17 +315,18 @@ func worker(parentCtx context.Context, logger *slog.Logger, loadedConfig config.
 				for {
 					select {
 					case <-serviceCtx.Done():
-						serviceCancel()
-						logger.WarnContext(serviceCtx, shutDownMessage)
 						metrics.UpdateService(workerCtx, serviceCtx, logger, metrics.Service{
 							Status: "stopped",
 						})
+						logger.WarnContext(serviceCtx, shutDownMessage)
+						serviceCancel()
 						return
 					default:
 						run.Plugin(workerCtx, serviceCtx, serviceCancel, logger)
 						if workerCtx.Err() != nil || toRunOnce == "true" {
 							serviceCancel()
-							break
+							logger.WarnContext(serviceCtx, shutDownMessage)
+							return
 						}
 						metrics.UpdateService(workerCtx, serviceCtx, logger, metrics.Service{
 							Status: "idle",
@@ -333,6 +334,7 @@ func worker(parentCtx context.Context, logger *slog.Logger, loadedConfig config.
 						select {
 						case <-time.After(time.Duration(service.SleepInterval) * time.Second):
 						case <-serviceCtx.Done():
+							logger.WarnContext(serviceCtx, shutDownMessage)
 							break
 						}
 					}

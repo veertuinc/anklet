@@ -3,6 +3,7 @@ package github
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 
@@ -65,31 +66,39 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 			logger.InfoContext(serviceCtx, "received workflow job", slog.Any("workflowJob", workflow))
 			if workflow.Action == "queued" {
 				if exists_in_array_exact(workflow.WorkflowJob.Labels, []string{"self-hosted", "anka"}) {
-					payloadJSON, err := json.Marshal(payload)
+					wrappedJobPayload := map[string]interface{}{
+						"type":    "WorkflowJobPayload",
+						"payload": payload,
+					}
+					wrappedPayloadJSON, err := json.Marshal(wrappedJobPayload)
 					if err != nil {
-						logger.ErrorContext(serviceCtx, "error converting payload to JSON", "error", err)
+						logger.ErrorContext(serviceCtx, "error converting job payload to JSON", "error", err)
 						return
 					}
-					push := databaseContainer.Client.LPush(serviceCtx, "anklet/jobs/github/queued", payloadJSON)
+					push := databaseContainer.Client.LPush(serviceCtx, "anklet/jobs/github/queued", wrappedPayloadJSON)
 					if push.Err() != nil {
 						logger.ErrorContext(serviceCtx, "error pushing job to queue", "error", push.Err())
 						return
 					}
-					logger.InfoContext(serviceCtx, "job pushed to queued queue", "json", string(payloadJSON))
+					logger.InfoContext(serviceCtx, "job pushed to queued queue", "json", string(wrappedPayloadJSON))
 				}
 			} else if workflow.Action == "completed" {
 				if exists_in_array_exact(workflow.WorkflowJob.Labels, []string{"self-hosted", "anka"}) {
-					payloadJSON, err := json.Marshal(payload)
+					wrappedJobPayload := map[string]interface{}{
+						"type":    "WorkflowJobPayload",
+						"payload": payload,
+					}
+					wrappedPayloadJSON, err := json.Marshal(wrappedJobPayload)
 					if err != nil {
-						logger.ErrorContext(serviceCtx, "error converting payload to JSON", "error", err)
+						logger.ErrorContext(serviceCtx, "error converting job payload to JSON", "error", err)
 						return
 					}
-					push := databaseContainer.Client.LPush(serviceCtx, "anklet/jobs/github/completed", payloadJSON)
+					push := databaseContainer.Client.LPush(serviceCtx, "anklet/jobs/github/completed", wrappedPayloadJSON)
 					if push.Err() != nil {
 						logger.ErrorContext(serviceCtx, "error pushing job to queue", "error", push.Err())
 						return
 					}
-					logger.InfoContext(serviceCtx, "job pushed to completed queue", "json", string(payloadJSON))
+					logger.InfoContext(serviceCtx, "job pushed to completed queue", "json", string(wrappedPayloadJSON))
 				}
 			}
 		}
@@ -105,6 +114,7 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 			logger.ErrorContext(serviceCtx, "controller listener error", "error", err)
 		}
 	}()
+	fmt.Println("HERE =====================")
 	<-serviceCtx.Done()
 	logger.InfoContext(serviceCtx, "shutting down controller")
 	if err := server.Shutdown(serviceCtx); err != nil {
