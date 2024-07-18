@@ -334,7 +334,7 @@ func worker(parentCtx context.Context, logger *slog.Logger, loadedConfig config.
 						select {
 						case <-time.After(time.Duration(service.SleepInterval) * time.Second):
 						case <-serviceCtx.Done():
-							logger.WarnContext(serviceCtx, shutDownMessage)
+							fmt.Println("serviceCtx.Done()")
 							break
 						}
 					}

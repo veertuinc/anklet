@@ -3,7 +3,6 @@ package github
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"log/slog"
 	"net/http"
 
@@ -114,7 +113,6 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 			logger.ErrorContext(serviceCtx, "controller listener error", "error", err)
 		}
 	}()
-	fmt.Println("HERE =====================")
 	<-serviceCtx.Done()
 	logger.InfoContext(serviceCtx, "shutting down controller")
 	if err := server.Shutdown(serviceCtx); err != nil {

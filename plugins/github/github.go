@@ -185,11 +185,9 @@ func CheckForCompletedJobs(
 		logging.Panic(workerCtx, serviceCtx, "error getting database from context")
 	}
 	for {
-		fmt.Println("check for completed jobs loop")
 		// do not use 'continue' in the loop or else the ranOnce won't happen
 		select {
 		case <-serviceCtx.Done():
-			logger.InfoContext(serviceCtx, "CheckForCompletedJobs service context done")
 			return
 		default:
 			// get the job ID
@@ -420,7 +418,10 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 
 	returnToQueue := make(chan bool) // if any errors, we need to return the task to the queue instead of deleting it
 	defer func() {
-		serviceCancel()
+		select { // send a message to the channel to stop the check for completed jobs goroutine
+		case completedJobChannel <- true: // prevent it getting stuck if the channel isn't open
+		default:
+		}
 		wg.Wait()
 		// cleanup after we exit the check for completed so we can clean up the environment if a completed job was received
 		cleanup(workerCtx, serviceCtx, logger, serviceDatabaseKeyName, returnToQueue)
