@@ -318,8 +318,6 @@ func cleanup(workerCtx context.Context, serviceCtx context.Context, logger *slog
 	}
 	for {
 		var jobJSON string
-		fmt.Println("DO IT")
-		time.Sleep(10 * time.Second)
 		exists, err := databaseContainer.Client.Exists(cleanupContext, serviceDatabaseKeyName+"/cleaning").Result()
 		if err != nil {
 			logger.ErrorContext(cleanupContext, "error checking if cleaning up already in progress", "err", err)
