@@ -306,7 +306,6 @@ func cleanup(workerCtx context.Context, serviceCtx context.Context, logger *slog
 		logger.ErrorContext(serviceCtx, "error getting database from context", "err", err)
 		return
 	}
-	return
 	for {
 		var jobJSON string
 		exists, err := databaseContainer.Client.Exists(cleanupContext, serviceDatabaseKeyName+"/cleaning").Result()
@@ -366,7 +365,12 @@ func cleanup(workerCtx context.Context, serviceCtx context.Context, logger *slog
 			// if it was an error, just return it to the main queue for another anklet to handle
 			select {
 			case <-returnToQueue:
-				databaseContainer.Client.RPopLPush(cleanupContext, serviceDatabaseKeyName+"/cleaning", "anklet/jobs/github/queued").Result()
+				fmt.Println("returnToQueue")
+				_, err := databaseContainer.Client.RPopLPush(cleanupContext, serviceDatabaseKeyName+"/cleaning", "anklet/jobs/github/queued").Result()
+				if err != nil {
+					logger.ErrorContext(serviceCtx, "error pushing job to queued", "err", err)
+					return
+				}
 			default:
 			}
 			logger.InfoContext(serviceCtx, "finalized cleaning of workflow job", "workflowJobID", hook.WorkflowJob.ID)
@@ -423,8 +427,8 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 	serviceCtx = logging.AppendCtx(serviceCtx, slog.String("owner", service.Owner))
 	serviceDatabaseKeyName := "anklet/jobs/github/service/" + service.Name
 	repositoryURL := fmt.Sprintf("https://github.com/%s/%s", service.Owner, service.Repo)
-	completedJobChannel := make(chan bool)
-	returnToQueue := make(chan bool) // if any errors, we need to return the task to the queue instead of deleting it
+	completedJobChannel := make(chan bool, 1)
+	returnToQueue := make(chan bool, 1) // if any errors, we need to return the task to the queue instead of deleting it
 	// wait group so we can wait for the goroutine to finish before exiting the service
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -468,7 +472,6 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 		default:
 			logger.WarnContext(serviceCtx, "unable to return task to queue")
 		}
-		fmt.Println("context canceled before completed job found")
 		return
 	default:
 	}
