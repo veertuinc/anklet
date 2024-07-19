@@ -148,10 +148,12 @@ func ExecuteGitHubClientFunction[T any](serviceCtx context.Context, logger *slog
 			}
 		}
 	}
-	if err != nil &&
-		err.Error() != "context canceled" &&
-		!strings.Contains(err.Error(), "try again later") {
-		logger.Error("error executing GitHub client function: " + err.Error())
+	if err != nil {
+		if err.Error() != "context canceled" {
+			if !strings.Contains(err.Error(), "try again later") {
+				logger.Error("error executing GitHub client function: " + err.Error())
+			}
+		}
 		return serviceCtx, nil, nil, err
 	}
 	return serviceCtx, result, response, nil
@@ -299,7 +301,15 @@ func CheckForCompletedJobs(
 // this assumes the plugin code created a list item to represent the thing to clean up
 func cleanup(workerCtx context.Context, serviceCtx context.Context, logger *slog.Logger, serviceDatabaseKeyName string, returnToQueue chan bool) {
 	logger.InfoContext(serviceCtx, "cleaning up")
-	cleanupContext, cancel := context.WithCancel(serviceCtx) // can't use serviceCtx or it will be cancelled before we can cleanup
+	// create an idependent copy of the serviceCtx so we can do cleanup even if serviceCtx got "context canceled"
+	cleanupContext := context.Background()
+	serviceDatabase, err := dbFunctions.GetDatabaseFromContext(serviceCtx)
+	if err != nil {
+		logger.ErrorContext(serviceCtx, "error getting database from context", "err", err)
+		return
+	}
+	cleanupContext = context.WithValue(cleanupContext, config.ContextKey("database"), serviceDatabase)
+	cleanupContext, cancel := context.WithCancel(cleanupContext)
 	defer cancel()
 	databaseContainer, err := dbFunctions.GetDatabaseFromContext(cleanupContext)
 	if err != nil {
@@ -308,10 +318,16 @@ func cleanup(workerCtx context.Context, serviceCtx context.Context, logger *slog
 	}
 	for {
 		var jobJSON string
+		fmt.Println("DO IT")
+		time.Sleep(10 * time.Second)
 		exists, err := databaseContainer.Client.Exists(cleanupContext, serviceDatabaseKeyName+"/cleaning").Result()
 		if err != nil {
-			logger.ErrorContext(serviceCtx, "error checking if cleaning up already in progress", "err", err)
-			return
+			logger.ErrorContext(cleanupContext, "error checking if cleaning up already in progress", "err", err)
+			select {
+			case returnToQueue <- true:
+			default:
+				logger.WarnContext(serviceCtx, "unable to return task to queue")
+			}
 		}
 		if exists == 1 {
 			logger.InfoContext(serviceCtx, "cleaning up already in progress; getting job")
