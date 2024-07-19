@@ -5,7 +5,7 @@ go 1.22.2
 require (
 	github.com/bradleyfalzon/ghinstallation/v2 v2.11.0
 	github.com/gofri/go-github-ratelimit v1.1.0
-	github.com/google/go-github/v61 v61.0.0
+	github.com/google/go-github/v63 v63.0.0
 	github.com/google/uuid v1.6.0
 	github.com/norsegaud/go-daemon v0.1.10
 	github.com/redis/go-redis/v9 v9.5.1

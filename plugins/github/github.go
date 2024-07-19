@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/bradleyfalzon/ghinstallation/v2"
-	"github.com/google/go-github/v61/github"
+	"github.com/google/go-github/v63/github"
 	"github.com/redis/go-redis/v9"
 	"github.com/veertuinc/anklet/internal/anka"
 	"github.com/veertuinc/anklet/internal/config"
@@ -866,7 +866,7 @@ func removeSelfHostedRunner(serviceCtx context.Context, vm anka.VM, workflowRunI
 	service := config.GetServiceFromContext(serviceCtx)
 	githubClient := internalGithub.GetGitHubClientFromContext(serviceCtx)
 	serviceCtx, runnersList, response, err := ExecuteGitHubClientFunction[github.Runners](serviceCtx, logger, func() (*github.Runners, *github.Response, error) {
-		runnersList, resp, err := githubClient.Actions.ListRunners(context.Background(), service.Owner, service.Repo, &github.ListOptions{})
+		runnersList, resp, err := githubClient.Actions.ListRunners(context.Background(), service.Owner, service.Repo, &github.ListRunnersOptions{})
 		return runnersList, resp, err
 	})
 	if err != nil {
