@@ -199,7 +199,6 @@ func CheckForCompletedJobs(
 	}()
 	for {
 		// do not use 'continue' in the loop or else the ranOnce won't happen
-		time.Sleep(3 * time.Second)
 		fmt.Println("CheckForCompletedJobs default")
 		select {
 		case <-completedJobChannel:
@@ -294,6 +293,7 @@ func CheckForCompletedJobs(
 		default:
 			close(ranOnce)
 		}
+		time.Sleep(3 * time.Second)
 	}
 }
 
@@ -349,28 +349,36 @@ func cleanup(workerCtx context.Context, serviceCtx context.Context, logger *slog
 			logger.ErrorContext(serviceCtx, "error unmarshalling job", "err", err)
 			return
 		}
+
+		var payload map[string]interface{}
+		payloadJSON, err := json.Marshal(typedJob)
+		if err != nil {
+			logger.ErrorContext(serviceCtx, "error marshalling payload", "err", err)
+			return
+		}
+		if err := json.Unmarshal(payloadJSON, &payload); err != nil {
+			logger.ErrorContext(serviceCtx, "error unmarshalling job", "err", err)
+			return
+		}
+		payloadBytes, err := json.Marshal(payload["payload"])
+		if err != nil {
+			logger.ErrorContext(serviceCtx, "error marshalling payload", "err", err)
+			return
+		}
 		switch typedJob["type"] {
 		case "anka.VM":
+			fmt.Println("cleanup anka.VM")
+			var vm anka.VM
+			err = json.Unmarshal(payloadBytes, &vm)
+			if err != nil {
+				logger.ErrorContext(serviceCtx, "error unmarshalling payload to webhook.WorkflowJobPayload", "err", err)
+				return
+			}
 			ankaCLI := anka.GetAnkaCLIFromContext(serviceCtx)
-			vm := typedJob["payload"].(anka.VM)
 			ankaCLI.AnkaDelete(workerCtx, serviceCtx, &vm)
 		case "WorkflowJobPayload":
+
 			var hook webhook.WorkflowJobPayload
-			var payload map[string]interface{}
-			payloadJSON, err := json.Marshal(typedJob)
-			if err != nil {
-				logger.ErrorContext(serviceCtx, "error marshalling payload", "err", err)
-				return
-			}
-			if err := json.Unmarshal(payloadJSON, &payload); err != nil {
-				logger.ErrorContext(serviceCtx, "error unmarshalling job", "err", err)
-				return
-			}
-			payloadBytes, err := json.Marshal(payload["payload"])
-			if err != nil {
-				logger.ErrorContext(serviceCtx, "error marshalling payload", "err", err)
-				return
-			}
 			err = json.Unmarshal(payloadBytes, &hook)
 			if err != nil {
 				logger.ErrorContext(serviceCtx, "error unmarshalling payload to webhook.WorkflowJobPayload", "err", err)
@@ -441,7 +449,7 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 	serviceCtx = logging.AppendCtx(serviceCtx, slog.String("owner", service.Owner))
 	serviceDatabaseKeyName := "anklet/jobs/github/service/" + service.Name
 	repositoryURL := fmt.Sprintf("https://github.com/%s/%s", service.Owner, service.Repo)
-	completedJobChannel := make(chan bool, 1)
+	completedJobChannel := make(chan bool)
 	returnToQueue := make(chan bool, 1) // if any errors, we need to return the task to the queue instead of deleting it
 	// wait group so we can wait for the goroutine to finish before exiting the service
 	var wg sync.WaitGroup
@@ -474,6 +482,12 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 	fmt.Println("ranOnce")
 	<-ranOnce // wait for the goroutine to run at least once
 	fmt.Println("ranOnce done")
+	// finalize cleanup if the service crashed mid-cleanup
+	returnToQueue <- true
+	cleanup(workerCtx, serviceCtx, logger, serviceDatabaseKeyName, returnToQueue)
+
+	// create a new returnToQueue channel
+	returnToQueue = make(chan bool, 1)
 
 	select {
 	case <-completedJobChannel:
@@ -493,6 +507,7 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 	var queuedJob webhook.WorkflowJobPayload
 	var wrappedPayload map[string]interface{}
 	var wrappedPayloadJSON string
+	// allow picking up where we left off
 	wrappedPayloadJSON, err = databaseContainer.Client.LIndex(serviceCtx, serviceDatabaseKeyName+"test", -1).Result()
 	if err != nil && err != redis.Nil {
 		logger.ErrorContext(serviceCtx, "error getting last object from "+serviceDatabaseKeyName, "err", err)
@@ -691,7 +706,7 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 		}
 		return
 	}
-	err = databaseContainer.Client.LPush(serviceCtx, serviceDatabaseKeyName, wrappedVmJSON).Err()
+	err = databaseContainer.Client.RPush(serviceCtx, serviceDatabaseKeyName, wrappedVmJSON).Err()
 	if err != nil {
 		logger.ErrorContext(serviceCtx, "error pushing vm data to database", "err", err)
 		select {
