@@ -239,7 +239,17 @@ func CheckForCompletedJobs(
 					return
 				}
 				if count > 0 {
-					completedJobChannel <- true
+					select {
+					case completedJobChannel <- true:
+					default:
+						logger.WarnContext(serviceCtx, "unable to send to completedJobChannel")
+						// remove the completed job we found
+						_, err = databaseContainer.Client.Del(serviceCtx, serviceDatabaseKeyName+"/completed").Result()
+						if err != nil {
+							logger.ErrorContext(serviceCtx, "error removing completedJob from "+serviceDatabaseKeyName+"/completed", "err", err)
+							return
+						}
+					}
 					return
 				} else {
 					// get count of completed jobs in the queue
@@ -717,8 +727,6 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 		return
 	}
 
-	serviceCancel()
-
 	if serviceCtx.Err() != nil {
 		logger.WarnContext(serviceCtx, "context canceled after ObtainAnkaVM")
 		select {
@@ -824,7 +832,12 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 	jobCompleted := false
 	// logCounter := 0
 	for !jobCompleted {
-		if serviceCtx.Err() != nil {
+		fmt.Println("watching for job completion")
+		select {
+		case <-completedJobChannel:
+			logger.InfoContext(serviceCtx, "job completed")
+			jobCompleted = true
+		case <-serviceCtx.Done():
 			logger.WarnContext(serviceCtx, "context canceled while watching for job completion")
 			select {
 			case returnToQueue <- true:
@@ -871,6 +884,7 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 		// 	time.Sleep(5 * time.Second) // Wait before checking the job status again
 		// }
 		// logCounter++
+		time.Sleep(10 * time.Second)
 	}
 }
 

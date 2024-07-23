@@ -62,7 +62,6 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 		switch workflow := payload.(type) {
 		case github.WorkflowJobPayload:
 			// Do whatever you want from here...
-			logger.InfoContext(serviceCtx, "received workflow job", slog.Any("workflowJob", workflow))
 			if workflow.Action == "queued" {
 				if exists_in_array_exact(workflow.WorkflowJob.Labels, []string{"self-hosted", "anka"}) {
 					wrappedJobPayload := map[string]interface{}{
@@ -74,7 +73,8 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 						logger.ErrorContext(serviceCtx, "error converting job payload to JSON", "error", err)
 						return
 					}
-					push := databaseContainer.Client.LPush(serviceCtx, "anklet/jobs/github/queued", wrappedPayloadJSON)
+					logger.InfoContext(serviceCtx, "received workflow job", slog.Any("workflowJob", workflow))
+					push := databaseContainer.Client.RPush(serviceCtx, "anklet/jobs/github/queued", wrappedPayloadJSON)
 					if push.Err() != nil {
 						logger.ErrorContext(serviceCtx, "error pushing job to queue", "error", push.Err())
 						return
@@ -92,7 +92,8 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 						logger.ErrorContext(serviceCtx, "error converting job payload to JSON", "error", err)
 						return
 					}
-					push := databaseContainer.Client.LPush(serviceCtx, "anklet/jobs/github/completed", wrappedPayloadJSON)
+					logger.InfoContext(serviceCtx, "received workflow job", slog.Any("workflowJob", workflow))
+					push := databaseContainer.Client.RPush(serviceCtx, "anklet/jobs/github/completed", wrappedPayloadJSON)
 					if push.Err() != nil {
 						logger.ErrorContext(serviceCtx, "error pushing job to queue", "error", push.Err())
 						return
