@@ -242,7 +242,6 @@ func CheckForCompletedJobs(
 					select {
 					case completedJobChannel <- true:
 					default:
-						logger.WarnContext(serviceCtx, "unable to send to completedJobChannel")
 						// remove the completed job we found
 						_, err = databaseContainer.Client.Del(serviceCtx, serviceDatabaseKeyName+"/completed").Result()
 						if err != nil {

@@ -7,7 +7,7 @@ require (
 	github.com/gofri/go-github-ratelimit v1.1.0
 	github.com/google/go-github/v63 v63.0.0
 	github.com/google/uuid v1.6.0
-	github.com/norsegaud/go-daemon v0.1.10
+	github.com/norsegaud/go-daemon v0.1.11
 	github.com/redis/go-redis/v9 v9.5.1
 	github.com/shirou/gopsutil/v3 v3.24.4
 	github.com/veertuinc/webhooks/v6 v6.1.0

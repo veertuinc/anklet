@@ -34,8 +34,8 @@ github.com/kardianos/osext v0.0.0-20190222173326-2bc1f35cddc0 h1:iQTw/8FWTuc7uia
 github.com/kardianos/osext v0.0.0-20190222173326-2bc1f35cddc0/go.mod h1:1NbS8ALrpOvjt0rHPNLyCIeMtbizbir8U//inJ+zuB8=
 github.com/lufia/plan9stats v0.0.0-20211012122336-39d0f177ccd0 h1:6E+4a0GO5zZEnZ81pIr0yLvtUWk2if982qA3F3QD6H4=
 github.com/lufia/plan9stats v0.0.0-20211012122336-39d0f177ccd0/go.mod h1:zJYVVT2jmtg6P3p1VtQj7WsuWi/y4VnjVBn7F8KPB3I=
-github.com/norsegaud/go-daemon v0.1.10 h1:JnYLPJ1uHU1SsZ29iDkXQbzvy0Fxecy2o2buDgnI528=
-github.com/norsegaud/go-daemon v0.1.10/go.mod h1:Xfzc5NRusltO7M151oKbmC4bBXBi44uFviKbP2BUxQ8=
+github.com/norsegaud/go-daemon v0.1.11 h1:U6M1oByXDbShJ4g6D7gg1CCA/3oMvBORdGTZvyf20Zk=
+github.com/norsegaud/go-daemon v0.1.11/go.mod h1:Xfzc5NRusltO7M151oKbmC4bBXBi44uFviKbP2BUxQ8=
 github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZbAQM=
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
 github.com/power-devops/perfstat v0.0.0-20210106213030-5aafc221ea8c h1:ncq/mPwQF4JjgDlrVEn3C11VoGHZN7m8qihwgMEtzYw=
