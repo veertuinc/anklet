@@ -518,7 +518,7 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 	var wrappedPayload map[string]interface{}
 	var wrappedPayloadJSON string
 	// allow picking up where we left off
-	wrappedPayloadJSON, err = databaseContainer.Client.LIndex(serviceCtx, serviceDatabaseKeyName+"test", -1).Result()
+	wrappedPayloadJSON, err = databaseContainer.Client.LIndex(serviceCtx, serviceDatabaseKeyName, -1).Result()
 	if err != nil && err != redis.Nil {
 		logger.ErrorContext(serviceCtx, "error getting last object from "+serviceDatabaseKeyName, "err", err)
 		select {
@@ -529,7 +529,7 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 		return
 	}
 	if wrappedPayloadJSON == "" {
-		wrappedPayloadJSON, err = databaseContainer.Client.RPopLPush(serviceCtx, "anklet/jobs/github/queued", serviceDatabaseKeyName).Result()
+		eldestQueuedJob, err := databaseContainer.Client.LPop(serviceCtx, "anklet/jobs/github/queued").Result()
 		if err == redis.Nil {
 			logger.DebugContext(serviceCtx, "no queued jobs found")
 			return
@@ -538,15 +538,8 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 			logger.ErrorContext(serviceCtx, "error getting queued jobs", "err", err)
 			return
 		}
-		if err := json.Unmarshal([]byte(wrappedPayloadJSON), &wrappedPayload); err != nil {
-			logger.ErrorContext(serviceCtx, "error unmarshalling job", "err", err)
-			select {
-			case returnToQueue <- true:
-			default:
-				logger.WarnContext(serviceCtx, "unable to return task to queue")
-			}
-			return
-		}
+		databaseContainer.Client.RPush(serviceCtx, serviceDatabaseKeyName, eldestQueuedJob)
+		wrappedPayloadJSON = eldestQueuedJob
 	}
 
 	if err := json.Unmarshal([]byte(wrappedPayloadJSON), &wrappedPayload); err != nil {
@@ -828,11 +821,12 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 		return
 	}
 
+	logger.InfoContext(serviceCtx, "watching for job completion")
+
 	// Watch for job completion
 	jobCompleted := false
 	// logCounter := 0
 	for !jobCompleted {
-		fmt.Println("watching for job completion")
 		select {
 		case <-completedJobChannel:
 			logger.InfoContext(serviceCtx, "job completed")
@@ -846,6 +840,7 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 			}
 			return
 		}
+		time.Sleep(10 * time.Second)
 		// serviceCtx, currentJob, response, err := ExecuteGitHubClientFunction[github.WorkflowJob](serviceCtx, logger, func() (*github.WorkflowJob, *github.Response, error) {
 		// 	currentJob, resp, err := githubClient.Actions.GetWorkflowJobByID(context.Background(), service.Owner, service.Repo, workflowRunJob.JobID)
 		// 	return currentJob, resp, err
@@ -884,7 +879,6 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 		// 	time.Sleep(5 * time.Second) // Wait before checking the job status again
 		// }
 		// logCounter++
-		time.Sleep(10 * time.Second)
 	}
 }
 
