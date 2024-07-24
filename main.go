@@ -259,6 +259,7 @@ func worker(parentCtx context.Context, logger *slog.Logger, loadedConfig config.
 		metrics.UpdateSystemMetrics(workerCtx, logger, metricsData)
 		/////////////
 		// Services
+		firstServiceStarted := make(chan bool, 1)
 		for _, service := range loadedConfig.Services {
 			wg.Add(1)
 			go func(service config.Service) {
@@ -302,7 +303,8 @@ func worker(parentCtx context.Context, logger *slog.Logger, loadedConfig config.
 					serviceCtx = context.WithValue(serviceCtx, config.ContextKey("database"), databaseClient)
 				}
 
-				logger.InfoContext(serviceCtx, "started service")
+				logger.InfoContext(serviceCtx, "starting service")
+
 				metricsData.AddService(metrics.Service{
 					Name:               service.Name,
 					PluginName:         service.Plugin,
@@ -322,7 +324,7 @@ func worker(parentCtx context.Context, logger *slog.Logger, loadedConfig config.
 						serviceCancel()
 						return
 					default:
-						run.Plugin(workerCtx, serviceCtx, serviceCancel, logger)
+						run.Plugin(workerCtx, serviceCtx, serviceCancel, logger, firstServiceStarted)
 						if workerCtx.Err() != nil || toRunOnce == "true" {
 							serviceCancel()
 							logger.WarnContext(serviceCtx, shutDownMessage)

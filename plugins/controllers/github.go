@@ -122,7 +122,7 @@ func ExecuteGitHubClientFunction[T any](serviceCtx context.Context, logger *slog
 }
 
 // Start runs the HTTP server
-func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel context.CancelFunc, logger *slog.Logger) {
+func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel context.CancelFunc, logger *slog.Logger, firstServiceStarted chan bool) {
 	service := config.GetServiceFromContext(serviceCtx)
 	databaseContainer, err := database.GetDatabaseFromContext(serviceCtx)
 	if err != nil {
@@ -239,6 +239,7 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 	}
 	var firstQueuedJobStartedAtDate time.Time
 	if len(queuedJobs) > 0 {
+		logger.InfoContext(serviceCtx, "searching for redeliveries")
 		// get the started date of the eldest item in the list of queued jobs
 		var firstQueuedJobEvent github.WorkflowJobEvent
 		var payload map[string]interface{}
@@ -345,6 +346,13 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 			}
 		}
 	}
+	// notify the main thread that the service has started
+	select {
+	case <-firstServiceStarted:
+	default:
+		close(firstServiceStarted)
+	}
+	logger.InfoContext(serviceCtx, "started service")
 	// wait for the context to be canceled
 	<-serviceCtx.Done()
 	logger.InfoContext(serviceCtx, "shutting down controller")
