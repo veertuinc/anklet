@@ -65,6 +65,7 @@ type Service struct {
 	Workflows      Workflow `yaml:"workflows"`
 	Port           string   `yaml:"port"`
 	Secret         string   `yaml:"secret"`
+	HookID         int64    `yaml:"hook_id"`
 }
 
 func LoadConfig(configPath string) (Config, error) {

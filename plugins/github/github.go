@@ -20,7 +20,6 @@ import (
 	internalGithub "github.com/veertuinc/anklet/internal/github"
 	"github.com/veertuinc/anklet/internal/logging"
 	"github.com/veertuinc/anklet/internal/metrics"
-	webhook "github.com/veertuinc/webhooks/v6/github"
 )
 
 type WorkflowRunJobDetail struct {
@@ -210,7 +209,7 @@ func CheckForCompletedJobs(
 		default:
 		}
 		// get the job ID
-		var existingJob webhook.WorkflowJobPayload
+		var existingJob github.WorkflowJobEvent
 		var existingJobID int64
 		existingJobString, err := databaseContainer.Client.LIndex(serviceCtx, serviceDatabaseKeyName, -1).Result()
 		if err != redis.Nil { // handle no job for service
@@ -227,10 +226,10 @@ func CheckForCompletedJobs(
 				}
 				err = json.Unmarshal(payloadBytes, &existingJob)
 				if err != nil {
-					logger.ErrorContext(serviceCtx, "error unmarshalling payload to webhook.WorkflowJobPayload", "err", err)
+					logger.ErrorContext(serviceCtx, "error unmarshalling payload to github.WorkflowJobEvent", "err", err)
 					return
 				}
-				existingJobID = existingJob.WorkflowJob.ID
+				existingJobID = *existingJob.WorkflowJob.ID
 				// check if there is already a completed job queued for the server
 				// // this can happen if the service crashes or is stopped before it finalizes cleanup
 				count, err := databaseContainer.Client.LLen(serviceCtx, serviceDatabaseKeyName+"/completed").Result()
@@ -264,13 +263,13 @@ func CheckForCompletedJobs(
 						return
 					}
 					for _, completedJob := range completedJobs {
-						var completedJobWebhook webhook.WorkflowJobPayload
+						var completedJobWebhook github.WorkflowJobEvent
 						err := json.Unmarshal([]byte(completedJob), &completedJobWebhook)
 						if err != nil {
 							logger.ErrorContext(serviceCtx, "error unmarshalling completed job", "err", err)
 							return
 						}
-						if completedJobWebhook.WorkflowJob.ID == existingJobID {
+						if *completedJobWebhook.WorkflowJob.ID == existingJobID {
 							// remove the completed job we found
 							_, err = databaseContainer.Client.LRem(serviceCtx, "anklet/jobs/github/completed", 1, completedJob).Result()
 							if err != nil {
@@ -387,7 +386,7 @@ func cleanup(workerCtx context.Context, serviceCtx context.Context, logger *slog
 			ankaCLI.AnkaDelete(workerCtx, serviceCtx, &vm)
 		case "WorkflowJobPayload":
 
-			var hook webhook.WorkflowJobPayload
+			var hook github.WorkflowJobEvent
 			err = json.Unmarshal(payloadBytes, &hook)
 			if err != nil {
 				logger.ErrorContext(serviceCtx, "error unmarshalling payload to webhook.WorkflowJobPayload", "err", err)
@@ -513,7 +512,7 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 	default:
 	}
 
-	var queuedJob webhook.WorkflowJobPayload
+	var queuedJob github.WorkflowJobEvent
 	var wrappedPayload map[string]interface{}
 	var wrappedPayloadJSON string
 	// allow picking up where we left off
@@ -569,7 +568,7 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 		}
 		return
 	}
-	serviceCtx = logging.AppendCtx(serviceCtx, slog.Int64("workflowJobID", queuedJob.WorkflowJob.ID))
+	serviceCtx = logging.AppendCtx(serviceCtx, slog.Int64("workflowJobID", *queuedJob.WorkflowJob.ID))
 
 	logger.DebugContext(serviceCtx, "queued job found", "queuedJob", queuedJob)
 
@@ -604,13 +603,13 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 	serviceCtx = logging.AppendCtx(serviceCtx, slog.String("ankaTemplateTag", ankaTemplateTag))
 
 	workflowJob := WorkflowRunJobDetail{
-		JobID:           queuedJob.WorkflowJob.ID,
-		JobName:         queuedJob.WorkflowJob.Name,
-		JobURL:          queuedJob.WorkflowJob.HTMLURL,
-		WorkflowName:    queuedJob.WorkflowJob.WorkflowName,
+		JobID:           *queuedJob.WorkflowJob.ID,
+		JobName:         *queuedJob.WorkflowJob.Name,
+		JobURL:          *queuedJob.WorkflowJob.HTMLURL,
+		WorkflowName:    *queuedJob.WorkflowJob.WorkflowName,
 		AnkaTemplate:    ankaTemplate,
 		AnkaTemplateTag: ankaTemplateTag,
-		RunID:           queuedJob.WorkflowJob.RunID,
+		RunID:           *queuedJob.WorkflowJob.RunID,
 		UniqueID:        uniqueID,
 		Labels:          queuedJob.WorkflowJob.Labels,
 	}

@@ -145,7 +145,7 @@ func main() {
 
 	githubServiceExists := false
 	for _, service := range loadedConfig.Services {
-		if service.Plugin == "github" {
+		if service.Plugin == "github" || service.Plugin == "github_controller" {
 			githubServiceExists = true
 		}
 	}
