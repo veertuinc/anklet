@@ -46,6 +46,7 @@ func exists_in_array_exact(array_to_search_in []string, desired []string) bool {
 	return true
 }
 
+// make sure there are no duplicates in a specific queue
 func EnsureNoDuplicates(serviceCtx context.Context, logger *slog.Logger, jobID int64, queue string) error {
 	databaseContainer, err := database.GetDatabaseFromContext(serviceCtx)
 	if err != nil {

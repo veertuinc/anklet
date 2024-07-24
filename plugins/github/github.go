@@ -250,14 +250,7 @@ func CheckForCompletedJobs(
 					}
 					return
 				} else {
-					// get count of completed jobs in the queue
-					count, err = databaseContainer.Client.LLen(serviceCtx, "anklet/jobs/github/completed").Result()
-					if err != nil {
-						logger.ErrorContext(serviceCtx, "error getting count of objects in anklet/jobs/github/completed", "err", err)
-						return
-					}
-					// logger.InfoContext(serviceCtx, "count of objects in anklet/jobs/github/completed", "count", count)
-					completedJobs, err := databaseContainer.Client.LRange(serviceCtx, "anklet/jobs/github/completed", 0, count-1).Result()
+					completedJobs, err := databaseContainer.Client.LRange(serviceCtx, "anklet/jobs/github/completed", 0, -1).Result()
 					if err != nil {
 						logger.ErrorContext(serviceCtx, "error getting list of completed jobs", "err", err)
 						return
