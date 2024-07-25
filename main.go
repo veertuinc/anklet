@@ -252,6 +252,10 @@ func worker(parentCtx context.Context, logger *slog.Logger, loadedConfig config.
 			}(metricsURL)
 		}
 	} else {
+		// firstServiceStarted: always make sure the first service in the config starts first before any others.
+		// this allows users to mix a controller with multiple other plugins,
+		// and let the controller do its thing to prepare the db first.
+		firstServiceStarted := make(chan bool, 1)
 		metricsData := &metrics.MetricsDataLock{}
 		workerCtx = context.WithValue(workerCtx, config.ContextKey("metrics"), metricsData)
 		go metricsService.Start(workerCtx, logger)
@@ -259,26 +263,11 @@ func worker(parentCtx context.Context, logger *slog.Logger, loadedConfig config.
 		metrics.UpdateSystemMetrics(workerCtx, logger, metricsData)
 		/////////////
 		// Services
-		firstServiceStarted := make(chan bool, 1)
 		for _, service := range loadedConfig.Services {
 			wg.Add(1)
 			go func(service config.Service) {
 				defer wg.Done()
 				serviceCtx, serviceCancel := context.WithCancel(workerCtx) // Inherit from parent context
-				// sigChan := make(chan os.Signal, 1)
-				// signal.Notify(sigChan, syscall.SIGTERM, syscall.SIGQUIT)
-				// go func() {
-				// 	defer signal.Stop(sigChan)
-				// 	defer close(sigChan)
-				// 	for sig := range sigChan {
-				// 		switch sig {
-				// 		case syscall.SIGTERM:
-				// 			serviceCancel()
-				// 		case syscall.SIGQUIT:
-				// 			runOnce = "true"
-				// 		}
-				// 	}
-				// }()
 
 				if service.Name == "" {
 					panic("name is required for services")

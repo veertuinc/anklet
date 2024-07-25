@@ -176,10 +176,12 @@ func CheckForCompletedJobs(
 	workerCtx context.Context,
 	serviceCtx context.Context,
 	logger *slog.Logger,
+	mu *sync.Mutex,
 	completedJobChannel chan bool,
 	serviceDatabaseKeyName string,
 	ranOnce chan struct{},
 ) {
+	defer mu.Unlock()
 	fmt.Println("CheckForCompletedJobs")
 	databaseContainer, err := dbFunctions.GetDatabaseFromContext(serviceCtx)
 	if err != nil {
@@ -197,6 +199,7 @@ func CheckForCompletedJobs(
 		}
 	}()
 	for {
+		mu.Lock()
 		// do not use 'continue' in the loop or else the ranOnce won't happen
 		fmt.Println("CheckForCompletedJobs default")
 		select {
@@ -210,7 +213,6 @@ func CheckForCompletedJobs(
 		}
 		// get the job ID
 		var existingJob github.WorkflowJobEvent
-		var existingJobID int64
 		existingJobString, err := databaseContainer.Client.LIndex(serviceCtx, serviceDatabaseKeyName, -1).Result()
 		if err != redis.Nil { // handle no job for service
 			if err == nil {
@@ -229,7 +231,6 @@ func CheckForCompletedJobs(
 					logger.ErrorContext(serviceCtx, "error unmarshalling payload to github.WorkflowJobEvent", "err", err)
 					return
 				}
-				existingJobID = *existingJob.WorkflowJob.ID
 				// check if there is already a completed job queued for the server
 				// // this can happen if the service crashes or is stopped before it finalizes cleanup
 				count, err := databaseContainer.Client.LLen(serviceCtx, serviceDatabaseKeyName+"/completed").Result()
@@ -257,12 +258,30 @@ func CheckForCompletedJobs(
 					}
 					for _, completedJob := range completedJobs {
 						var completedJobWebhook github.WorkflowJobEvent
-						err := json.Unmarshal([]byte(completedJob), &completedJobWebhook)
+						var completedPayload map[string]interface{}
+						if err := json.Unmarshal([]byte(completedJob), &completedPayload); err != nil {
+							logger.ErrorContext(serviceCtx, "error unmarshalling job", "err", err)
+							return
+						}
+						completedPayloadBytes, err := json.Marshal(completedPayload["payload"])
+						if err != nil {
+							logger.ErrorContext(serviceCtx, "error marshalling payload", "err", err)
+							return
+						}
+						err = json.Unmarshal(completedPayloadBytes, &completedJobWebhook)
+						if err != nil {
+							logger.ErrorContext(serviceCtx, "error unmarshalling payload to github.WorkflowJobEvent", "err", err)
+							return
+						}
+						err = json.Unmarshal([]byte(completedJob), &completedJobWebhook)
 						if err != nil {
 							logger.ErrorContext(serviceCtx, "error unmarshalling completed job", "err", err)
 							return
 						}
-						if *completedJobWebhook.WorkflowJob.ID == existingJobID {
+						fmt.Println("completedJobWebhook.WorkflowJob.ID", *completedJobWebhook.WorkflowJob.ID)
+						fmt.Println("existingJob.WorkflowJob.ID", *existingJob.WorkflowJob.ID)
+						if *completedJobWebhook.WorkflowJob.ID == *existingJob.WorkflowJob.ID {
+							fmt.Println("INSIDE!!!")
 							// remove the completed job we found
 							_, err = databaseContainer.Client.LRem(serviceCtx, "anklet/jobs/github/completed", 1, completedJob).Result()
 							if err != nil {
@@ -281,7 +300,10 @@ func CheckForCompletedJobs(
 								logger.ErrorContext(serviceCtx, "error inserting completed job into list", "err", err)
 								return
 							}
+							fmt.Println("PUSHING TO CHANNEL")
 							completedJobChannel <- true
+							fmt.Println("PUSHED TO CHANNEL")
+							return
 						}
 					}
 				}
@@ -294,6 +316,7 @@ func CheckForCompletedJobs(
 		default:
 			close(ranOnce)
 		}
+		mu.Unlock()
 		time.Sleep(3 * time.Second)
 	}
 }
@@ -378,7 +401,6 @@ func cleanup(workerCtx context.Context, serviceCtx context.Context, logger *slog
 			ankaCLI := anka.GetAnkaCLIFromContext(serviceCtx)
 			ankaCLI.AnkaDelete(workerCtx, serviceCtx, &vm)
 		case "WorkflowJobPayload":
-
 			var hook github.WorkflowJobEvent
 			err = json.Unmarshal(payloadBytes, &hook)
 			if err != nil {
@@ -397,6 +419,7 @@ func cleanup(workerCtx context.Context, serviceCtx context.Context, logger *slog
 			default:
 			}
 			logger.InfoContext(serviceCtx, "finalized cleaning of workflow job", "workflowJobID", hook.WorkflowJob.ID)
+			databaseContainer.Client.Del(cleanupContext, serviceDatabaseKeyName+"/completed")
 		default:
 			logger.ErrorContext(serviceCtx, "unknown job type", "job", typedJob)
 			return
@@ -450,7 +473,10 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 	serviceCtx = logging.AppendCtx(serviceCtx, slog.String("owner", service.Owner))
 	serviceDatabaseKeyName := "anklet/jobs/github/service/" + service.Name
 	repositoryURL := fmt.Sprintf("https://github.com/%s/%s", service.Owner, service.Repo)
-	completedJobChannel := make(chan bool)
+
+	mu := &sync.Mutex{}
+
+	completedJobChannel := make(chan bool, 1)
 	returnToQueue := make(chan bool, 1) // if any errors, we need to return the task to the queue instead of deleting it
 	// wait group so we can wait for the goroutine to finish before exiting the service
 	var wg sync.WaitGroup
@@ -476,7 +502,7 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 	ranOnce := make(chan struct{})
 	go func() {
 		fmt.Println("CheckForCompletedJobs goroutine")
-		CheckForCompletedJobs(workerCtx, serviceCtx, logger, completedJobChannel, serviceDatabaseKeyName, ranOnce)
+		CheckForCompletedJobs(workerCtx, serviceCtx, logger, mu, completedJobChannel, serviceDatabaseKeyName, ranOnce)
 		wg.Done()
 		fmt.Println("CheckForCompletedJobs goroutine done")
 	}()
@@ -563,8 +589,28 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 	}
 	serviceCtx = logging.AppendCtx(serviceCtx, slog.Int64("workflowJobID", *queuedJob.WorkflowJob.ID))
 
-	logger.DebugContext(serviceCtx, "queued job found", "queuedJob", queuedJob)
+	logger.DebugContext(serviceCtx, "queued job found", "queuedJob", queuedJob.Action)
 
+	// check if the job is already completed, so we don't orphan if there is
+	// a job in anklet/jobs/github/queued and also a anklet/jobs/github/completed
+	fmt.Println("CHECKING FOR COMPLETED JOBS")
+	CheckForCompletedJobs(workerCtx, serviceCtx, logger, mu, completedJobChannel, serviceDatabaseKeyName, ranOnce)
+	select {
+	case <-completedJobChannel:
+		logger.InfoContext(serviceCtx, "completed job found")
+		return
+	case <-serviceCtx.Done():
+		logger.WarnContext(serviceCtx, "context canceled before completed job found")
+		select {
+		case returnToQueue <- true:
+		default:
+			logger.WarnContext(serviceCtx, "unable to return task to queue")
+		}
+		return
+	}
+
+	fmt.Println("END")
+	panic("here")
 	// get the unique unique-id for this job
 	// this ensures that multiple jobs in the same workflow run don't compete for the same runner
 	uniqueID := extractLabelValue(queuedJob.WorkflowJob.Labels, "unique-id:")
@@ -607,8 +653,6 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 		Labels:          queuedJob.WorkflowJob.Labels,
 	}
 
-	fmt.Println("NEW =====================================================")
-
 	// get anka CLI
 	ankaCLI := anka.GetAnkaCLIFromContext(serviceCtx)
 
@@ -621,12 +665,7 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 	//TODO: be able to interrupt this
 	templateTagExistsError := ankaCLI.EnsureVMTemplateExists(workerCtx, serviceCtx, workflowJob.AnkaTemplate, workflowJob.AnkaTemplateTag)
 	if templateTagExistsError != nil {
-		logger.WarnContext(serviceCtx, "error ensuring vm template exists", "err", templateTagExistsError)
-		select {
-		case returnToQueue <- true:
-		default:
-			logger.WarnContext(serviceCtx, "unable to return task to queue")
-		}
+		logger.WarnContext(serviceCtx, "error ensuring vm template exists on host", "err", templateTagExistsError)
 		return
 	}
 	if serviceCtx.Err() != nil {
