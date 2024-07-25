@@ -180,8 +180,8 @@ func CheckForCompletedJobs(
 	completedJobChannel chan bool,
 	serviceDatabaseKeyName string,
 	ranOnce chan struct{},
+	runOnce bool,
 ) {
-	defer mu.Unlock()
 	fmt.Println("CheckForCompletedJobs")
 	databaseContainer, err := dbFunctions.GetDatabaseFromContext(serviceCtx)
 	if err != nil {
@@ -189,7 +189,10 @@ func CheckForCompletedJobs(
 		logging.Panic(workerCtx, serviceCtx, "error getting database from context")
 	}
 	defer func() {
-		fmt.Println("CheckForCompletedJobs defer")
+		fmt.Println("CheckForCompletedJobs defer: " + fmt.Sprint(runOnce))
+		if mu != nil {
+			mu.Unlock()
+		}
 		// ensure, outside of needing to return on error, that the following always runs
 		select {
 		case <-ranOnce:
@@ -201,7 +204,7 @@ func CheckForCompletedJobs(
 	for {
 		mu.Lock()
 		// do not use 'continue' in the loop or else the ranOnce won't happen
-		fmt.Println("CheckForCompletedJobs default")
+		fmt.Println("CheckForCompletedJobs default: " + fmt.Sprint(runOnce))
 		select {
 		case <-completedJobChannel:
 			fmt.Println("CheckForCompletedJobs completedJobChannel at top")
@@ -300,9 +303,7 @@ func CheckForCompletedJobs(
 								logger.ErrorContext(serviceCtx, "error inserting completed job into list", "err", err)
 								return
 							}
-							fmt.Println("PUSHING TO CHANNEL")
 							completedJobChannel <- true
-							fmt.Println("PUSHED TO CHANNEL")
 							return
 						}
 					}
@@ -315,6 +316,10 @@ func CheckForCompletedJobs(
 			// already closed, do nothing
 		default:
 			close(ranOnce)
+		}
+		fmt.Println("CheckForCompletedJobs runOnce: " + fmt.Sprint(runOnce))
+		if runOnce {
+			return
 		}
 		mu.Unlock()
 		time.Sleep(3 * time.Second)
@@ -502,7 +507,7 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 	ranOnce := make(chan struct{})
 	go func() {
 		fmt.Println("CheckForCompletedJobs goroutine")
-		CheckForCompletedJobs(workerCtx, serviceCtx, logger, mu, completedJobChannel, serviceDatabaseKeyName, ranOnce)
+		CheckForCompletedJobs(workerCtx, serviceCtx, logger, mu, completedJobChannel, serviceDatabaseKeyName, ranOnce, false)
 		wg.Done()
 		fmt.Println("CheckForCompletedJobs goroutine done")
 	}()
@@ -593,8 +598,7 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 
 	// check if the job is already completed, so we don't orphan if there is
 	// a job in anklet/jobs/github/queued and also a anklet/jobs/github/completed
-	fmt.Println("CHECKING FOR COMPLETED JOBS")
-	CheckForCompletedJobs(workerCtx, serviceCtx, logger, mu, completedJobChannel, serviceDatabaseKeyName, ranOnce)
+	CheckForCompletedJobs(workerCtx, serviceCtx, logger, mu, completedJobChannel, serviceDatabaseKeyName, ranOnce, true)
 	select {
 	case <-completedJobChannel:
 		logger.InfoContext(serviceCtx, "completed job found")
@@ -607,10 +611,9 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 			logger.WarnContext(serviceCtx, "unable to return task to queue")
 		}
 		return
+	default:
 	}
 
-	fmt.Println("END")
-	panic("here")
 	// get the unique unique-id for this job
 	// this ensures that multiple jobs in the same workflow run don't compete for the same runner
 	uniqueID := extractLabelValue(queuedJob.WorkflowJob.Labels, "unique-id:")
