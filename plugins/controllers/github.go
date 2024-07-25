@@ -59,20 +59,9 @@ func EnsureNoDuplicates(serviceCtx context.Context, logger *slog.Logger, jobID i
 		return err
 	}
 	for _, queueItem := range queued {
-		var workflowJobEvent github.WorkflowJobEvent
-		var payload map[string]interface{}
-		if err := json.Unmarshal([]byte(queueItem), &payload); err != nil {
+		workflowJobEvent, err := database.UnwrapPayload[github.WorkflowJobEvent](queueItem)
+		if err != nil {
 			logger.ErrorContext(serviceCtx, "error unmarshalling job", "err", err)
-			return err
-		}
-		payloadBytes, err := json.Marshal(payload["payload"])
-		if err != nil {
-			logger.ErrorContext(serviceCtx, "error marshalling payload", "err", err)
-			return err
-		}
-		err = json.Unmarshal(payloadBytes, &workflowJobEvent)
-		if err != nil {
-			logger.ErrorContext(serviceCtx, "error unmarshalling payload to github.WorkflowJobEvent", "err", err)
 			return err
 		}
 		if *workflowJobEvent.WorkflowJob.ID == jobID {
@@ -241,27 +230,12 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 	if len(queuedJobs) > 0 {
 		logger.InfoContext(serviceCtx, "searching for redeliveries")
 		// get the started date of the eldest item in the list of queued jobs
-		var firstQueuedJobEvent github.WorkflowJobEvent
-		var payload map[string]interface{}
-		if err := json.Unmarshal([]byte(queuedJobs[0]), &payload); err != nil {
+		firstQueuedJobEvent, err := database.UnwrapPayload[github.WorkflowJobEvent](queuedJobs[0])
+		if err != nil {
 			logger.ErrorContext(serviceCtx, "error unmarshalling job", "err", err)
 			return
 		}
-		payloadBytes, err := json.Marshal(payload["payload"])
-		if err != nil {
-			logger.ErrorContext(serviceCtx, "error marshalling payload", "err", err)
-			return
-		}
-		err = json.Unmarshal(payloadBytes, &firstQueuedJobEvent)
-		if err != nil {
-			logger.ErrorContext(serviceCtx, "error unmarshalling payload to github.WorkflowJobEvent", "err", err)
-			return
-		}
-		if err := json.Unmarshal([]byte(queuedJobs[0]), &firstQueuedJobEvent); err != nil {
-			logger.ErrorContext(serviceCtx, "error unmarshalling first queued job", "err", err)
-		} else {
-			firstQueuedJobStartedAtDate = firstQueuedJobEvent.WorkflowJob.StartedAt.Time
-		}
+		firstQueuedJobStartedAtDate = firstQueuedJobEvent.WorkflowJob.StartedAt.Time
 		var allHooks []github.HookDelivery
 		opts := &github.ListCursorOptions{PerPage: 10}
 		for {
@@ -287,23 +261,8 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 			opts.Cursor = response.Cursor
 		}
 		for _, queuedJob := range queuedJobs {
-			var wrappedPayload github.WorkflowJobEvent
-			var payload map[string]interface{}
-			if err := json.Unmarshal([]byte(queuedJob), &payload); err != nil {
-				logger.ErrorContext(serviceCtx, "error unmarshalling job", "err", err)
-				return
-			}
-			payloadBytes, err := json.Marshal(payload["payload"])
+			wrappedPayload, err := database.UnwrapPayload[github.WorkflowJobEvent](queuedJob)
 			if err != nil {
-				logger.ErrorContext(serviceCtx, "error marshalling payload", "err", err)
-				return
-			}
-			err = json.Unmarshal(payloadBytes, &wrappedPayload)
-			if err != nil {
-				logger.ErrorContext(serviceCtx, "error unmarshalling payload to github.WorkflowJobEvent", "err", err)
-				return
-			}
-			if err := json.Unmarshal([]byte(queuedJob), &wrappedPayload); err != nil {
 				logger.ErrorContext(serviceCtx, "error unmarshalling job", "err", err)
 				return
 			}

@@ -2,6 +2,7 @@ package database
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -111,4 +112,21 @@ func AddUniqueRunKey(ctx context.Context) (bool, error) {
 		return true, nil
 	}
 	return true, errors.New("unique run key already exists")
+}
+
+func UnwrapPayload[T any](payload string) (T, error) {
+	var wrappedPayload map[string]interface{}
+	var t T
+	err := json.Unmarshal([]byte(payload), &wrappedPayload)
+	if err != nil {
+		return t, err
+	}
+	payloadBytes, err := json.Marshal(wrappedPayload["payload"])
+	if err != nil {
+		return t, err
+	}
+	if err := json.Unmarshal(payloadBytes, &t); err != nil {
+		return t, err
+	}
+	return t, nil
 }

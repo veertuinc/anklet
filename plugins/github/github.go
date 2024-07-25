@@ -16,6 +16,7 @@ import (
 	"github.com/redis/go-redis/v9"
 	"github.com/veertuinc/anklet/internal/anka"
 	"github.com/veertuinc/anklet/internal/config"
+	"github.com/veertuinc/anklet/internal/database"
 	dbFunctions "github.com/veertuinc/anklet/internal/database"
 	internalGithub "github.com/veertuinc/anklet/internal/github"
 	"github.com/veertuinc/anklet/internal/logging"
@@ -215,23 +216,12 @@ func CheckForCompletedJobs(
 		default:
 		}
 		// get the job ID
-		var existingJob github.WorkflowJobEvent
 		existingJobString, err := databaseContainer.Client.LIndex(serviceCtx, serviceDatabaseKeyName, -1).Result()
 		if err != redis.Nil { // handle no job for service
 			if err == nil {
-				var payload map[string]interface{}
-				if err := json.Unmarshal([]byte(existingJobString), &payload); err != nil {
+				existingJob, err := database.UnwrapPayload[github.WorkflowJobEvent](existingJobString)
+				if err != nil {
 					logger.ErrorContext(serviceCtx, "error unmarshalling job", "err", err)
-					return
-				}
-				payloadBytes, err := json.Marshal(payload["payload"])
-				if err != nil {
-					logger.ErrorContext(serviceCtx, "error marshalling payload", "err", err)
-					return
-				}
-				err = json.Unmarshal(payloadBytes, &existingJob)
-				if err != nil {
-					logger.ErrorContext(serviceCtx, "error unmarshalling payload to github.WorkflowJobEvent", "err", err)
 					return
 				}
 				// check if there is already a completed job queued for the server
@@ -260,31 +250,12 @@ func CheckForCompletedJobs(
 						return
 					}
 					for _, completedJob := range completedJobs {
-						var completedJobWebhook github.WorkflowJobEvent
-						var completedPayload map[string]interface{}
-						if err := json.Unmarshal([]byte(completedJob), &completedPayload); err != nil {
+						completedJobWebhook, err := database.UnwrapPayload[github.WorkflowJobEvent](completedJob)
+						if err != nil {
 							logger.ErrorContext(serviceCtx, "error unmarshalling job", "err", err)
 							return
 						}
-						completedPayloadBytes, err := json.Marshal(completedPayload["payload"])
-						if err != nil {
-							logger.ErrorContext(serviceCtx, "error marshalling payload", "err", err)
-							return
-						}
-						err = json.Unmarshal(completedPayloadBytes, &completedJobWebhook)
-						if err != nil {
-							logger.ErrorContext(serviceCtx, "error unmarshalling payload to github.WorkflowJobEvent", "err", err)
-							return
-						}
-						err = json.Unmarshal([]byte(completedJob), &completedJobWebhook)
-						if err != nil {
-							logger.ErrorContext(serviceCtx, "error unmarshalling completed job", "err", err)
-							return
-						}
-						fmt.Println("completedJobWebhook.WorkflowJob.ID", *completedJobWebhook.WorkflowJob.ID)
-						fmt.Println("existingJob.WorkflowJob.ID", *existingJob.WorkflowJob.ID)
 						if *completedJobWebhook.WorkflowJob.ID == *existingJob.WorkflowJob.ID {
-							fmt.Println("INSIDE!!!")
 							// remove the completed job we found
 							_, err = databaseContainer.Client.LRem(serviceCtx, "anklet/jobs/github/completed", 1, completedJob).Result()
 							if err != nil {
@@ -516,8 +487,6 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 	default:
 	}
 
-	var queuedJob github.WorkflowJobEvent
-	var wrappedPayload map[string]interface{}
 	var wrappedPayloadJSON string
 	// allow picking up where we left off
 	wrappedPayloadJSON, err = databaseContainer.Client.LIndex(serviceCtx, serviceDatabaseKeyName, -1).Result()
@@ -539,17 +508,9 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 		wrappedPayloadJSON = eldestQueuedJob
 	}
 
-	if err := json.Unmarshal([]byte(wrappedPayloadJSON), &wrappedPayload); err != nil {
-		logger.ErrorContext(serviceCtx, "error unmarshalling job", "err", err)
-		return
-	}
-	payloadBytes, err := json.Marshal(wrappedPayload["payload"])
+	queuedJob, err := database.UnwrapPayload[github.WorkflowJobEvent](wrappedPayloadJSON)
 	if err != nil {
-		logger.ErrorContext(serviceCtx, "error marshalling payload", "err", err)
-		return
-	}
-	if err := json.Unmarshal(payloadBytes, &queuedJob); err != nil {
-		logger.ErrorContext(serviceCtx, "error unmarshalling payload to webhook.WorkflowJobPayload", "err", err)
+		logger.ErrorContext(serviceCtx, "error unmarshalling job", "err", err)
 		return
 	}
 	serviceCtx = logging.AppendCtx(serviceCtx, slog.Int64("workflowJobID", *queuedJob.WorkflowJob.ID))
