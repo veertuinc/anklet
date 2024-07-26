@@ -336,6 +336,9 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 					doneWithHooks = true
 					break
 				}
+				if !exists_in_array_exact(workflowJobEvent.WorkflowJob.Labels, []string{"self-hosted", "anka"}) {
+					continue
+				}
 				allHooks = append(allHooks, map[string]interface{}{
 					"hookDelivery":     gottenHookDelivery,
 					"workflowJobEvent": workflowJobEvent,
@@ -354,7 +357,7 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 		logger.ErrorContext(serviceCtx, "error getting list of keys", "err", err)
 		return
 	}
-	var allQueuedJobs map[string][]string
+	var allQueuedJobs = make(map[string][]string)
 	for _, key := range queuedKeys {
 		queuedJobs, err := databaseContainer.Client.LRange(serviceCtx, key, 0, -1).Result()
 		if err != nil {
@@ -368,7 +371,7 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 		logger.ErrorContext(serviceCtx, "error getting list of keys", "err", err)
 		return
 	}
-	var allCompletedJobs map[string][]string
+	var allCompletedJobs = make(map[string][]string)
 	for _, key := range completedKeys {
 		completedJobs, err := databaseContainer.Client.LRange(serviceCtx, key, 0, -1).Result()
 		if err != nil {
@@ -380,7 +383,7 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 
 	if len(allHooks) > 0 {
 		for _, hookWrapper := range allHooks {
-			hookDelivery := hookWrapper["hookDelivery"].(github.HookDelivery)
+			hookDelivery := hookWrapper["hookDelivery"].(*github.HookDelivery)
 			workflowJobEvent := hookWrapper["workflowJobEvent"].(github.WorkflowJobEvent)
 
 			inQueued := false
@@ -391,23 +394,21 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 			inCompletedIndex := 0
 
 			// Queued deliveries
-			if *hookDelivery.Action == "queued" {
-				for _, queuedJobs := range allQueuedJobs {
-					for _, queuedJob := range queuedJobs {
-						wrappedPayload, err := database.UnwrapPayload[github.WorkflowJobEvent](queuedJob)
-						if err != nil {
-							logger.ErrorContext(serviceCtx, "error unmarshalling job", "err", err)
-							return
-						}
-						if *wrappedPayload.WorkflowJob.ID == *workflowJobEvent.WorkflowJob.ID {
-							inQueued = true
-							// inQueuedListKey = key
-							// inQueuedListIndex = index
-							break
-						}
+			// // always get queued jobs so that completed cleanup (when there is no queued but there is a completed) works
+			for _, queuedJobs := range allQueuedJobs {
+				for _, queuedJob := range queuedJobs {
+					wrappedPayload, err := database.UnwrapPayload[github.WorkflowJobEvent](queuedJob)
+					if err != nil {
+						logger.ErrorContext(serviceCtx, "error unmarshalling job", "err", err)
+						return
+					}
+					if *wrappedPayload.WorkflowJob.ID == *workflowJobEvent.WorkflowJob.ID {
+						inQueued = true
+						// inQueuedListKey = key
+						// inQueuedListIndex = index
+						break
 					}
 				}
-
 			}
 
 			// Completed deliveries
@@ -449,6 +450,13 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 				continue
 			}
 
+			fmt.Println("here4")
+			hookDeliveryJSON, _ := json.MarshalIndent(hookDelivery, "", "  ")
+			fmt.Println(string(hookDeliveryJSON))
+			workflowJobEventJSON, _ := json.MarshalIndent(workflowJobEvent, "", "  ")
+			fmt.Println(string(workflowJobEventJSON))
+
+			panic("here")
 			// Redeliver the hook
 			serviceCtx, redelivery, _, _ := ExecuteGitHubClientFunction(serviceCtx, logger, func() (*github.HookDelivery, *github.Response, error) {
 				redelivery, response, err := githubClient.Repositories.RedeliverHookDelivery(serviceCtx, service.Owner, service.Repo, service.HookID, *hookDelivery.ID)
