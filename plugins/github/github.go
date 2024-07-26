@@ -179,7 +179,6 @@ func CheckForCompletedJobs(
 	logger *slog.Logger,
 	mu *sync.Mutex,
 	completedJobChannel chan bool,
-	serviceDatabaseKeyName string,
 	ranOnce chan struct{},
 	runOnce bool,
 ) {
@@ -215,20 +214,23 @@ func CheckForCompletedJobs(
 			return
 		default:
 		}
+		service := config.GetServiceFromContext(serviceCtx)
 		// get the job ID
-		existingJobString, err := databaseContainer.Client.LIndex(serviceCtx, serviceDatabaseKeyName, -1).Result()
-		if err != redis.Nil { // handle no job for service
+		existingJobString, err := databaseContainer.Client.LIndex(serviceCtx, "anklet/jobs/github/queued/"+service.Name, -1).Result()
+		if err == redis.Nil { // handle no job for service; needed so the github plugin resets and looks for new jobs again
+			return
+		} else {
 			if err == nil {
 				existingJob, err := database.UnwrapPayload[github.WorkflowJobEvent](existingJobString)
 				if err != nil {
 					logger.ErrorContext(serviceCtx, "error unmarshalling job", "err", err)
 					return
 				}
-				// check if there is already a completed job queued for the server
+				// check if there is already a completed job queued for the service
 				// // this can happen if the service crashes or is stopped before it finalizes cleanup
-				count, err := databaseContainer.Client.LLen(serviceCtx, serviceDatabaseKeyName+"/completed").Result()
+				count, err := databaseContainer.Client.LLen(serviceCtx, "anklet/jobs/github/completed/"+service.Name).Result()
 				if err != nil {
-					logger.ErrorContext(serviceCtx, "error getting count of objects in "+serviceDatabaseKeyName+"/completed", "err", err)
+					logger.ErrorContext(serviceCtx, "error getting count of objects in anklet/jobs/github/completed/"+service.Name, "err", err)
 					return
 				}
 				if count > 0 {
@@ -236,9 +238,9 @@ func CheckForCompletedJobs(
 					case completedJobChannel <- true:
 					default:
 						// remove the completed job we found
-						_, err = databaseContainer.Client.Del(serviceCtx, serviceDatabaseKeyName+"/completed").Result()
+						_, err = databaseContainer.Client.Del(serviceCtx, "anklet/jobs/github/completed/"+service.Name).Result()
 						if err != nil {
-							logger.ErrorContext(serviceCtx, "error removing completedJob from "+serviceDatabaseKeyName+"/completed", "err", err)
+							logger.ErrorContext(serviceCtx, "error removing completedJob from anklet/jobs/github/completed/"+service.Name, "err", err)
 							return
 						}
 					}
@@ -259,17 +261,17 @@ func CheckForCompletedJobs(
 							// remove the completed job we found
 							_, err = databaseContainer.Client.LRem(serviceCtx, "anklet/jobs/github/completed", 1, completedJob).Result()
 							if err != nil {
-								logger.ErrorContext(serviceCtx, "error removing completedJob from anklet/jobs/github/completed", "err", err)
+								logger.ErrorContext(serviceCtx, "error removing completedJob from anklet/jobs/github/completed", "err", err, "completedJob", completedJobWebhook)
 								return
 							}
 							// delete the existing service task
-							// _, err = databaseContainer.Client.Del(serviceCtx, serviceDatabaseKeyName).Result()
+							// _, err = databaseContainer.Client.Del(serviceCtx, serviceQueueDatabaseKeyName).Result()
 							// if err != nil {
-							// 	logger.ErrorContext(serviceCtx, "error deleting all objects from "+serviceDatabaseKeyName, "err", err)
+							// 	logger.ErrorContext(serviceCtx, "error deleting all objects from "+serviceQueueDatabaseKeyName, "err", err)
 							// 	return
 							// }
 							// add a task for the completed job so we know the clean up
-							_, err = databaseContainer.Client.LPush(serviceCtx, serviceDatabaseKeyName+"/completed", completedJob).Result()
+							_, err = databaseContainer.Client.LPush(serviceCtx, "anklet/jobs/github/completed/"+service.Name, completedJob).Result()
 							if err != nil {
 								logger.ErrorContext(serviceCtx, "error inserting completed job into list", "err", err)
 								return
@@ -299,10 +301,11 @@ func CheckForCompletedJobs(
 
 // cleanup will pop off the last item from the list and, based on its type, perform the appropriate cleanup action
 // this assumes the plugin code created a list item to represent the thing to clean up
-func cleanup(workerCtx context.Context, serviceCtx context.Context, logger *slog.Logger, serviceDatabaseKeyName string) {
+func cleanup(workerCtx context.Context, serviceCtx context.Context, logger *slog.Logger, completedJobChannel chan bool) {
 	logger.InfoContext(serviceCtx, "cleaning up")
 	// create an idependent copy of the serviceCtx so we can do cleanup even if serviceCtx got "context canceled"
 	cleanupContext := context.Background()
+	service := config.GetServiceFromContext(serviceCtx)
 	serviceDatabase, err := dbFunctions.GetDatabaseFromContext(serviceCtx)
 	if err != nil {
 		logger.ErrorContext(serviceCtx, "error getting database from context", "err", err)
@@ -311,6 +314,7 @@ func cleanup(workerCtx context.Context, serviceCtx context.Context, logger *slog
 	cleanupContext = context.WithValue(cleanupContext, config.ContextKey("database"), serviceDatabase)
 	cleanupContext, cancel := context.WithCancel(cleanupContext)
 	defer cancel()
+	cleanCompleted := false
 	databaseContainer, err := dbFunctions.GetDatabaseFromContext(cleanupContext)
 	if err != nil {
 		logger.ErrorContext(serviceCtx, "error getting database from context", "err", err)
@@ -318,20 +322,20 @@ func cleanup(workerCtx context.Context, serviceCtx context.Context, logger *slog
 	}
 	for {
 		var jobJSON string
-		exists, err := databaseContainer.Client.Exists(cleanupContext, serviceDatabaseKeyName+"/cleaning").Result()
+		exists, err := databaseContainer.Client.Exists(cleanupContext, "anklet/jobs/github/queued/"+service.Name+"/cleaning").Result()
 		if err != nil {
 			logger.ErrorContext(cleanupContext, "error checking if cleaning up already in progress", "err", err)
 		}
 		if exists == 1 {
 			logger.InfoContext(serviceCtx, "cleaning up already in progress; getting job")
-			jobJSON, err = databaseContainer.Client.LIndex(cleanupContext, serviceDatabaseKeyName+"/cleaning", 0).Result()
+			jobJSON, err = databaseContainer.Client.LIndex(cleanupContext, "anklet/jobs/github/queued/"+service.Name+"/cleaning", 0).Result()
 			if err != nil {
 				logger.ErrorContext(serviceCtx, "error getting job from the list", "err", err)
 				return
 			}
 		} else {
 			// pop the job from the list and push it to the cleaning list
-			jobJSON, err = databaseContainer.Client.RPopLPush(cleanupContext, serviceDatabaseKeyName, serviceDatabaseKeyName+"/cleaning").Result()
+			jobJSON, err = databaseContainer.Client.RPopLPush(cleanupContext, "anklet/jobs/github/queued/"+service.Name, "anklet/jobs/github/queued/"+service.Name+"/cleaning").Result()
 			if err == redis.Nil {
 				break
 			} else if err != nil {
@@ -371,33 +375,40 @@ func cleanup(workerCtx context.Context, serviceCtx context.Context, logger *slog
 			}
 			ankaCLI := anka.GetAnkaCLIFromContext(serviceCtx)
 			ankaCLI.AnkaDelete(workerCtx, serviceCtx, &vm)
-		case "WorkflowJobPayload":
-			var hook github.WorkflowJobEvent
-			err = json.Unmarshal(payloadBytes, &hook)
+		case "WorkflowJobPayload": // MUST COME LAST
+			var workflowJobEvent github.WorkflowJobEvent
+			err = json.Unmarshal(payloadBytes, &workflowJobEvent)
 			if err != nil {
 				logger.ErrorContext(serviceCtx, "error unmarshalling payload to webhook.WorkflowJobPayload", "err", err)
 				return
 			}
-			// return it to the queue
+			// return it to the queue if the job isn't completed yet
 			// if we don't, we could suffer from a situation where a completed job comes in and is orphaned
-			_, err := databaseContainer.Client.RPopLPush(cleanupContext, serviceDatabaseKeyName+"/cleaning", "anklet/jobs/github/queued").Result()
-			if err != nil {
-				logger.ErrorContext(serviceCtx, "error pushing job to queued", "err", err)
-				return
+			select {
+			case <-completedJobChannel:
+			default:
+				_, err := databaseContainer.Client.RPopLPush(cleanupContext, "anklet/jobs/github/queued/"+service.Name+"/cleaning", "anklet/jobs/github/queued/").Result()
+				if err != nil {
+					logger.ErrorContext(serviceCtx, "error pushing job back to queued", "err", err)
+					return
+				}
 			}
-			logger.InfoContext(serviceCtx, "finalized cleaning of workflow job", "workflowJobID", hook.WorkflowJob.ID)
-			databaseContainer.Client.Del(cleanupContext, serviceDatabaseKeyName+"/completed")
+			logger.InfoContext(serviceCtx, "finalized cleaning of workflow job", "workflowJobID", workflowJobEvent.WorkflowJob.ID)
+			databaseContainer.Client.Del(cleanupContext, "anklet/jobs/github/queued/"+service.Name+"/cleaning")
+			cleanCompleted = true
 		default:
 			logger.ErrorContext(serviceCtx, "unknown job type", "job", typedJob)
 			return
 		}
-		databaseContainer.Client.Del(cleanupContext, serviceDatabaseKeyName+"/cleaning")
+		if cleanCompleted {
+			databaseContainer.Client.Del(cleanupContext, "anklet/jobs/github/completed/"+service.Name)
+		}
 	}
-	databaseContainer.Client.Del(cleanupContext, serviceDatabaseKeyName)
+	databaseContainer.Client.Del(cleanupContext, "anklet/jobs/github/queued/"+service.Name)
 }
 
 func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel context.CancelFunc, logger *slog.Logger) {
-	return
+	logger.InfoContext(serviceCtx, "github plugin checking for jobs")
 
 	service := config.GetServiceFromContext(serviceCtx)
 
@@ -439,7 +450,6 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 	serviceCtx = context.WithValue(serviceCtx, config.ContextKey("githubwrapperclient"), githubWrapperClient)
 	serviceCtx = logging.AppendCtx(serviceCtx, slog.String("repo", service.Repo))
 	serviceCtx = logging.AppendCtx(serviceCtx, slog.String("owner", service.Owner))
-	serviceDatabaseKeyName := "anklet/jobs/github/service/" + service.Name
 	repositoryURL := fmt.Sprintf("https://github.com/%s/%s", service.Owner, service.Repo)
 
 	mu := &sync.Mutex{}
@@ -459,23 +469,22 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 		fmt.Println("DEFER AT END")
 		fmt.Println("wg.Wait()")
 		wg.Wait()
-		fmt.Println("wg.Wait() done")
+		fmt.Println("wg.Wait() done") // cleanup after we exit the check for completed so we can clean up the environment if a completed job was received
+		cleanup(workerCtx, serviceCtx, logger, completedJobChannel)
 		close(completedJobChannel)
-		// cleanup after we exit the check for completed so we can clean up the environment if a completed job was received
-		cleanup(workerCtx, serviceCtx, logger, serviceDatabaseKeyName)
 	}()
 
 	// check constantly for a cancelled webhook to be received for our job
 	ranOnce := make(chan struct{})
 	go func() {
 		fmt.Println("CheckForCompletedJobs goroutine")
-		CheckForCompletedJobs(workerCtx, serviceCtx, logger, mu, completedJobChannel, serviceDatabaseKeyName, ranOnce, false)
+		CheckForCompletedJobs(workerCtx, serviceCtx, logger, mu, completedJobChannel, ranOnce, false)
 		wg.Done()
 		fmt.Println("CheckForCompletedJobs goroutine done")
 	}()
 	<-ranOnce // wait for the goroutine to run at least once
 	// finalize cleanup if the service crashed mid-cleanup
-	cleanup(workerCtx, serviceCtx, logger, serviceDatabaseKeyName)
+	cleanup(workerCtx, serviceCtx, logger, completedJobChannel)
 
 	select {
 	case <-completedJobChannel:
@@ -489,12 +498,12 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 
 	var wrappedPayloadJSON string
 	// allow picking up where we left off
-	wrappedPayloadJSON, err = databaseContainer.Client.LIndex(serviceCtx, serviceDatabaseKeyName, -1).Result()
+	wrappedPayloadJSON, err = databaseContainer.Client.LIndex(serviceCtx, "anklet/jobs/github/queued/"+service.Name, -1).Result()
 	if err != nil && err != redis.Nil {
-		logger.ErrorContext(serviceCtx, "error getting last object from "+serviceDatabaseKeyName, "err", err)
+		logger.ErrorContext(serviceCtx, "error getting last object from anklet/jobs/github/queued/"+service.Name, "err", err)
 		return
 	}
-	if wrappedPayloadJSON == "" {
+	if wrappedPayloadJSON == "" { // if we haven't done anything before, get something from the main queue
 		eldestQueuedJob, err := databaseContainer.Client.LPop(serviceCtx, "anklet/jobs/github/queued").Result()
 		if err == redis.Nil {
 			logger.DebugContext(serviceCtx, "no queued jobs found")
@@ -504,7 +513,7 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 			logger.ErrorContext(serviceCtx, "error getting queued jobs", "err", err)
 			return
 		}
-		databaseContainer.Client.RPush(serviceCtx, serviceDatabaseKeyName, eldestQueuedJob)
+		databaseContainer.Client.RPush(serviceCtx, "anklet/jobs/github/queued/"+service.Name, eldestQueuedJob)
 		wrappedPayloadJSON = eldestQueuedJob
 	}
 
@@ -519,7 +528,7 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 
 	// check if the job is already completed, so we don't orphan if there is
 	// a job in anklet/jobs/github/queued and also a anklet/jobs/github/completed
-	CheckForCompletedJobs(workerCtx, serviceCtx, logger, mu, completedJobChannel, serviceDatabaseKeyName, ranOnce, true)
+	CheckForCompletedJobs(workerCtx, serviceCtx, logger, mu, completedJobChannel, ranOnce, true)
 	select {
 	case <-completedJobChannel:
 		logger.InfoContext(serviceCtx, "completed job found")
@@ -618,7 +627,7 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 		logger.ErrorContext(serviceCtx, "error marshalling vm to json", "err", err)
 		return
 	}
-	err = databaseContainer.Client.RPush(serviceCtx, serviceDatabaseKeyName, wrappedVmJSON).Err()
+	err = databaseContainer.Client.RPush(serviceCtx, "anklet/jobs/github/queued/"+service.Name, wrappedVmJSON).Err()
 	if err != nil {
 		logger.ErrorContext(serviceCtx, "error pushing vm data to database", "err", err)
 		return

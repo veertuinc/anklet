@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/bradleyfalzon/ghinstallation/v2"
@@ -46,29 +47,29 @@ func exists_in_array_exact(array_to_search_in []string, desired []string) bool {
 	return true
 }
 
-// make sure there are no duplicates in a specific queue
-func EnsureNoDuplicates(serviceCtx context.Context, logger *slog.Logger, jobID int64, queue string) error {
+// passing the the queue and ID to check for
+func InQueue(serviceCtx context.Context, logger *slog.Logger, jobID int64, queue string) (bool, error) {
 	databaseContainer, err := database.GetDatabaseFromContext(serviceCtx)
 	if err != nil {
 		logger.ErrorContext(serviceCtx, "error getting database client from context", "error", err)
-		return err
+		return false, err
 	}
 	queued, err := databaseContainer.Client.LRange(serviceCtx, queue, 0, -1).Result()
 	if err != nil {
 		logger.ErrorContext(serviceCtx, "error getting list of queued jobs", "err", err)
-		return err
+		return false, err
 	}
 	for _, queueItem := range queued {
 		workflowJobEvent, err := database.UnwrapPayload[github.WorkflowJobEvent](queueItem)
 		if err != nil {
 			logger.ErrorContext(serviceCtx, "error unmarshalling job", "err", err)
-			return err
+			return false, err
 		}
 		if *workflowJobEvent.WorkflowJob.ID == jobID {
-			return fmt.Errorf("job already in queue")
+			return true, fmt.Errorf("job already in queue")
 		}
 	}
-	return nil
+	return false, nil
 }
 
 // https://github.com/gofri/go-github-ratelimit has yet to support primary rate limits, so we have to do it ourselves.
@@ -156,10 +157,12 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 			if *workflowJob.Action == "queued" {
 				if exists_in_array_exact(workflowJob.WorkflowJob.Labels, []string{"self-hosted", "anka"}) {
 					// make sure it doesn't already exist
-					err := EnsureNoDuplicates(serviceCtx, logger, *workflowJob.WorkflowJob.ID, "anklet/jobs/github/queued")
+					inQueue, err := InQueue(serviceCtx, logger, *workflowJob.WorkflowJob.ID, "anklet/jobs/github/queued")
 					if err != nil {
-						logger.DebugContext(serviceCtx, err.Error())
-					} else {
+						logger.ErrorContext(serviceCtx, "error searching in queue", "error", err)
+						return
+					}
+					if !inQueue { // if it doesn't exist already
 						// push it to the queue
 						wrappedJobPayload := map[string]interface{}{
 							"type":    "WorkflowJobPayload",
@@ -180,28 +183,101 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 				}
 			} else if *workflowJob.Action == "completed" {
 				if exists_in_array_exact(workflowJob.WorkflowJob.Labels, []string{"self-hosted", "anka"}) {
-					// make sure it doesn't already exist
-					err := EnsureNoDuplicates(serviceCtx, logger, *workflowJob.WorkflowJob.ID, "anklet/jobs/github/completed")
-					if err != nil {
-						logger.DebugContext(serviceCtx, err.Error())
-					} else {
-						// push it to the queue
-						wrappedJobPayload := map[string]interface{}{
-							"type":    "WorkflowJobPayload",
-							"payload": workflowJob,
-						}
-						wrappedPayloadJSON, err := json.Marshal(wrappedJobPayload)
-						if err != nil {
-							logger.ErrorContext(serviceCtx, "error converting job payload to JSON", "error", err)
-							return
-						}
-						push := databaseContainer.Client.RPush(serviceCtx, "anklet/jobs/github/completed", wrappedPayloadJSON)
-						if push.Err() != nil {
-							logger.ErrorContext(serviceCtx, "error pushing job to queue", "error", push.Err())
-							return
-						}
-						logger.InfoContext(serviceCtx, "job pushed to completed queue", "json", string(wrappedPayloadJSON))
+
+					queues := []string{"anklet/jobs/github/queued"}
+					results := make(chan bool, len(queues))
+					var wg sync.WaitGroup
+
+					for _, queue := range queues {
+						wg.Add(1)
+						go func(queue string) {
+							defer wg.Done()
+							inQueue, err := InQueue(serviceCtx, logger, *workflowJob.WorkflowJob.ID, queue)
+							if err != nil {
+								logger.ErrorContext(serviceCtx, "error searching in queue", "queue", queue, "error", err)
+								results <- false
+								return
+							}
+							results <- inQueue
+						}(queue)
 					}
+
+					fmt.Println("here1")
+					go func() {
+						wg.Wait()
+						close(results)
+					}()
+
+					fmt.Println("here2")
+
+					inAQueue := false
+					for result := range results {
+						if result {
+							inAQueue = true
+							break
+						}
+					}
+
+					fmt.Println("here3")
+
+					if inAQueue { // only add completed if it's in a queue
+						inCompletedQueue, err := InQueue(serviceCtx, logger, *workflowJob.WorkflowJob.ID, "anklet/jobs/github/completed")
+						if err != nil {
+							logger.ErrorContext(serviceCtx, "error searching in queue", "error", err)
+							return
+						}
+						if !inCompletedQueue {
+							// push it to the queue
+							wrappedJobPayload := map[string]interface{}{
+								"type":    "WorkflowJobPayload",
+								"payload": workflowJob,
+							}
+							wrappedPayloadJSON, err := json.Marshal(wrappedJobPayload)
+							if err != nil {
+								logger.ErrorContext(serviceCtx, "error converting job payload to JSON", "error", err)
+								return
+							}
+							push := databaseContainer.Client.RPush(serviceCtx, "anklet/jobs/github/completed", wrappedPayloadJSON)
+							if push.Err() != nil {
+								logger.ErrorContext(serviceCtx, "error pushing job to queue", "error", push.Err())
+								return
+							}
+							logger.InfoContext(serviceCtx, "job pushed to completed queue", "json", string(wrappedPayloadJSON))
+						}
+					}
+
+					// // make sure we don't orphan completed if there is nothing in queued or other lists for it
+					// inQueueQueue, err := InQueue(serviceCtx, logger, *workflowJob.WorkflowJob.ID, "anklet/jobs/github/queue")
+					// if err != nil {
+					// 	logger.ErrorContext(serviceCtx, "error searching in queue", "error", err)
+					// 	return
+					// }
+					// if !inQueueQueue {
+					// 	// make sure it doesn't already exist
+					// 	inCompletedQueue, err := InQueue(serviceCtx, logger, *workflowJob.WorkflowJob.ID, "anklet/jobs/github/completed")
+					// 	if err != nil {
+					// 		logger.ErrorContext(serviceCtx, "error searching in queue", "error", err)
+					// 		return
+					// 	}
+					// 	if !inCompletedQueue {
+					// 		// push it to the queue
+					// 		wrappedJobPayload := map[string]interface{}{
+					// 			"type":    "WorkflowJobPayload",
+					// 			"payload": workflowJob,
+					// 		}
+					// 		wrappedPayloadJSON, err := json.Marshal(wrappedJobPayload)
+					// 		if err != nil {
+					// 			logger.ErrorContext(serviceCtx, "error converting job payload to JSON", "error", err)
+					// 			return
+					// 		}
+					// 		push := databaseContainer.Client.RPush(serviceCtx, "anklet/jobs/github/completed", wrappedPayloadJSON)
+					// 		if push.Err() != nil {
+					// 			logger.ErrorContext(serviceCtx, "error pushing job to queue", "error", push.Err())
+					// 			return
+					// 		}
+					// 		logger.InfoContext(serviceCtx, "job pushed to completed queue", "json", string(wrappedPayloadJSON))
+					// 	}
+					// }
 				}
 			}
 		}
@@ -220,89 +296,169 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 	// redeliver all hooks that failed while the service was down
 	githubWrapperClient := internalGithub.NewGitHubClientWrapper(githubClient)
 	serviceCtx = context.WithValue(serviceCtx, config.ContextKey("githubwrapperclient"), githubWrapperClient)
-	// check if the items int he queued list are even still running, otherwise remove them
-	queuedJobs, err := databaseContainer.Client.LRange(serviceCtx, "anklet/jobs/github/queued", 0, -1).Result()
-	if err != nil {
-		logger.ErrorContext(serviceCtx, "error getting list of queued jobs", "err", err)
-		return
-	}
-	var firstQueuedJobStartedAtDate time.Time
-	if len(queuedJobs) > 0 {
-		logger.InfoContext(serviceCtx, "searching for redeliveries")
-		// get the started date of the eldest item in the list of queued jobs
-		firstQueuedJobEvent, err := database.UnwrapPayload[github.WorkflowJobEvent](queuedJobs[0])
+	// Redeliver queued jobs
+	limitForHooks := time.Now().Add(-time.Hour * 24) // the time we want the stop search for redeliveries
+	var allHooks []map[string]interface{}
+	opts := &github.ListCursorOptions{PerPage: 10}
+	doneWithHooks := false
+	for {
+		serviceCtx, hookDeliveries, response, err := ExecuteGitHubClientFunction(serviceCtx, logger, func() (*[]*github.HookDelivery, *github.Response, error) {
+			hookDeliveries, response, err := githubClient.Repositories.ListHookDeliveries(serviceCtx, service.Owner, service.Repo, service.HookID, opts)
+			if err != nil {
+				return nil, nil, err
+			}
+			return &hookDeliveries, response, nil
+		})
 		if err != nil {
-			logger.ErrorContext(serviceCtx, "error unmarshalling job", "err", err)
+			logger.ErrorContext(serviceCtx, "error listing hooks", "err", err)
 			return
 		}
-		firstQueuedJobStartedAtDate = firstQueuedJobEvent.WorkflowJob.StartedAt.Time
-		var allHooks []github.HookDelivery
-		opts := &github.ListCursorOptions{PerPage: 10}
-		for {
-			serviceCtx, hooks, response, err := ExecuteGitHubClientFunction(serviceCtx, logger, func() (*[]*github.HookDelivery, *github.Response, error) {
-				hooks, response, err := githubClient.Repositories.ListHookDeliveries(serviceCtx, service.Owner, service.Repo, service.HookID, opts)
-				if err != nil {
-					return nil, nil, err
-				}
-				return &hooks, response, nil
-			})
-			if err != nil {
-				logger.ErrorContext(serviceCtx, "error listing hooks", "err", err)
-				return
-			}
-			for _, hook := range *hooks {
-				if hook.StatusCode != nil && *hook.StatusCode == 502 {
-					allHooks = append(allHooks, *hook)
-				}
-			}
-			if response.Cursor == "" || (len(allHooks) > 0 && firstQueuedJobStartedAtDate.After(allHooks[len(allHooks)-1].DeliveredAt.Time)) {
-				break
-			}
-			opts.Cursor = response.Cursor
-		}
-		for _, queuedJob := range queuedJobs {
-			wrappedPayload, err := database.UnwrapPayload[github.WorkflowJobEvent](queuedJob)
-			if err != nil {
-				logger.ErrorContext(serviceCtx, "error unmarshalling job", "err", err)
-				return
-			}
-			for _, hook := range allHooks {
-				serviceCtx, hookdelivery, _, err := ExecuteGitHubClientFunction(serviceCtx, logger, func() (*github.HookDelivery, *github.Response, error) {
-					hookdelivery, response, err := githubClient.Repositories.GetHookDelivery(serviceCtx, service.Owner, service.Repo, service.HookID, *hook.ID)
+		for _, hookDelivery := range *hookDeliveries {
+			if hookDelivery.StatusCode != nil && *hookDelivery.StatusCode == 502 && !*hookDelivery.Redelivery {
+				serviceCtx, gottenHookDelivery, _, err := ExecuteGitHubClientFunction(serviceCtx, logger, func() (*github.HookDelivery, *github.Response, error) {
+					gottenHookDelivery, response, err := githubClient.Repositories.GetHookDelivery(serviceCtx, service.Owner, service.Repo, service.HookID, *hookDelivery.ID)
 					if err != nil {
 						return nil, nil, err
 					}
-					return hookdelivery, response, nil
+					return gottenHookDelivery, response, nil
 				})
 				if err != nil {
 					logger.ErrorContext(serviceCtx, "error listing hooks", "err", err)
 					return
 				}
-				var hookResponse github.WorkflowJobEvent
-				err = json.Unmarshal(*hookdelivery.Request.RawPayload, &hookResponse)
+				var workflowJobEvent github.WorkflowJobEvent
+				err = json.Unmarshal(*gottenHookDelivery.Request.RawPayload, &workflowJobEvent)
 				if err != nil {
 					logger.ErrorContext(serviceCtx, "error unmarshalling hook request raw payload to HookResponse", "err", err)
 					return
 				}
-				if *hookResponse.WorkflowJob.ID == *wrappedPayload.WorkflowJob.ID && !*hookdelivery.Redelivery {
-					logger.DebugContext(serviceCtx, "redelivery being considered", "action", *hookResponse.Action, "workflowID", *hookResponse.WorkflowJob.ID, "redeliveryGUID", *hookdelivery.GUID)
-					err := EnsureNoDuplicates(serviceCtx, logger, *hookResponse.WorkflowJob.ID, "anklet/jobs/github/"+*hookResponse.Action)
-					if err != nil {
-						logger.DebugContext(serviceCtx, err.Error())
-					} else {
-						serviceCtx, redelivery, _, _ := ExecuteGitHubClientFunction(serviceCtx, logger, func() (*github.HookDelivery, *github.Response, error) {
-							redelivery, response, err := githubClient.Repositories.RedeliverHookDelivery(serviceCtx, service.Owner, service.Repo, service.HookID, *hookdelivery.ID)
-							if err != nil {
-								return nil, nil, err
-							}
-							return redelivery, response, nil
-						})
-						// err doesn't matter here and it will always throw "job scheduled on GitHub side; try again later"
-						logger.InfoContext(serviceCtx, "hook redelivered", "hook", redelivery)
-					}
+				if len(allHooks) > 0 && limitForHooks.After(gottenHookDelivery.DeliveredAt.Time) {
+					doneWithHooks = true
 					break
 				}
+				allHooks = append(allHooks, map[string]interface{}{
+					"hookDelivery":     gottenHookDelivery,
+					"workflowJobEvent": workflowJobEvent,
+				})
 			}
+		}
+		if response.Cursor == "" || doneWithHooks {
+			break
+		}
+		opts.Cursor = response.Cursor
+	}
+
+	// get all keys from database for the main queue and service queues as well as completed
+	queuedKeys, err := databaseContainer.Client.Keys(serviceCtx, "anklet/jobs/github/queued*").Result()
+	if err != nil {
+		logger.ErrorContext(serviceCtx, "error getting list of keys", "err", err)
+		return
+	}
+	var allQueuedJobs map[string][]string
+	for _, key := range queuedKeys {
+		queuedJobs, err := databaseContainer.Client.LRange(serviceCtx, key, 0, -1).Result()
+		if err != nil {
+			logger.ErrorContext(serviceCtx, "error getting list of queued jobs for key: "+key, "err", err)
+			return
+		}
+		allQueuedJobs[key] = queuedJobs
+	}
+	completedKeys, err := databaseContainer.Client.Keys(serviceCtx, "anklet/jobs/github/completed*").Result()
+	if err != nil {
+		logger.ErrorContext(serviceCtx, "error getting list of keys", "err", err)
+		return
+	}
+	var allCompletedJobs map[string][]string
+	for _, key := range completedKeys {
+		completedJobs, err := databaseContainer.Client.LRange(serviceCtx, key, 0, -1).Result()
+		if err != nil {
+			logger.ErrorContext(serviceCtx, "error getting list of queued jobs for key: "+key, "err", err)
+			return
+		}
+		allCompletedJobs[key] = completedJobs
+	}
+
+	if len(allHooks) > 0 {
+		for _, hookWrapper := range allHooks {
+			hookDelivery := hookWrapper["hookDelivery"].(github.HookDelivery)
+			workflowJobEvent := hookWrapper["workflowJobEvent"].(github.WorkflowJobEvent)
+
+			inQueued := false
+			// inQueuedListKey := ""
+			// inQueuedListIndex := 0
+			inCompleted := false
+			inCompletedListKey := ""
+			inCompletedIndex := 0
+
+			// Queued deliveries
+			if *hookDelivery.Action == "queued" {
+				for _, queuedJobs := range allQueuedJobs {
+					for _, queuedJob := range queuedJobs {
+						wrappedPayload, err := database.UnwrapPayload[github.WorkflowJobEvent](queuedJob)
+						if err != nil {
+							logger.ErrorContext(serviceCtx, "error unmarshalling job", "err", err)
+							return
+						}
+						if *wrappedPayload.WorkflowJob.ID == *workflowJobEvent.WorkflowJob.ID {
+							inQueued = true
+							// inQueuedListKey = key
+							// inQueuedListIndex = index
+							break
+						}
+					}
+				}
+
+			}
+
+			// Completed deliveries
+			if *hookDelivery.Action == "completed" {
+				for key, completedJobs := range allCompletedJobs {
+					for index, completedJob := range completedJobs {
+						wrappedPayload, err := database.UnwrapPayload[github.WorkflowJobEvent](completedJob)
+						if err != nil {
+							logger.ErrorContext(serviceCtx, "error unmarshalling job", "err", err)
+							return
+						}
+						if *wrappedPayload.WorkflowJob.ID == *workflowJobEvent.WorkflowJob.ID {
+							inCompleted = true
+							inCompletedListKey = key
+							inCompletedIndex = index
+							break
+						}
+					}
+				}
+			}
+
+			// if in queued, but also has completed; continue and do nothing
+			if inQueued && inCompleted {
+				continue
+			}
+
+			// if in completed, but has no queued; remove from completed db
+			if inCompleted && !inQueued {
+				_, err = databaseContainer.Client.LRem(serviceCtx, inCompletedListKey, 1, allCompletedJobs[inCompletedListKey][inCompletedIndex]).Result()
+				if err != nil {
+					logger.ErrorContext(serviceCtx, "error removing completedJob from anklet/jobs/github/completed", "err", err, "completedJob", allCompletedJobs[inCompletedListKey][inCompletedIndex])
+					return
+				}
+				continue
+			}
+
+			// all other cases (like when it's queued); continue
+			if inQueued || inCompleted {
+				continue
+			}
+
+			// Redeliver the hook
+			serviceCtx, redelivery, _, _ := ExecuteGitHubClientFunction(serviceCtx, logger, func() (*github.HookDelivery, *github.Response, error) {
+				redelivery, response, err := githubClient.Repositories.RedeliverHookDelivery(serviceCtx, service.Owner, service.Repo, service.HookID, *hookDelivery.ID)
+				if err != nil {
+					return nil, nil, err
+				}
+				return redelivery, response, nil
+			})
+			// err doesn't matter here and it will always throw "job scheduled on GitHub side; try again later"
+			logger.InfoContext(serviceCtx, "hook redelivered", "hook", redelivery)
 		}
 	}
 	// notify the main thread that the service has started
