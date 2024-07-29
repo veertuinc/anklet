@@ -184,7 +184,15 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 			} else if *workflowJob.Action == "completed" {
 				if exists_in_array_exact(workflowJob.WorkflowJob.Labels, []string{"self-hosted", "anka"}) {
 
-					queues := []string{"anklet/jobs/github/queued"}
+					queues := []string{}
+					// get all keys from database for the main queue and service queues as well as completed
+					queuedKeys, err := databaseContainer.Client.Keys(serviceCtx, "anklet/jobs/github/queued*").Result()
+					if err != nil {
+						logger.ErrorContext(serviceCtx, "error getting list of keys", "err", err)
+						return
+					}
+					queues = append(queues, queuedKeys...)
+
 					results := make(chan bool, len(queues))
 					var wg sync.WaitGroup
 
@@ -192,23 +200,19 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 						wg.Add(1)
 						go func(queue string) {
 							defer wg.Done()
+							fmt.Println("checking if in queue", queue)
 							inQueue, err := InQueue(serviceCtx, logger, *workflowJob.WorkflowJob.ID, queue)
 							if err != nil {
-								logger.ErrorContext(serviceCtx, "error searching in queue", "queue", queue, "error", err)
-								results <- false
-								return
+								logger.WarnContext(serviceCtx, "error searching in queue", "queue", queue, "error", err)
 							}
 							results <- inQueue
 						}(queue)
 					}
 
-					fmt.Println("here1")
 					go func() {
 						wg.Wait()
 						close(results)
 					}()
-
-					fmt.Println("here2")
 
 					inAQueue := false
 					for result := range results {
@@ -218,14 +222,13 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 						}
 					}
 
-					fmt.Println("here3")
-
 					if inAQueue { // only add completed if it's in a queue
 						inCompletedQueue, err := InQueue(serviceCtx, logger, *workflowJob.WorkflowJob.ID, "anklet/jobs/github/completed")
 						if err != nil {
 							logger.ErrorContext(serviceCtx, "error searching in queue", "error", err)
 							return
 						}
+						fmt.Println("inCompletedQueue", inCompletedQueue)
 						if !inCompletedQueue {
 							// push it to the queue
 							wrappedJobPayload := map[string]interface{}{
@@ -301,6 +304,7 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 	var allHooks []map[string]interface{}
 	opts := &github.ListCursorOptions{PerPage: 10}
 	doneWithHooks := false
+	logger.InfoContext(serviceCtx, "listing hook deliveries to see if there any that we missed...")
 	for {
 		serviceCtx, hookDeliveries, response, err := ExecuteGitHubClientFunction(serviceCtx, logger, func() (*[]*github.HookDelivery, *github.Response, error) {
 			hookDeliveries, response, err := githubClient.Repositories.ListHookDeliveries(serviceCtx, service.Owner, service.Repo, service.HookID, opts)
@@ -314,7 +318,8 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 			return
 		}
 		for _, hookDelivery := range *hookDeliveries {
-			if hookDelivery.StatusCode != nil && *hookDelivery.StatusCode == 502 && !*hookDelivery.Redelivery {
+			fmt.Println("hookDelivery", *hookDelivery.ID, *hookDelivery.StatusCode, *hookDelivery.Redelivery, *hookDelivery.DeliveredAt)
+			if hookDelivery.StatusCode != nil && !*hookDelivery.Redelivery && *hookDelivery.Action != "in_progress" {
 				serviceCtx, gottenHookDelivery, _, err := ExecuteGitHubClientFunction(serviceCtx, logger, func() (*github.HookDelivery, *github.Response, error) {
 					gottenHookDelivery, response, err := githubClient.Repositories.GetHookDelivery(serviceCtx, service.Owner, service.Repo, service.HookID, *hookDelivery.ID)
 					if err != nil {
@@ -445,18 +450,16 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 				continue
 			}
 
-			// all other cases (like when it's queued); continue
-			if inQueued || inCompleted {
+			// if in queued, and also has a successful completed, something is wrong and we need to re-deliver it.
+			if *hookDelivery.Action == "completed" && inQueued && *hookDelivery.StatusCode == 200 && !inCompleted {
+				logger.InfoContext(serviceCtx, "hook delivery has completed but is still in queued; redelivering")
+			} else if *hookDelivery.Action == "completed" && *hookDelivery.StatusCode == 200 {
+				// already completed, but not in queued
+				continue
+			} else if inQueued || inCompleted { // all other cases (like when it's queued); continue
 				continue
 			}
 
-			fmt.Println("here4")
-			hookDeliveryJSON, _ := json.MarshalIndent(hookDelivery, "", "  ")
-			fmt.Println(string(hookDeliveryJSON))
-			workflowJobEventJSON, _ := json.MarshalIndent(workflowJobEvent, "", "  ")
-			fmt.Println(string(workflowJobEventJSON))
-
-			panic("here")
 			// Redeliver the hook
 			serviceCtx, redelivery, _, _ := ExecuteGitHubClientFunction(serviceCtx, logger, func() (*github.HookDelivery, *github.Response, error) {
 				redelivery, response, err := githubClient.Repositories.RedeliverHookDelivery(serviceCtx, service.Owner, service.Repo, service.HookID, *hookDelivery.ID)
@@ -466,7 +469,15 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 				return redelivery, response, nil
 			})
 			// err doesn't matter here and it will always throw "job scheduled on GitHub side; try again later"
-			logger.InfoContext(serviceCtx, "hook redelivered", "hook", redelivery)
+			logger.InfoContext(serviceCtx, "hook redelivered",
+				"redelivery", redelivery,
+				"hookDelivery.GUID", *hookDelivery.GUID,
+				"hookDelivery.Action", *hookDelivery.Action,
+				"hookDelivery.StatusCode", *hookDelivery.StatusCode,
+				"hookDelivery.Redelivery", *hookDelivery.Redelivery,
+				"inQueued", inQueued,
+				"inCompleted", inCompleted,
+			)
 		}
 	}
 	// notify the main thread that the service has started

@@ -314,7 +314,6 @@ func cleanup(workerCtx context.Context, serviceCtx context.Context, logger *slog
 	cleanupContext = context.WithValue(cleanupContext, config.ContextKey("database"), serviceDatabase)
 	cleanupContext, cancel := context.WithCancel(cleanupContext)
 	defer cancel()
-	cleanCompleted := false
 	databaseContainer, err := dbFunctions.GetDatabaseFromContext(cleanupContext)
 	if err != nil {
 		logger.ErrorContext(serviceCtx, "error getting database from context", "err", err)
@@ -337,7 +336,7 @@ func cleanup(workerCtx context.Context, serviceCtx context.Context, logger *slog
 			// pop the job from the list and push it to the cleaning list
 			jobJSON, err = databaseContainer.Client.RPopLPush(cleanupContext, "anklet/jobs/github/queued/"+service.Name, "anklet/jobs/github/queued/"+service.Name+"/cleaning").Result()
 			if err == redis.Nil {
-				break
+				return // nothing to clean up
 			} else if err != nil {
 				logger.ErrorContext(serviceCtx, "error popping job from the list", "err", err)
 				return
@@ -375,6 +374,8 @@ func cleanup(workerCtx context.Context, serviceCtx context.Context, logger *slog
 			}
 			ankaCLI := anka.GetAnkaCLIFromContext(serviceCtx)
 			ankaCLI.AnkaDelete(workerCtx, serviceCtx, &vm)
+			databaseContainer.Client.Del(cleanupContext, "anklet/jobs/github/queued/"+service.Name+"/cleaning")
+			continue // required to keep processing tasks in the db list
 		case "WorkflowJobPayload": // MUST COME LAST
 			var workflowJobEvent github.WorkflowJobEvent
 			err = json.Unmarshal(payloadBytes, &workflowJobEvent)
@@ -386,24 +387,26 @@ func cleanup(workerCtx context.Context, serviceCtx context.Context, logger *slog
 			// if we don't, we could suffer from a situation where a completed job comes in and is orphaned
 			select {
 			case <-completedJobChannel:
+				fmt.Println("completed job found")
+				databaseContainer.Client.Del(cleanupContext, "anklet/jobs/github/completed/"+service.Name)
+				databaseContainer.Client.Del(cleanupContext, "anklet/jobs/github/queued/"+service.Name+"/cleaning")
+				break // break loop and delete /queued/servicename
 			default:
-				_, err := databaseContainer.Client.RPopLPush(cleanupContext, "anklet/jobs/github/queued/"+service.Name+"/cleaning", "anklet/jobs/github/queued/").Result()
+				fmt.Println("pushing job back to queued")
+				_, err := databaseContainer.Client.RPopLPush(cleanupContext, "anklet/jobs/github/queued/"+service.Name+"/cleaning", "anklet/jobs/github/queued/"+service.Name).Result()
 				if err != nil {
 					logger.ErrorContext(serviceCtx, "error pushing job back to queued", "err", err)
 					return
 				}
+				databaseContainer.Client.Del(cleanupContext, "anklet/jobs/github/queued/"+service.Name+"/cleaning")
 			}
-			logger.InfoContext(serviceCtx, "finalized cleaning of workflow job", "workflowJobID", workflowJobEvent.WorkflowJob.ID)
-			databaseContainer.Client.Del(cleanupContext, "anklet/jobs/github/queued/"+service.Name+"/cleaning")
-			cleanCompleted = true
 		default:
 			logger.ErrorContext(serviceCtx, "unknown job type", "job", typedJob)
 			return
 		}
-		if cleanCompleted {
-			databaseContainer.Client.Del(cleanupContext, "anklet/jobs/github/completed/"+service.Name)
-		}
+		return // don't delete the queued/servicename
 	}
+	fmt.Println("DELETING QUEUED")
 	databaseContainer.Client.Del(cleanupContext, "anklet/jobs/github/queued/"+service.Name)
 }
 
@@ -467,9 +470,7 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 
 	defer func() {
 		fmt.Println("DEFER AT END")
-		fmt.Println("wg.Wait()")
 		wg.Wait()
-		fmt.Println("wg.Wait() done") // cleanup after we exit the check for completed so we can clean up the environment if a completed job was received
 		cleanup(workerCtx, serviceCtx, logger, completedJobChannel)
 		close(completedJobChannel)
 	}()
@@ -477,10 +478,8 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 	// check constantly for a cancelled webhook to be received for our job
 	ranOnce := make(chan struct{})
 	go func() {
-		fmt.Println("CheckForCompletedJobs goroutine")
 		CheckForCompletedJobs(workerCtx, serviceCtx, logger, mu, completedJobChannel, ranOnce, false)
 		wg.Done()
-		fmt.Println("CheckForCompletedJobs goroutine done")
 	}()
 	<-ranOnce // wait for the goroutine to run at least once
 	// finalize cleanup if the service crashed mid-cleanup
