@@ -136,6 +136,7 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 
 	server := &http.Server{Addr: ":" + service.Port}
 	http.HandleFunc("/jobs/v1/receiver", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Println("RECEIVED ====================")
 		databaseContainer, err := database.GetDatabaseFromContext(serviceCtx)
 		if err != nil {
 			logger.ErrorContext(serviceCtx, "error getting database client from context", "error", err)
@@ -153,7 +154,7 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 		}
 		switch workflowJob := event.(type) {
 		case *github.WorkflowJobEvent:
-			// logger.DebugContext(serviceCtx, "received workflow job to consider", slog.Any("workflowJob", workflowJob))
+			logger.DebugContext(serviceCtx, "received workflow job to consider", slog.Any("workflowJob", workflowJob))
 			if *workflowJob.Action == "queued" {
 				if exists_in_array_exact(workflowJob.WorkflowJob.Labels, []string{"self-hosted", "anka"}) {
 					// make sure it doesn't already exist
@@ -387,7 +388,8 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 	}
 
 	if len(allHooks) > 0 {
-		for _, hookWrapper := range allHooks {
+		for i := len(allHooks) - 1; i >= 0; i-- { // make sure we process/redeliver queued before completed
+			hookWrapper := allHooks[i]
 			hookDelivery := hookWrapper["hookDelivery"].(*github.HookDelivery)
 			workflowJobEvent := hookWrapper["workflowJobEvent"].(github.WorkflowJobEvent)
 
@@ -453,10 +455,7 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 			// if in queued, and also has a successful completed, something is wrong and we need to re-deliver it.
 			if *hookDelivery.Action == "completed" && inQueued && *hookDelivery.StatusCode == 200 && !inCompleted {
 				logger.InfoContext(serviceCtx, "hook delivery has completed but is still in queued; redelivering")
-			} else if *hookDelivery.Action == "completed" && *hookDelivery.StatusCode == 200 {
-				// already completed, but not in queued
-				continue
-			} else if inQueued || inCompleted { // all other cases (like when it's queued); continue
+			} else if *hookDelivery.StatusCode == 200 || inQueued || inCompleted { // all other cases (like when it's queued); continue
 				continue
 			}
 
@@ -472,6 +471,7 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 			logger.InfoContext(serviceCtx, "hook redelivered",
 				"redelivery", redelivery,
 				"hookDelivery.GUID", *hookDelivery.GUID,
+				"workflowJobEvent.WorkflowJob.ID", *workflowJobEvent.WorkflowJob.ID,
 				"hookDelivery.Action", *hookDelivery.Action,
 				"hookDelivery.StatusCode", *hookDelivery.StatusCode,
 				"hookDelivery.Redelivery", *hookDelivery.Redelivery,
