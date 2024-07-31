@@ -189,7 +189,6 @@ func CheckForCompletedJobs(
 		logging.Panic(workerCtx, serviceCtx, "error getting database from context")
 	}
 	defer func() {
-		fmt.Println("CheckForCompletedJobs defer: " + fmt.Sprint(runOnce))
 		if checkForCompletedJobsMu != nil {
 			checkForCompletedJobsMu.Unlock()
 		}
@@ -204,10 +203,9 @@ func CheckForCompletedJobs(
 	for {
 		checkForCompletedJobsMu.Lock()
 		// do not use 'continue' in the loop or else the ranOnce won't happen
-		fmt.Println("CheckForCompletedJobs default: " + fmt.Sprint(runOnce))
+		fmt.Println("CheckForCompletedJobs loop start: " + fmt.Sprint(runOnce))
 		select {
 		case <-completedJobChannel:
-			fmt.Println("CheckForCompletedJobs completedJobChannel at top")
 			return
 		case <-serviceCtx.Done():
 			fmt.Println("CheckForCompletedJobs serviceCtx.Done()")
@@ -337,7 +335,6 @@ func cleanup(
 	defer func() {
 		if cleanupMu != nil {
 			cleanupMu.Unlock()
-			logger.DebugContext(serviceCtx, "cleanup unlocked")
 		}
 		cancel()
 	}()
