@@ -216,16 +216,11 @@ func CheckForCompletedJobs(
 		}
 		service := config.GetServiceFromContext(serviceCtx)
 		// get the job ID
-		existingJobString, err := databaseContainer.Client.LIndex(serviceCtx, "anklet/jobs/github/queued/"+service.Name, -1).Result()
+		existingJobString, err := databaseContainer.Client.LIndex(serviceCtx, "anklet/jobs/github/queued/"+service.Name, 0).Result()
 		if err == redis.Nil { // handle no job for service; needed so the github plugin resets and looks for new jobs again
 			return
 		} else {
 			if err == nil {
-				existingJob, err := database.UnwrapPayload[github.WorkflowJobEvent](existingJobString)
-				if err != nil {
-					logger.ErrorContext(serviceCtx, "error unmarshalling job", "err", err)
-					return
-				}
 				// check if there is already a completed job queued for the service
 				// // this can happen if the service crashes or is stopped before it finalizes cleanup
 				count, err := databaseContainer.Client.LLen(serviceCtx, "anklet/jobs/github/completed/"+service.Name).Result()
@@ -234,6 +229,7 @@ func CheckForCompletedJobs(
 					return
 				}
 				if count > 0 {
+					fmt.Println("count > 0 =============")
 					select {
 					case completedJobChannel <- true:
 					default:
@@ -246,9 +242,19 @@ func CheckForCompletedJobs(
 					}
 					return
 				} else {
+					fmt.Println("count == 0 =============")
 					completedJobs, err := databaseContainer.Client.LRange(serviceCtx, "anklet/jobs/github/completed", 0, -1).Result()
 					if err != nil {
 						logger.ErrorContext(serviceCtx, "error getting list of completed jobs", "err", err)
+						return
+					}
+					existingJob, err := database.UnwrapPayload[github.WorkflowJobEvent](existingJobString)
+					if err != nil {
+						logger.ErrorContext(serviceCtx, "error unmarshalling job", "err", err)
+						return
+					}
+					if existingJob.WorkflowJob == nil {
+						logger.ErrorContext(serviceCtx, "existingJob.WorkflowJob is nil")
 						return
 					}
 					for _, completedJob := range completedJobs {
@@ -410,7 +416,8 @@ func cleanup(workerCtx context.Context, serviceCtx context.Context, logger *slog
 	databaseContainer.Client.Del(cleanupContext, "anklet/jobs/github/queued/"+service.Name)
 }
 
-func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel context.CancelFunc, logger *slog.Logger) {
+func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel context.CancelFunc, logger *slog.Logger, firstServiceStarted chan bool) {
+	fmt.Println(" ====================================================== ")
 	logger.InfoContext(serviceCtx, "github plugin checking for jobs")
 
 	service := config.GetServiceFromContext(serviceCtx)
@@ -469,7 +476,6 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 	}
 
 	defer func() {
-		fmt.Println("DEFER AT END")
 		wg.Wait()
 		cleanup(workerCtx, serviceCtx, logger, completedJobChannel)
 		close(completedJobChannel)
@@ -694,13 +700,16 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 	jobCompleted := false
 	// logCounter := 0
 	for !jobCompleted {
+		fmt.Println("WATCHING FOR JOB COMPLETION")
 		select {
 		case <-completedJobChannel:
 			logger.InfoContext(serviceCtx, "job completed")
 			jobCompleted = true
+			completedJobChannel <- true // so cleanup can also see it as completed
 		case <-serviceCtx.Done():
 			logger.WarnContext(serviceCtx, "context canceled while watching for job completion")
 			return
+		default:
 		}
 		time.Sleep(10 * time.Second)
 		// serviceCtx, currentJob, response, err := ExecuteGitHubClientFunction[github.WorkflowJob](serviceCtx, logger, func() (*github.WorkflowJob, *github.Response, error) {

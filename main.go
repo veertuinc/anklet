@@ -81,14 +81,14 @@ func main() {
 	// obtain config
 	loadedConfig, err := config.LoadConfig(configPath)
 	if err != nil {
-		logger.InfoContext(parentCtx, "unable to load config.yml", "error", err)
-		// panic(err)
+		logger.ErrorContext(parentCtx, "unable to load config.yml (is it in the work_dir, or are you using an absolute path?)", "error", err)
+		panic(err)
 	}
-	logger.InfoContext(parentCtx, "loaded config", slog.Any("config", loadedConfig))
 	loadedConfig, err = config.LoadInEnvs(loadedConfig)
 	if err != nil {
 		panic(err)
 	}
+	logger.InfoContext(parentCtx, "loaded config", slog.Any("config", loadedConfig))
 
 	parentCtx = logging.AppendCtx(parentCtx, slog.String("ankletVersion", version))
 

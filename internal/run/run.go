@@ -22,7 +22,7 @@ func Plugin(workerCtx context.Context, serviceCtx context.Context, serviceCancel
 		for {
 			select {
 			case <-firstServiceStarted:
-				github.Run(workerCtx, serviceCtx, serviceCancel, logger)
+				github.Run(workerCtx, serviceCtx, serviceCancel, logger, firstServiceStarted)
 				return
 			case <-serviceCtx.Done():
 				logger.InfoContext(serviceCtx, "context cancelled before service started")
@@ -30,6 +30,7 @@ func Plugin(workerCtx context.Context, serviceCtx context.Context, serviceCancel
 				return
 			default:
 				time.Sleep(1 * time.Second)
+				firstServiceStarted <- true // if there is no controller in the config, we need to send this to the first service started channel to start the service
 			}
 		}
 	} else if service.Plugin == "github_controller" {

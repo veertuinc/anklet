@@ -136,7 +136,6 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 
 	server := &http.Server{Addr: ":" + service.Port}
 	http.HandleFunc("/jobs/v1/receiver", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Println("RECEIVED ====================")
 		databaseContainer, err := database.GetDatabaseFromContext(serviceCtx)
 		if err != nil {
 			logger.ErrorContext(serviceCtx, "error getting database client from context", "error", err)
@@ -154,7 +153,11 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 		}
 		switch workflowJob := event.(type) {
 		case *github.WorkflowJobEvent:
-			logger.DebugContext(serviceCtx, "received workflow job to consider", slog.Any("workflowJob", workflowJob))
+			logger.DebugContext(serviceCtx, "received workflow job to consider",
+				"workflowJob.Action", *workflowJob.Action,
+				"workflowJob.WorkflowJob.Labels", workflowJob.WorkflowJob.Labels,
+				"workflowJob.WorkflowJob.ID", *workflowJob.WorkflowJob.ID,
+			)
 			if *workflowJob.Action == "queued" {
 				if exists_in_array_exact(workflowJob.WorkflowJob.Labels, []string{"self-hosted", "anka"}) {
 					// make sure it doesn't already exist
@@ -204,7 +207,7 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 							fmt.Println("checking if in queue", queue)
 							inQueue, err := InQueue(serviceCtx, logger, *workflowJob.WorkflowJob.ID, queue)
 							if err != nil {
-								logger.WarnContext(serviceCtx, "error searching in queue", "queue", queue, "error", err)
+								logger.WarnContext(serviceCtx, err.Error(), "queue", queue)
 							}
 							results <- inQueue
 						}(queue)
@@ -388,6 +391,7 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 	}
 
 	if len(allHooks) > 0 {
+	MainLoop:
 		for i := len(allHooks) - 1; i >= 0; i-- { // make sure we process/redeliver queued before completed
 			hookWrapper := allHooks[i]
 			hookDelivery := hookWrapper["hookDelivery"].(*github.HookDelivery)
@@ -452,12 +456,26 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 				continue
 			}
 
+			// handle queued that have already been successfully delivered before.
+			if *hookDelivery.Action == "queued" {
+				// check if a completed hook exists, so we don't re-queue something already finished
+				for _, job := range allHooks {
+					otherHookDelivery := job["hookDelivery"].(*github.HookDelivery)
+					otherWorkflowJobEvent := job["workflowJobEvent"].(github.WorkflowJobEvent)
+					if *otherHookDelivery.Action == "completed" && *workflowJobEvent.WorkflowJob.ID == *otherWorkflowJobEvent.WorkflowJob.ID {
+						continue MainLoop
+					}
+				}
+			}
+
 			// if in queued, and also has a successful completed, something is wrong and we need to re-deliver it.
 			if *hookDelivery.Action == "completed" && inQueued && *hookDelivery.StatusCode == 200 && !inCompleted {
 				logger.InfoContext(serviceCtx, "hook delivery has completed but is still in queued; redelivering")
 			} else if *hookDelivery.StatusCode == 200 || inQueued || inCompleted { // all other cases (like when it's queued); continue
 				continue
 			}
+
+			// Note; We cannot (and probably should not) stop completed from being redelivered.
 
 			// Redeliver the hook
 			serviceCtx, redelivery, _, _ := ExecuteGitHubClientFunction(serviceCtx, logger, func() (*github.HookDelivery, *github.Response, error) {
