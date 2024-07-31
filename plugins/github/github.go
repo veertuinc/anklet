@@ -177,7 +177,7 @@ func CheckForCompletedJobs(
 	workerCtx context.Context,
 	serviceCtx context.Context,
 	logger *slog.Logger,
-	mu *sync.Mutex,
+	checkForCompletedJobsMu *sync.Mutex,
 	completedJobChannel chan bool,
 	ranOnce chan struct{},
 	runOnce bool,
@@ -190,8 +190,8 @@ func CheckForCompletedJobs(
 	}
 	defer func() {
 		fmt.Println("CheckForCompletedJobs defer: " + fmt.Sprint(runOnce))
-		if mu != nil {
-			mu.Unlock()
+		if checkForCompletedJobsMu != nil {
+			checkForCompletedJobsMu.Unlock()
 		}
 		// ensure, outside of needing to return on error, that the following always runs
 		select {
@@ -202,7 +202,7 @@ func CheckForCompletedJobs(
 		}
 	}()
 	for {
-		mu.Lock()
+		checkForCompletedJobsMu.Lock()
 		// do not use 'continue' in the loop or else the ranOnce won't happen
 		fmt.Println("CheckForCompletedJobs default: " + fmt.Sprint(runOnce))
 		select {
@@ -217,7 +217,8 @@ func CheckForCompletedJobs(
 		service := config.GetServiceFromContext(serviceCtx)
 		// get the job ID
 		existingJobString, err := databaseContainer.Client.LIndex(serviceCtx, "anklet/jobs/github/queued/"+service.Name, 0).Result()
-		if err == redis.Nil { // handle no job for service; needed so the github plugin resets and looks for new jobs again
+		if runOnce && err == redis.Nil { // handle no job for service; needed so the github plugin resets and looks for new jobs again
+			fmt.Println("CheckForCompletedJobs err == redis.Nil")
 			return
 		} else {
 			if err == nil {
@@ -283,6 +284,7 @@ func CheckForCompletedJobs(
 								return
 							}
 							completedJobChannel <- true
+							fmt.Println("completedJobChannel <- true")
 							return
 						}
 					}
@@ -300,7 +302,7 @@ func CheckForCompletedJobs(
 		if runOnce {
 			return
 		}
-		mu.Unlock()
+		checkForCompletedJobsMu.Unlock()
 		time.Sleep(3 * time.Second)
 	}
 }
@@ -544,6 +546,7 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 		eldestQueuedJob, err := databaseContainer.Client.LPop(serviceCtx, "anklet/jobs/github/queued").Result()
 		if err == redis.Nil {
 			logger.DebugContext(serviceCtx, "no queued jobs found")
+			completedJobChannel <- true // send true to the channel to stop the check for completed jobs goroutine
 			return
 		}
 		if err != nil {
