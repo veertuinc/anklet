@@ -148,14 +148,14 @@ func LoadInEnvs(config Config) (Config, error) {
 	if workDir != "" {
 		config.WorkDir = workDir
 	}
-	pidFileDir := os.Getenv("ANKLET_PID_FILE_DIR")
-	if pidFileDir != "" {
-		config.PidFileDir = pidFileDir
-	}
-	logFileDir := os.Getenv("ANKLET_LOG_FILE_DIR")
-	if logFileDir != "" {
-		config.Log.FileDir = logFileDir
-	}
+	// pidFileDir := os.Getenv("ANKLET_PID_FILE_DIR")
+	// if pidFileDir != "" {
+	// 	config.PidFileDir = pidFileDir
+	// }
+	// logFileDir := os.Getenv("ANKLET_LOG_FILE_DIR")
+	// if logFileDir != "" {
+	// 	config.Log.FileDir = logFileDir
+	// }
 	return config, nil
 }
 

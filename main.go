@@ -4,7 +4,6 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"log"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -16,7 +15,6 @@ import (
 	"time"
 
 	"github.com/gofri/go-github-ratelimit/github_ratelimit"
-	"github.com/norsegaud/go-daemon"
 	"github.com/veertuinc/anklet/internal/anka"
 	"github.com/veertuinc/anklet/internal/config"
 	"github.com/veertuinc/anklet/internal/database"
@@ -30,25 +28,25 @@ var (
 	runOnce     = "false"
 	versionFlag = flag.Bool("version", false, "Print the version")
 	configFlag  = flag.String("c", "", "Path to the config file (defaults to ~/.config/anklet/config.yml)")
-	signalFlag  = flag.String("s", "", `Send signal to the daemon:
-  drain — graceful shutdown, will wait until all jobs finish before exiting
-  stop — best effort graceful shutdown, interrupting the job as soon as possible`)
-	attachFlag      = flag.Bool("attach", false, "Attach to the anklet and don't background it (useful for containers)")
-	stop            = make(chan struct{})
-	done            = make(chan struct{})
+	// 	signalFlag  = flag.String("s", "", `Send signal to the daemon:
+	//   drain — graceful shutdown, will wait until all jobs finish before exiting
+	//   stop — best effort graceful shutdown, interrupting the job as soon as possible`)
+	// attachFlag      = flag.Bool("attach", false, "Attach to the anklet and don't background it (useful for containers)")
+	// stop            = make(chan struct{})
+	// done            = make(chan struct{})
 	shutDownMessage = "anklet service shut down"
 )
 
-func termHandler(ctx context.Context, logger *slog.Logger) daemon.SignalHandlerFunc {
-	return func(sig os.Signal) error {
-		logger.WarnContext(ctx, "terminating anklet, please do not interrupt...")
-		stop <- struct{}{}
-		if sig == syscall.SIGQUIT {
-			<-done
-		}
-		return daemon.ErrStop
-	}
-}
+// func termHandler(ctx context.Context, logger *slog.Logger) daemon.SignalHandlerFunc {
+// 	return func(sig os.Signal) error {
+// 		logger.WarnContext(ctx, "terminating anklet, please do not interrupt...")
+// 		stop <- struct{}{}
+// 		if sig == syscall.SIGQUIT {
+// 			<-done
+// 		}
+// 		return daemon.ErrStop
+// 	}
+// }
 
 func main() {
 
@@ -64,8 +62,8 @@ func main() {
 		fmt.Println(version)
 		os.Exit(0)
 	}
-	daemon.AddCommand(daemon.StringFlag(signalFlag, "drain"), syscall.SIGQUIT, termHandler(parentCtx, logger))
-	daemon.AddCommand(daemon.StringFlag(signalFlag, "stop"), syscall.SIGTERM, termHandler(parentCtx, logger))
+	// daemon.AddCommand(daemon.StringFlag(signalFlag, "drain"), syscall.SIGQUIT, termHandler(parentCtx, logger))
+	// daemon.AddCommand(daemon.StringFlag(signalFlag, "stop"), syscall.SIGTERM, termHandler(parentCtx, logger))
 
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
@@ -98,12 +96,12 @@ func main() {
 	}
 	parentCtx = context.WithValue(parentCtx, config.ContextKey("suffix"), suffix)
 
-	if loadedConfig.Log.FileDir == "" {
-		loadedConfig.Log.FileDir = "./"
-	}
-	if loadedConfig.PidFileDir == "" {
-		loadedConfig.PidFileDir = "./"
-	}
+	// if loadedConfig.Log.FileDir == "" {
+	// 	loadedConfig.Log.FileDir = "./"
+	// }
+	// if loadedConfig.PidFileDir == "" {
+	// 	loadedConfig.PidFileDir = "./"
+	// }
 	if loadedConfig.WorkDir == "" {
 		loadedConfig.WorkDir = "./"
 	}
@@ -111,27 +109,27 @@ func main() {
 	logger.DebugContext(parentCtx, "loaded config", slog.Any("config", loadedConfig))
 	parentCtx = context.WithValue(parentCtx, config.ContextKey("config"), &loadedConfig)
 
-	daemonContext := &daemon.Context{
-		PidFileName: loadedConfig.PidFileDir + "anklet" + suffix + ".pid",
-		PidFilePerm: 0644,
-		LogFileName: loadedConfig.Log.FileDir + "anklet" + suffix + ".log",
-		LogFilePerm: 0640,
-		WorkDir:     loadedConfig.WorkDir,
-		Umask:       027,
-		Args:        []string{"anklet", "-c", configPath},
-	}
+	// daemonContext := &daemon.Context{
+	// 	PidFileName: loadedConfig.PidFileDir + "anklet" + suffix + ".pid",
+	// 	PidFilePerm: 0644,
+	// 	LogFileName: loadedConfig.Log.FileDir + "anklet" + suffix + ".log",
+	// 	LogFilePerm: 0640,
+	// 	WorkDir:     loadedConfig.WorkDir,
+	// 	Umask:       027,
+	// 	Args:        []string{"anklet", "-c", configPath},
+	// }
 
-	if len(daemon.ActiveFlags()) > 0 {
-		d, err := daemonContext.Search()
-		if err != nil {
-			log.Fatalf("Unable send signal to the daemon: %s", err.Error())
-		}
-		err = daemon.SendCommands(d)
-		if err != nil {
-			log.Fatalln(err.Error())
-		}
-		return
-	}
+	// if len(daemon.ActiveFlags()) > 0 {
+	// 	d, err := daemonContext.Search()
+	// 	if err != nil {
+	// 		log.Fatalf("Unable send signal to the daemon: %s", err.Error())
+	// 	}
+	// 	err = daemon.SendCommands(d)
+	// 	if err != nil {
+	// 		log.Fatalln(err.Error())
+	// 	}
+	// 	return
+	// }
 
 	pluginsPath := filepath.Join(homeDir, ".config", "anklet", "plugins")
 	parentCtx = context.WithValue(parentCtx, config.ContextKey("globals"), config.Globals{
@@ -158,49 +156,57 @@ func main() {
 		parentCtx = context.WithValue(parentCtx, config.ContextKey("rateLimiter"), rateLimiter)
 	}
 
-	if !*attachFlag {
-		d, err := daemonContext.Reborn()
-		if err != nil {
-			log.Fatalln(err)
-		}
-		if d != nil {
-			return
-		}
-		defer daemonContext.Release()
-	}
+	// if !*attachFlag {
+	// 	d, err := daemonContext.Reborn()
+	// 	if err != nil {
+	// 		log.Fatalln(err)
+	// 	}
+	// 	if d != nil {
+	// 		return
+	// 	}
+	// 	defer daemonContext.Release()
+	// }
 
-	go worker(parentCtx, logger, loadedConfig)
+	// Capture ctrl+c and handle sending cancellation
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
 
-	err = daemon.ServeSignals()
-	if err != nil {
-		log.Printf("Error: %s", err.Error())
-	}
+	//go
+	worker(parentCtx, logger, loadedConfig, sigChan)
+
+	// err = daemon.ServeSignals()
+	// if err != nil {
+	// 	log.Printf("Error: %s", err.Error())
+	// }
 }
 
-func worker(parentCtx context.Context, logger *slog.Logger, loadedConfig config.Config) {
+func worker(parentCtx context.Context, logger *slog.Logger, loadedConfig config.Config, sigChan chan os.Signal) {
 	globals := config.GetGlobalsFromContext(parentCtx)
 	toRunOnce := globals.RunOnce
 	workerCtx, workerCancel := context.WithCancel(parentCtx)
 	suffix := parentCtx.Value(config.ContextKey("suffix")).(string)
 	logger.InfoContext(workerCtx, "starting anklet"+suffix)
+	returnToMainQueue := make(chan bool, 1)
+	workerCtx = context.WithValue(workerCtx, config.ContextKey("returnToMainQueue"), returnToMainQueue)
 	var wg sync.WaitGroup
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGTERM, syscall.SIGQUIT)
 	go func() {
 		defer signal.Stop(sigChan)
 		defer close(sigChan)
 		for sig := range sigChan {
 			switch sig {
-			case syscall.SIGTERM:
-				logger.WarnContext(workerCtx, "best effort graceful shutdown, interrupting the job as soon as possible...")
-				workerCancel()
-			case syscall.SIGQUIT:
+			// case syscall.SIGTERM:
+			// 	logger.WarnContext(workerCtx, "best effort graceful shutdown, interrupting the job as soon as possible...")
+			// 	workerCancel()
+			case syscall.SIGQUIT: // doesn't work for controllers since they don't loop
 				logger.WarnContext(workerCtx, "graceful shutdown, waiting for jobs to finish...")
 				toRunOnce = "true"
+			default:
+				logger.WarnContext(workerCtx, "best effort graceful shutdown, interrupting the job as soon as possible...")
+				workerCancel()
+				returnToMainQueue <- true
 			}
 		}
 	}()
-
 	// Setup Metrics Server and context
 	metricsPort := "8080"
 	if loadedConfig.Metrics.Port != "" {

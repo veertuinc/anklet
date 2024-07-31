@@ -307,11 +307,24 @@ func CheckForCompletedJobs(
 
 // cleanup will pop off the last item from the list and, based on its type, perform the appropriate cleanup action
 // this assumes the plugin code created a list item to represent the thing to clean up
-func cleanup(workerCtx context.Context, serviceCtx context.Context, logger *slog.Logger, completedJobChannel chan bool) {
+func cleanup(
+	workerCtx context.Context,
+	serviceCtx context.Context,
+	logger *slog.Logger,
+	completedJobChannel chan bool,
+	cleanupMu *sync.Mutex,
+) {
+	logger.DebugContext(serviceCtx, "check cleanup lock")
+	cleanupMu.Lock()
 	logger.InfoContext(serviceCtx, "cleaning up")
 	// create an idependent copy of the serviceCtx so we can do cleanup even if serviceCtx got "context canceled"
 	cleanupContext := context.Background()
 	service := config.GetServiceFromContext(serviceCtx)
+	returnToMainQueue, ok := workerCtx.Value(config.ContextKey("returnToMainQueue")).(chan bool)
+	if !ok {
+		logger.ErrorContext(serviceCtx, "error getting returnToMainQueue from context")
+		return
+	}
 	serviceDatabase, err := dbFunctions.GetDatabaseFromContext(serviceCtx)
 	if err != nil {
 		logger.ErrorContext(serviceCtx, "error getting database from context", "err", err)
@@ -319,7 +332,13 @@ func cleanup(workerCtx context.Context, serviceCtx context.Context, logger *slog
 	}
 	cleanupContext = context.WithValue(cleanupContext, config.ContextKey("database"), serviceDatabase)
 	cleanupContext, cancel := context.WithCancel(cleanupContext)
-	defer cancel()
+	defer func() {
+		if cleanupMu != nil {
+			cleanupMu.Unlock()
+			logger.DebugContext(serviceCtx, "cleanup unlocked")
+		}
+		cancel()
+	}()
 	databaseContainer, err := dbFunctions.GetDatabaseFromContext(cleanupContext)
 	if err != nil {
 		logger.ErrorContext(serviceCtx, "error getting database from context", "err", err)
@@ -393,18 +412,29 @@ func cleanup(workerCtx context.Context, serviceCtx context.Context, logger *slog
 			// if we don't, we could suffer from a situation where a completed job comes in and is orphaned
 			select {
 			case <-completedJobChannel:
-				fmt.Println("completed job found")
+				logger.WarnContext(serviceCtx, "completed job found")
 				databaseContainer.Client.Del(cleanupContext, "anklet/jobs/github/completed/"+service.Name)
 				databaseContainer.Client.Del(cleanupContext, "anklet/jobs/github/queued/"+service.Name+"/cleaning")
 				break // break loop and delete /queued/servicename
 			default:
-				fmt.Println("pushing job back to queued")
-				_, err := databaseContainer.Client.RPopLPush(cleanupContext, "anklet/jobs/github/queued/"+service.Name+"/cleaning", "anklet/jobs/github/queued/"+service.Name).Result()
-				if err != nil {
-					logger.ErrorContext(serviceCtx, "error pushing job back to queued", "err", err)
-					return
+				select {
+				case <-returnToMainQueue:
+					logger.WarnContext(serviceCtx, "pushing job back to anklet/jobs/github/queued")
+					_, err := databaseContainer.Client.RPopLPush(cleanupContext, "anklet/jobs/github/queued/"+service.Name+"/cleaning", "anklet/jobs/github/queued").Result()
+					if err != nil {
+						logger.ErrorContext(serviceCtx, "error pushing job back to queued", "err", err)
+						return
+					}
+					databaseContainer.Client.Del(cleanupContext, "anklet/jobs/github/queued/"+service.Name+"/cleaning")
+				default:
+					logger.WarnContext(serviceCtx, "pushing job back to anklet/jobs/github/queued/"+service.Name)
+					_, err := databaseContainer.Client.RPopLPush(cleanupContext, "anklet/jobs/github/queued/"+service.Name+"/cleaning", "anklet/jobs/github/queued/"+service.Name).Result()
+					if err != nil {
+						logger.ErrorContext(serviceCtx, "error pushing job back to queued", "err", err)
+						return
+					}
+					databaseContainer.Client.Del(cleanupContext, "anklet/jobs/github/queued/"+service.Name+"/cleaning")
 				}
-				databaseContainer.Client.Del(cleanupContext, "anklet/jobs/github/queued/"+service.Name+"/cleaning")
 			}
 		default:
 			logger.ErrorContext(serviceCtx, "unknown job type", "job", typedJob)
@@ -462,7 +492,8 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 	serviceCtx = logging.AppendCtx(serviceCtx, slog.String("owner", service.Owner))
 	repositoryURL := fmt.Sprintf("https://github.com/%s/%s", service.Owner, service.Repo)
 
-	mu := &sync.Mutex{}
+	checkForCompletedJobsMu := &sync.Mutex{}
+	cleanupMu := &sync.Mutex{}
 
 	completedJobChannel := make(chan bool, 1)
 	// wait group so we can wait for the goroutine to finish before exiting the service
@@ -477,23 +508,24 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 
 	defer func() {
 		wg.Wait()
-		cleanup(workerCtx, serviceCtx, logger, completedJobChannel)
+		cleanup(workerCtx, serviceCtx, logger, completedJobChannel, cleanupMu)
 		close(completedJobChannel)
 	}()
 
 	// check constantly for a cancelled webhook to be received for our job
 	ranOnce := make(chan struct{})
 	go func() {
-		CheckForCompletedJobs(workerCtx, serviceCtx, logger, mu, completedJobChannel, ranOnce, false)
+		CheckForCompletedJobs(workerCtx, serviceCtx, logger, checkForCompletedJobsMu, completedJobChannel, ranOnce, false)
 		wg.Done()
 	}()
 	<-ranOnce // wait for the goroutine to run at least once
 	// finalize cleanup if the service crashed mid-cleanup
-	cleanup(workerCtx, serviceCtx, logger, completedJobChannel)
+	cleanup(workerCtx, serviceCtx, logger, completedJobChannel, cleanupMu)
 
 	select {
 	case <-completedJobChannel:
 		logger.InfoContext(serviceCtx, "completed job found")
+		completedJobChannel <- true
 		return
 	case <-serviceCtx.Done():
 		logger.WarnContext(serviceCtx, "context canceled before completed job found")
@@ -533,10 +565,11 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 
 	// check if the job is already completed, so we don't orphan if there is
 	// a job in anklet/jobs/github/queued and also a anklet/jobs/github/completed
-	CheckForCompletedJobs(workerCtx, serviceCtx, logger, mu, completedJobChannel, ranOnce, true)
+	CheckForCompletedJobs(workerCtx, serviceCtx, logger, checkForCompletedJobsMu, completedJobChannel, ranOnce, true)
 	select {
 	case <-completedJobChannel:
 		logger.InfoContext(serviceCtx, "completed job found")
+		completedJobChannel <- true
 		return
 	case <-serviceCtx.Done():
 		logger.WarnContext(serviceCtx, "context canceled before completed job found")
