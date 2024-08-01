@@ -1,4 +1,4 @@
-name: 't1-with-tag-1-failure'
+name: 't1-failure-no-template'
 on:
   workflow_dispatch:
 

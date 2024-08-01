@@ -1,4 +1,4 @@
-name: 't1-with-tag-1-failure'
+name: 't1-failure-tag-1-in-vm'
 on:
   workflow_dispatch:
 

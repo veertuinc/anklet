@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -212,6 +213,12 @@ func worker(parentCtx context.Context, logger *slog.Logger, loadedConfig config.
 	if loadedConfig.Metrics.Port != "" {
 		metricsPort = loadedConfig.Metrics.Port
 	}
+	ln, err := net.Listen("tcp", ":"+metricsPort)
+	if err != nil {
+		logger.ErrorContext(workerCtx, "port already in use", "port", metricsPort, "error", err)
+		panic(fmt.Sprintf("port %s is already in use", metricsPort))
+	}
+	ln.Close()
 	metricsService := metrics.NewServer(metricsPort)
 	if loadedConfig.Metrics.Aggregator {
 		workerCtx = logging.AppendCtx(workerCtx, slog.Any("metrics_urls", loadedConfig.Metrics.MetricsURLs))

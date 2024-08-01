@@ -178,7 +178,7 @@ func CheckForCompletedJobs(
 	serviceCtx context.Context,
 	logger *slog.Logger,
 	checkForCompletedJobsMu *sync.Mutex,
-	completedJobChannel chan bool,
+	completedJobChannel chan github.WorkflowJobEvent,
 	ranOnce chan struct{},
 	runOnce bool,
 ) {
@@ -203,7 +203,7 @@ func CheckForCompletedJobs(
 	for {
 		checkForCompletedJobsMu.Lock()
 		// do not use 'continue' in the loop or else the ranOnce won't happen
-		fmt.Println("CheckForCompletedJobs loop start: " + fmt.Sprint(runOnce))
+		// fmt.Println("CheckForCompletedJobs loop start: " + fmt.Sprint(runOnce))
 		select {
 		case <-completedJobChannel:
 			return
@@ -227,10 +227,14 @@ func CheckForCompletedJobs(
 					logger.ErrorContext(serviceCtx, "error getting count of objects in anklet/jobs/github/completed/"+service.Name, "err", err)
 					return
 				}
+				existingJobEvent, err := database.UnwrapPayload[github.WorkflowJobEvent](existingJobString)
+				if err != nil {
+					logger.ErrorContext(serviceCtx, "error unmarshalling job", "err", err)
+					return
+				}
 				if count > 0 {
-					fmt.Println("count > 0 =============")
 					select {
-					case completedJobChannel <- true:
+					case completedJobChannel <- existingJobEvent:
 					default:
 						// remove the completed job we found
 						_, err = databaseContainer.Client.Del(serviceCtx, "anklet/jobs/github/completed/"+service.Name).Result()
@@ -241,32 +245,26 @@ func CheckForCompletedJobs(
 					}
 					return
 				} else {
-					fmt.Println("count == 0 =============")
 					completedJobs, err := databaseContainer.Client.LRange(serviceCtx, "anklet/jobs/github/completed", 0, -1).Result()
 					if err != nil {
 						logger.ErrorContext(serviceCtx, "error getting list of completed jobs", "err", err)
 						return
 					}
-					existingJob, err := database.UnwrapPayload[github.WorkflowJobEvent](existingJobString)
-					if err != nil {
-						logger.ErrorContext(serviceCtx, "error unmarshalling job", "err", err)
-						return
-					}
-					if existingJob.WorkflowJob == nil {
-						logger.ErrorContext(serviceCtx, "existingJob.WorkflowJob is nil")
+					if existingJobEvent.WorkflowJob == nil {
+						logger.ErrorContext(serviceCtx, "existingJobEvent.WorkflowJob is nil")
 						return
 					}
 					for _, completedJob := range completedJobs {
-						completedJobWebhook, err := database.UnwrapPayload[github.WorkflowJobEvent](completedJob)
+						completedJobWebhookEvent, err := database.UnwrapPayload[github.WorkflowJobEvent](completedJob)
 						if err != nil {
 							logger.ErrorContext(serviceCtx, "error unmarshalling job", "err", err)
 							return
 						}
-						if *completedJobWebhook.WorkflowJob.ID == *existingJob.WorkflowJob.ID {
+						if *completedJobWebhookEvent.WorkflowJob.ID == *existingJobEvent.WorkflowJob.ID {
 							// remove the completed job we found
 							_, err = databaseContainer.Client.LRem(serviceCtx, "anklet/jobs/github/completed", 1, completedJob).Result()
 							if err != nil {
-								logger.ErrorContext(serviceCtx, "error removing completedJob from anklet/jobs/github/completed", "err", err, "completedJob", completedJobWebhook)
+								logger.ErrorContext(serviceCtx, "error removing completedJob from anklet/jobs/github/completed", "err", err, "completedJob", completedJobWebhookEvent)
 								return
 							}
 							// delete the existing service task
@@ -281,8 +279,8 @@ func CheckForCompletedJobs(
 								logger.ErrorContext(serviceCtx, "error inserting completed job into list", "err", err)
 								return
 							}
-							completedJobChannel <- true
-							fmt.Println("completedJobChannel <- true")
+							completedJobChannel <- completedJobWebhookEvent
+							fmt.Println("completedJobChannel <- existingJobEvent")
 							return
 						}
 					}
@@ -311,12 +309,11 @@ func cleanup(
 	workerCtx context.Context,
 	serviceCtx context.Context,
 	logger *slog.Logger,
-	completedJobChannel chan bool,
+	completedJobChannel chan github.WorkflowJobEvent,
 	cleanupMu *sync.Mutex,
 ) {
-	logger.DebugContext(serviceCtx, "check cleanup lock")
+	logger.DebugContext(serviceCtx, "cleaning up")
 	cleanupMu.Lock()
-	logger.InfoContext(serviceCtx, "cleaning up")
 	// create an idependent copy of the serviceCtx so we can do cleanup even if serviceCtx got "context canceled"
 	cleanupContext := context.Background()
 	service := config.GetServiceFromContext(serviceCtx)
@@ -441,8 +438,7 @@ func cleanup(
 		}
 		return // don't delete the queued/servicename
 	}
-	fmt.Println("DELETING QUEUED")
-	databaseContainer.Client.Del(cleanupContext, "anklet/jobs/github/queued/"+service.Name)
+	// databaseContainer.Client.Del(cleanupContext, "anklet/jobs/github/queued/"+service.Name)
 }
 
 func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel context.CancelFunc, logger *slog.Logger, firstServiceStarted chan bool) {
@@ -494,7 +490,7 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 	checkForCompletedJobsMu := &sync.Mutex{}
 	cleanupMu := &sync.Mutex{}
 
-	completedJobChannel := make(chan bool, 1)
+	completedJobChannel := make(chan github.WorkflowJobEvent, 1)
 	// wait group so we can wait for the goroutine to finish before exiting the service
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -524,7 +520,7 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 	select {
 	case <-completedJobChannel:
 		logger.InfoContext(serviceCtx, "completed job found")
-		completedJobChannel <- true
+		completedJobChannel <- github.WorkflowJobEvent{}
 		return
 	case <-serviceCtx.Done():
 		logger.WarnContext(serviceCtx, "context canceled before completed job found")
@@ -543,7 +539,7 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 		eldestQueuedJob, err := databaseContainer.Client.LPop(serviceCtx, "anklet/jobs/github/queued").Result()
 		if err == redis.Nil {
 			logger.DebugContext(serviceCtx, "no queued jobs found")
-			completedJobChannel <- true // send true to the channel to stop the check for completed jobs goroutine
+			completedJobChannel <- github.WorkflowJobEvent{} // send true to the channel to stop the check for completed jobs goroutine
 			return
 		}
 		if err != nil {
@@ -569,7 +565,7 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 	select {
 	case <-completedJobChannel:
 		logger.InfoContext(serviceCtx, "completed job found")
-		completedJobChannel <- true
+		completedJobChannel <- github.WorkflowJobEvent{} // send true to the channel to stop the check for completed jobs goroutine
 		return
 	case <-serviceCtx.Done():
 		logger.WarnContext(serviceCtx, "context canceled before completed job found")
@@ -731,20 +727,53 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 
 	// Watch for job completion
 	jobCompleted := false
-	// logCounter := 0
+	logCounter := 0
 	for !jobCompleted {
-		fmt.Println("WATCHING FOR JOB COMPLETION")
 		select {
-		case <-completedJobChannel:
-			logger.InfoContext(serviceCtx, "job completed")
+		case completedJobEvent := <-completedJobChannel:
+			if *completedJobEvent.Action == "completed" {
+				jobCompleted = true
+				serviceCtx = logging.AppendCtx(serviceCtx, slog.String("conclusion", *completedJobEvent.WorkflowJob.Conclusion))
+				logger.InfoContext(serviceCtx, "job completed",
+					"job_id", completedJobEvent.WorkflowJob.ID,
+					"conclusion", *completedJobEvent.WorkflowJob.Conclusion,
+				)
+				if *completedJobEvent.WorkflowJob.Conclusion == "success" {
+					metricsData := metrics.GetMetricsDataFromContext(workerCtx)
+					metricsData.IncrementTotalSuccessfulRunsSinceStart()
+					metricsData.UpdateService(serviceCtx, logger, metrics.Service{
+						Name:                    service.Name,
+						LastSuccessfulRun:       time.Now(),
+						LastSuccessfulRunJobUrl: *completedJobEvent.WorkflowJob.URL,
+					})
+				} else if *completedJobEvent.WorkflowJob.Conclusion == "failure" {
+					metricsData := metrics.GetMetricsDataFromContext(workerCtx)
+					metricsData.IncrementTotalFailedRunsSinceStart()
+					metricsData.UpdateService(serviceCtx, logger, metrics.Service{
+						Name:                service.Name,
+						LastFailedRun:       time.Now(),
+						LastFailedRunJobUrl: *completedJobEvent.WorkflowJob.URL,
+					})
+				}
+			} else if logCounter%2 == 0 {
+				if serviceCtx.Err() != nil {
+					logger.WarnContext(serviceCtx, "context canceled during job status check")
+					return
+				}
+			}
 			jobCompleted = true
-			completedJobChannel <- true // so cleanup can also see it as completed
+			completedJobChannel <- github.WorkflowJobEvent{} // so cleanup can also see it as completed
+			return
 		case <-serviceCtx.Done():
 			logger.WarnContext(serviceCtx, "context canceled while watching for job completion")
 			return
 		default:
+			time.Sleep(10 * time.Second)
+			if logCounter%2 == 0 {
+				logger.InfoContext(serviceCtx, "job still in progress", "job_id", workflowJob.JobID)
+			}
+			logCounter++
 		}
-		time.Sleep(10 * time.Second)
 		// serviceCtx, currentJob, response, err := ExecuteGitHubClientFunction[github.WorkflowJob](serviceCtx, logger, func() (*github.WorkflowJob, *github.Response, error) {
 		// 	currentJob, resp, err := githubClient.Actions.GetWorkflowJobByID(context.Background(), service.Owner, service.Repo, workflowRunJob.JobID)
 		// 	return currentJob, resp, err
@@ -782,7 +811,6 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 		// 	logger.InfoContext(serviceCtx, "job still in progress", "job_id", workflowRunJob.JobID)
 		// 	time.Sleep(5 * time.Second) // Wait before checking the job status again
 		// }
-		// logCounter++
 	}
 }
 

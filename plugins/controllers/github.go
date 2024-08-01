@@ -204,7 +204,6 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 						wg.Add(1)
 						go func(queue string) {
 							defer wg.Done()
-							fmt.Println("checking if in queue", queue)
 							inQueue, err := InQueue(serviceCtx, logger, *workflowJob.WorkflowJob.ID, queue)
 							if err != nil {
 								logger.WarnContext(serviceCtx, err.Error(), "queue", queue)
@@ -232,7 +231,6 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 							logger.ErrorContext(serviceCtx, "error searching in queue", "error", err)
 							return
 						}
-						fmt.Println("inCompletedQueue", inCompletedQueue)
 						if !inCompletedQueue {
 							// push it to the queue
 							wrappedJobPayload := map[string]interface{}{
@@ -322,7 +320,7 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 			return
 		}
 		for _, hookDelivery := range *hookDeliveries {
-			fmt.Println("hookDelivery", *hookDelivery.ID, *hookDelivery.StatusCode, *hookDelivery.Redelivery, *hookDelivery.DeliveredAt)
+			// fmt.Println("hookDelivery", *hookDelivery.ID, *hookDelivery.StatusCode, *hookDelivery.Redelivery, *hookDelivery.DeliveredAt)
 			if hookDelivery.StatusCode != nil && !*hookDelivery.Redelivery && *hookDelivery.Action != "in_progress" {
 				serviceCtx, gottenHookDelivery, _, err := ExecuteGitHubClientFunction(serviceCtx, logger, func() (*github.HookDelivery, *github.Response, error) {
 					gottenHookDelivery, response, err := githubClient.Repositories.GetHookDelivery(serviceCtx, service.Owner, service.Repo, service.HookID, *hookDelivery.ID)
