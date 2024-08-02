@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"regexp"
-	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -17,7 +15,6 @@ import (
 	"github.com/veertuinc/anklet/internal/anka"
 	"github.com/veertuinc/anklet/internal/config"
 	"github.com/veertuinc/anklet/internal/database"
-	dbFunctions "github.com/veertuinc/anklet/internal/database"
 	internalGithub "github.com/veertuinc/anklet/internal/github"
 	"github.com/veertuinc/anklet/internal/logging"
 	"github.com/veertuinc/anklet/internal/metrics"
@@ -35,81 +32,81 @@ type WorkflowRunJobDetail struct {
 	Labels          []string
 }
 
-func exists_in_array_exact(array_to_search_in []string, desired []string) bool {
-	for _, desired_string := range desired {
-		found := false
-		for _, item := range array_to_search_in {
-			if item == desired_string {
-				found = true
-				break
-			}
-		}
-		if !found {
-			return false
-		}
-	}
-	return true
-}
+// func exists_in_array_exact(array_to_search_in []string, desired []string) bool {
+// 	for _, desired_string := range desired {
+// 		found := false
+// 		for _, item := range array_to_search_in {
+// 			if item == desired_string {
+// 				found = true
+// 				break
+// 			}
+// 		}
+// 		if !found {
+// 			return false
+// 		}
+// 	}
+// 	return true
+// }
 
-func exists_in_array_regex(array_to_search_in []string, desired []string) bool {
-	if len(desired) == 0 || desired[0] == "" {
-		return false
-	}
-	for _, desired_string := range desired {
-		// fmt.Printf("  desired_string: %s\n", desired_string)
-		found := false
-		for _, item := range array_to_search_in {
-			// fmt.Printf("    item: %s\n", item)
-			// Check if the desired_string is a valid regex pattern
-			if rege, err := regexp.Compile(desired_string); err == nil {
-				// If it's a valid regex, check for a regex match
-				sanitizedSplit := slices.DeleteFunc(rege.Split(item, -1), func(e string) bool {
-					return e == ""
-				})
-				// fmt.Printf("    sanitizedSplit: %+v\n", sanitizedSplit)
-				if len(sanitizedSplit) == 0 {
-					// fmt.Println("      regex match")
-					found = true
-					break
-				}
-			}
-		}
-		if !found {
-			return false
-		}
-	}
-	return true
-}
+// func exists_in_array_regex(array_to_search_in []string, desired []string) bool {
+// 	if len(desired) == 0 || desired[0] == "" {
+// 		return false
+// 	}
+// 	for _, desired_string := range desired {
+// 		// fmt.Printf("  desired_string: %s\n", desired_string)
+// 		found := false
+// 		for _, item := range array_to_search_in {
+// 			// fmt.Printf("    item: %s\n", item)
+// 			// Check if the desired_string is a valid regex pattern
+// 			if rege, err := regexp.Compile(desired_string); err == nil {
+// 				// If it's a valid regex, check for a regex match
+// 				sanitizedSplit := slices.DeleteFunc(rege.Split(item, -1), func(e string) bool {
+// 					return e == ""
+// 				})
+// 				// fmt.Printf("    sanitizedSplit: %+v\n", sanitizedSplit)
+// 				if len(sanitizedSplit) == 0 {
+// 					// fmt.Println("      regex match")
+// 					found = true
+// 					break
+// 				}
+// 			}
+// 		}
+// 		if !found {
+// 			return false
+// 		}
+// 	}
+// 	return true
+// }
 
-func does_not_exist_in_array_regex(array_to_search_in []string, excluded []string) bool {
-	if len(excluded) == 0 || excluded[0] == "" {
-		return true
-	}
-	for _, excluded_string := range excluded {
-		// fmt.Printf("  excluded_string: %s\n", excluded_string)
-		found := false
-		for _, item := range array_to_search_in {
-			// fmt.Printf("    item: %s\n", item)
-			// Check if the desired_string is a valid regex pattern
-			if rege, err := regexp.Compile(excluded_string); err == nil {
-				// If it's a valid regex, check for a regex match
-				sanitizedSplit := slices.DeleteFunc(rege.Split(item, -1), func(e string) bool {
-					return e == ""
-				})
-				// fmt.Printf("    sanitizedSplit: %+v\n", sanitizedSplit)
-				if len(sanitizedSplit) > 0 {
-					// fmt.Println("      regex match")
-					found = true
-					break
-				}
-			}
-		}
-		if !found {
-			return false
-		}
-	}
-	return true
-}
+// func does_not_exist_in_array_regex(array_to_search_in []string, excluded []string) bool {
+// 	if len(excluded) == 0 || excluded[0] == "" {
+// 		return true
+// 	}
+// 	for _, excluded_string := range excluded {
+// 		// fmt.Printf("  excluded_string: %s\n", excluded_string)
+// 		found := false
+// 		for _, item := range array_to_search_in {
+// 			// fmt.Printf("    item: %s\n", item)
+// 			// Check if the desired_string is a valid regex pattern
+// 			if rege, err := regexp.Compile(excluded_string); err == nil {
+// 				// If it's a valid regex, check for a regex match
+// 				sanitizedSplit := slices.DeleteFunc(rege.Split(item, -1), func(e string) bool {
+// 					return e == ""
+// 				})
+// 				// fmt.Printf("    sanitizedSplit: %+v\n", sanitizedSplit)
+// 				if len(sanitizedSplit) > 0 {
+// 					// fmt.Println("      regex match")
+// 					found = true
+// 					break
+// 				}
+// 			}
+// 		}
+// 		if !found {
+// 			return false
+// 		}
+// 	}
+// 	return true
+// }
 
 func extractLabelValue(labels []string, prefix string) string {
 	for _, label := range labels {
@@ -120,8 +117,44 @@ func extractLabelValue(labels []string, prefix string) string {
 	return ""
 }
 
+func sendCancelWorkflowRun(serviceCtx context.Context, logger *slog.Logger, workflowRunID int64) error {
+	githubClient := internalGithub.GetGitHubClientFromContext(serviceCtx)
+	service := config.GetServiceFromContext(serviceCtx)
+	cancelSent := false
+	for {
+		serviceCtx, workflowRun, _, err := executeGitHubClientFunction[github.WorkflowRun](serviceCtx, logger, func() (*github.WorkflowRun, *github.Response, error) {
+			workflowRun, resp, err := githubClient.Actions.GetWorkflowRunByID(context.Background(), service.Owner, service.Repo, workflowRunID)
+			return workflowRun, resp, err
+		})
+		if err != nil {
+			logger.ErrorContext(serviceCtx, "error getting workflow run by ID", "err", err)
+			return err
+		}
+		if *workflowRun.Status == "completed" || (workflowRun.Conclusion != nil && *workflowRun.Conclusion == "cancelled") {
+			break
+		} else {
+			logger.WarnContext(serviceCtx, "workflow run is still active... waiting for cancellation so we can clean up...", "workflow_run_id", workflowRunID)
+			if !cancelSent { // this has to happen here so that it doesn't error with "409 Cannot cancel a workflow run that is completed. " if the job is already cancelled
+				serviceCtx, cancelResponse, _, cancelErr := executeGitHubClientFunction[github.Response](serviceCtx, logger, func() (*github.Response, *github.Response, error) {
+					resp, err := githubClient.Actions.CancelWorkflowRunByID(context.Background(), service.Owner, service.Repo, workflowRunID)
+					return resp, nil, err
+				})
+				// don't use cancelResponse.Response.StatusCode or else it'll error with SIGSEV
+				if cancelErr != nil && !strings.Contains(cancelErr.Error(), "try again later") {
+					logger.ErrorContext(serviceCtx, "error executing githubClient.Actions.CancelWorkflowRunByID", "err", cancelErr, "response", cancelResponse)
+					return cancelErr
+				}
+				cancelSent = true
+				logger.WarnContext(serviceCtx, "sent cancel workflow run", "workflow_run_id", workflowRunID)
+			}
+			time.Sleep(10 * time.Second)
+		}
+	}
+	return nil
+}
+
 // https://github.com/gofri/go-github-ratelimit has yet to support primary rate limits, so we have to do it ourselves.
-func ExecuteGitHubClientFunction[T any](serviceCtx context.Context, logger *slog.Logger, executeFunc func() (*T, *github.Response, error)) (context.Context, *T, *github.Response, error) {
+func executeGitHubClientFunction[T any](serviceCtx context.Context, logger *slog.Logger, executeFunc func() (*T, *github.Response, error)) (context.Context, *T, *github.Response, error) {
 	result, response, err := executeFunc()
 	if response != nil {
 		serviceCtx = logging.AppendCtx(serviceCtx, slog.Int("api_limit_remaining", response.Rate.Remaining))
@@ -142,7 +175,7 @@ func ExecuteGitHubClientFunction[T any](serviceCtx context.Context, logger *slog
 					Name:   service.Name,
 					Status: "running",
 				})
-				return ExecuteGitHubClientFunction(serviceCtx, logger, executeFunc) // Retry the function after waiting
+				return executeGitHubClientFunction(serviceCtx, logger, executeFunc) // Retry the function after waiting
 			case <-serviceCtx.Done():
 				return serviceCtx, nil, nil, serviceCtx.Err()
 			}
@@ -183,7 +216,7 @@ func CheckForCompletedJobs(
 	runOnce bool,
 ) {
 	fmt.Println("CheckForCompletedJobs")
-	databaseContainer, err := dbFunctions.GetDatabaseFromContext(serviceCtx)
+	databaseContainer, err := database.GetDatabaseFromContext(serviceCtx)
 	if err != nil {
 		logger.ErrorContext(serviceCtx, "error getting database from context", "err", err)
 		logging.Panic(workerCtx, serviceCtx, "error getting database from context")
@@ -322,7 +355,7 @@ func cleanup(
 		logger.ErrorContext(serviceCtx, "error getting returnToMainQueue from context")
 		return
 	}
-	serviceDatabase, err := dbFunctions.GetDatabaseFromContext(serviceCtx)
+	serviceDatabase, err := database.GetDatabaseFromContext(serviceCtx)
 	if err != nil {
 		logger.ErrorContext(serviceCtx, "error getting database from context", "err", err)
 		return
@@ -335,7 +368,7 @@ func cleanup(
 		}
 		cancel()
 	}()
-	databaseContainer, err := dbFunctions.GetDatabaseFromContext(cleanupContext)
+	databaseContainer, err := database.GetDatabaseFromContext(cleanupContext)
 	if err != nil {
 		logger.ErrorContext(serviceCtx, "error getting database from context", "err", err)
 		return
@@ -495,7 +528,7 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 	var wg sync.WaitGroup
 	wg.Add(1)
 
-	databaseContainer, err := dbFunctions.GetDatabaseFromContext(serviceCtx)
+	databaseContainer, err := database.GetDatabaseFromContext(serviceCtx)
 	if err != nil {
 		logger.ErrorContext(serviceCtx, "error getting database from context", "err", err)
 		return
@@ -618,6 +651,10 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 	templateTagExistsError := ankaCLI.EnsureVMTemplateExists(workerCtx, serviceCtx, workflowJob.AnkaTemplate, workflowJob.AnkaTemplateTag)
 	if templateTagExistsError != nil {
 		logger.WarnContext(serviceCtx, "error ensuring vm template exists on host", "err", templateTagExistsError)
+		err := sendCancelWorkflowRun(serviceCtx, logger, workflowJob.RunID)
+		if err != nil {
+			logger.ErrorContext(serviceCtx, "error sending cancel workflow run", "err", err)
+		}
 		return
 	}
 	if serviceCtx.Err() != nil {
@@ -626,7 +663,7 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 	}
 
 	// Get runner registration token
-	serviceCtx, repoRunnerRegistration, response, err := ExecuteGitHubClientFunction[github.RegistrationToken](serviceCtx, logger, func() (*github.RegistrationToken, *github.Response, error) {
+	serviceCtx, repoRunnerRegistration, response, err := executeGitHubClientFunction[github.RegistrationToken](serviceCtx, logger, func() (*github.RegistrationToken, *github.Response, error) {
 		repoRunnerRegistration, resp, err := githubClient.Actions.CreateRegistrationToken(context.Background(), service.Owner, service.Repo)
 		return repoRunnerRegistration, resp, err
 	})
@@ -820,7 +857,7 @@ func removeSelfHostedRunner(serviceCtx context.Context, vm anka.VM, workflowRunI
 	logger := logging.GetLoggerFromContext(serviceCtx)
 	service := config.GetServiceFromContext(serviceCtx)
 	githubClient := internalGithub.GetGitHubClientFromContext(serviceCtx)
-	serviceCtx, runnersList, response, err := ExecuteGitHubClientFunction[github.Runners](serviceCtx, logger, func() (*github.Runners, *github.Response, error) {
+	serviceCtx, runnersList, response, err := executeGitHubClientFunction[github.Runners](serviceCtx, logger, func() (*github.Runners, *github.Response, error) {
 		runnersList, resp, err := githubClient.Actions.ListRunners(context.Background(), service.Owner, service.Repo, &github.ListRunnersOptions{})
 		return runnersList, resp, err
 	})
@@ -842,36 +879,12 @@ func removeSelfHostedRunner(serviceCtx context.Context, vm anka.VM, workflowRunI
 					"ankaTemplateTag": "(using latest)",
 					"err": "DELETE https://api.github.com/repos/veertuinc/anklet/actions/runners/142: 422 Bad request - Runner \"anklet-vm-\u003cuuid\u003e\" is still running a job\" []",
 				*/
-				cancelSent := false
-				for {
-					serviceCtx, workflowRun, _, err := ExecuteGitHubClientFunction[github.WorkflowRun](serviceCtx, logger, func() (*github.WorkflowRun, *github.Response, error) {
-						workflowRun, resp, err := githubClient.Actions.GetWorkflowRunByID(context.Background(), service.Owner, service.Repo, workflowRunID)
-						return workflowRun, resp, err
-					})
-					if err != nil {
-						logger.ErrorContext(serviceCtx, "error getting workflow run by ID", "err", err)
-						return
-					}
-					if *workflowRun.Status == "completed" || (workflowRun.Conclusion != nil && *workflowRun.Conclusion == "cancelled") {
-						break
-					} else {
-						logger.WarnContext(serviceCtx, "workflow run is still active... waiting for cancellation so we can clean up the runner...", "workflow_run_id", workflowRunID)
-						if !cancelSent { // this has to happen here so that it doesn't error with "409 Cannot cancel a workflow run that is completed. " if the job is already cancelled
-							serviceCtx, cancelResponse, _, cancelErr := ExecuteGitHubClientFunction[github.Response](serviceCtx, logger, func() (*github.Response, *github.Response, error) {
-								resp, err := githubClient.Actions.CancelWorkflowRunByID(context.Background(), service.Owner, service.Repo, workflowRunID)
-								return resp, nil, err
-							})
-							// don't use cancelResponse.Response.StatusCode or else it'll error with SIGSEV
-							if cancelErr != nil && !strings.Contains(cancelErr.Error(), "try again later") {
-								logger.ErrorContext(serviceCtx, "error executing githubClient.Actions.CancelWorkflowRunByID", "err", cancelErr, "response", cancelResponse)
-								break
-							}
-							cancelSent = true
-						}
-						time.Sleep(10 * time.Second)
-					}
+				err := sendCancelWorkflowRun(serviceCtx, logger, workflowRunID)
+				if err != nil {
+					logger.ErrorContext(serviceCtx, "error sending cancel workflow run", "err", err)
+					return
 				}
-				serviceCtx, _, _, err = ExecuteGitHubClientFunction[github.Response](serviceCtx, logger, func() (*github.Response, *github.Response, error) {
+				serviceCtx, _, _, err = executeGitHubClientFunction[github.Response](serviceCtx, logger, func() (*github.Response, *github.Response, error) {
 					response, err := githubClient.Actions.RemoveRunner(context.Background(), service.Owner, service.Repo, *runner.ID)
 					return response, nil, err
 				})
