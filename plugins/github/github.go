@@ -260,8 +260,8 @@ func CheckForCompletedJobs(
 					logger.ErrorContext(serviceCtx, "error getting count of objects in anklet/jobs/github/completed/"+service.Name, "err", err)
 					return
 				}
-				existingJobEvent, err := database.UnwrapPayload[github.WorkflowJobEvent](existingJobString)
-				if err != nil {
+				existingJobEvent, err, typeErr := database.UnwrapPayload[github.WorkflowJobEvent](existingJobString)
+				if err != nil || typeErr != nil {
 					logger.ErrorContext(serviceCtx, "error unmarshalling job", "err", err)
 					return
 				}
@@ -288,11 +288,12 @@ func CheckForCompletedJobs(
 						return
 					}
 					for _, completedJob := range completedJobs {
-						completedJobWebhookEvent, err := database.UnwrapPayload[github.WorkflowJobEvent](completedJob)
-						if err != nil {
+						completedJobWebhookEvent, err, typeErr := database.UnwrapPayload[github.WorkflowJobEvent](completedJob)
+						if err != nil || typeErr != nil {
 							logger.ErrorContext(serviceCtx, "error unmarshalling job", "err", err)
 							return
 						}
+
 						if *completedJobWebhookEvent.WorkflowJob.ID == *existingJobEvent.WorkflowJob.ID {
 							// remove the completed job we found
 							_, err = databaseContainer.Client.LRem(serviceCtx, "anklet/jobs/github/completed", 1, completedJob).Result()
@@ -583,8 +584,8 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 		wrappedPayloadJSON = eldestQueuedJob
 	}
 
-	queuedJob, err := database.UnwrapPayload[github.WorkflowJobEvent](wrappedPayloadJSON)
-	if err != nil {
+	queuedJob, err, typeErr := database.UnwrapPayload[github.WorkflowJobEvent](wrappedPayloadJSON)
+	if err != nil || typeErr != nil {
 		logger.ErrorContext(serviceCtx, "error unmarshalling job", "err", err)
 		return
 	}
@@ -722,19 +723,32 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 		return
 	}
 
-	if serviceCtx.Err() != nil {
+	select {
+	case <-completedJobChannel:
+		logger.InfoContext(serviceCtx, "completed job found")
+		completedJobChannel <- github.WorkflowJobEvent{} // send true to the channel to stop the check for completed jobs goroutine
+		return
+	case <-serviceCtx.Done():
 		logger.WarnContext(serviceCtx, "context canceled before install runner")
 		return
+	default:
 	}
+
 	installRunnerErr := ankaCLI.AnkaRun(serviceCtx, "./install-runner.bash")
 	if installRunnerErr != nil {
 		logger.ErrorContext(serviceCtx, "error executing install-runner.bash", "err", installRunnerErr)
 		return
 	}
 	// Register runner
-	if serviceCtx.Err() != nil {
+	select {
+	case <-completedJobChannel:
+		logger.InfoContext(serviceCtx, "completed job found")
+		completedJobChannel <- github.WorkflowJobEvent{} // send true to the channel to stop the check for completed jobs goroutine
+		return
+	case <-serviceCtx.Done():
 		logger.WarnContext(serviceCtx, "context canceled before register runner")
 		return
+	default:
 	}
 	registerRunnerErr := ankaCLI.AnkaRun(serviceCtx,
 		"./register-runner.bash",
@@ -746,18 +760,30 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 	}
 	defer removeSelfHostedRunner(serviceCtx, *vm, workflowJob.RunID)
 	// Install and Start runner
-	if serviceCtx.Err() != nil {
+	select {
+	case <-completedJobChannel:
+		logger.InfoContext(serviceCtx, "completed job found")
+		completedJobChannel <- github.WorkflowJobEvent{} // send true to the channel to stop the check for completed jobs goroutine
+		return
+	case <-serviceCtx.Done():
 		logger.WarnContext(serviceCtx, "context canceled before start runner")
 		return
+	default:
 	}
 	startRunnerErr := ankaCLI.AnkaRun(serviceCtx, "./start-runner.bash")
 	if startRunnerErr != nil {
 		logger.ErrorContext(serviceCtx, "error executing start-runner.bash", "err", startRunnerErr)
 		return
 	}
-	if serviceCtx.Err() != nil {
+	select {
+	case <-completedJobChannel:
+		logger.InfoContext(serviceCtx, "completed job found")
+		completedJobChannel <- github.WorkflowJobEvent{} // send true to the channel to stop the check for completed jobs goroutine
+		return
+	case <-serviceCtx.Done():
 		logger.WarnContext(serviceCtx, "context canceled before jobCompleted checks")
 		return
+	default:
 	}
 
 	logger.InfoContext(serviceCtx, "watching for job completion")
