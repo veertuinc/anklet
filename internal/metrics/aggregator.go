@@ -15,7 +15,7 @@ import (
 
 // Start runs the HTTP server
 func (s *Server) StartAggregatorServer(workerCtx context.Context, logger *slog.Logger) {
-	http.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
+	http.HandleFunc("/metrics/v1", func(w http.ResponseWriter, r *http.Request) {
 		databaseContainer, err := database.GetDatabaseFromContext(workerCtx)
 		if err != nil {
 			logger.ErrorContext(workerCtx, "error getting database client from context", "error", err)
@@ -29,6 +29,10 @@ func (s *Server) StartAggregatorServer(workerCtx context.Context, logger *slog.L
 		} else {
 			http.Error(w, "unsupported format, please use '?format=json' or '?format=prometheus'", http.StatusBadRequest)
 		}
+	})
+	http.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotImplemented)
+		w.Write([]byte("please use /metrics/v1"))
 	})
 	http.ListenAndServe(":"+s.Port, nil)
 }

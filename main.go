@@ -4,8 +4,8 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"log"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -16,7 +16,6 @@ import (
 	"time"
 
 	"github.com/gofri/go-github-ratelimit/github_ratelimit"
-	"github.com/norsegaud/go-daemon"
 	"github.com/veertuinc/anklet/internal/anka"
 	"github.com/veertuinc/anklet/internal/config"
 	"github.com/veertuinc/anklet/internal/database"
@@ -30,25 +29,25 @@ var (
 	runOnce     = "false"
 	versionFlag = flag.Bool("version", false, "Print the version")
 	configFlag  = flag.String("c", "", "Path to the config file (defaults to ~/.config/anklet/config.yml)")
-	signalFlag  = flag.String("s", "", `Send signal to the daemon:
-  drain — graceful shutdown, will wait until all jobs finish before exiting
-  stop — best effort graceful shutdown, interrupting the job as soon as possible`)
-	attachFlag      = flag.Bool("attach", false, "Attach to the anklet and don't background it (useful for containers)")
-	stop            = make(chan struct{})
-	done            = make(chan struct{})
+	// 	signalFlag  = flag.String("s", "", `Send signal to the daemon:
+	//   drain — graceful shutdown, will wait until all jobs finish before exiting
+	//   stop — best effort graceful shutdown, interrupting the job as soon as possible`)
+	// attachFlag      = flag.Bool("attach", false, "Attach to the anklet and don't background it (useful for containers)")
+	// stop            = make(chan struct{})
+	// done            = make(chan struct{})
 	shutDownMessage = "anklet service shut down"
 )
 
-func termHandler(ctx context.Context, logger *slog.Logger) daemon.SignalHandlerFunc {
-	return func(sig os.Signal) error {
-		logger.WarnContext(ctx, "terminating anklet, please do not interrupt...")
-		stop <- struct{}{}
-		if sig == syscall.SIGQUIT {
-			<-done
-		}
-		return daemon.ErrStop
-	}
-}
+// func termHandler(ctx context.Context, logger *slog.Logger) daemon.SignalHandlerFunc {
+// 	return func(sig os.Signal) error {
+// 		logger.WarnContext(ctx, "terminating anklet, please do not interrupt...")
+// 		stop <- struct{}{}
+// 		if sig == syscall.SIGQUIT {
+// 			<-done
+// 		}
+// 		return daemon.ErrStop
+// 	}
+// }
 
 func main() {
 
@@ -64,8 +63,8 @@ func main() {
 		fmt.Println(version)
 		os.Exit(0)
 	}
-	daemon.AddCommand(daemon.StringFlag(signalFlag, "drain"), syscall.SIGQUIT, termHandler(parentCtx, logger))
-	daemon.AddCommand(daemon.StringFlag(signalFlag, "stop"), syscall.SIGTERM, termHandler(parentCtx, logger))
+	// daemon.AddCommand(daemon.StringFlag(signalFlag, "drain"), syscall.SIGQUIT, termHandler(parentCtx, logger))
+	// daemon.AddCommand(daemon.StringFlag(signalFlag, "stop"), syscall.SIGTERM, termHandler(parentCtx, logger))
 
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
@@ -81,14 +80,14 @@ func main() {
 	// obtain config
 	loadedConfig, err := config.LoadConfig(configPath)
 	if err != nil {
-		logger.InfoContext(parentCtx, "unable to load config.yml", "error", err)
-		// panic(err)
+		logger.ErrorContext(parentCtx, "unable to load config.yml (is it in the work_dir, or are you using an absolute path?)", "error", err)
+		panic(err)
 	}
-	logger.InfoContext(parentCtx, "loaded config", slog.Any("config", loadedConfig))
 	loadedConfig, err = config.LoadInEnvs(loadedConfig)
 	if err != nil {
 		panic(err)
 	}
+	logger.InfoContext(parentCtx, "loaded config", slog.Any("config", loadedConfig))
 
 	parentCtx = logging.AppendCtx(parentCtx, slog.String("ankletVersion", version))
 
@@ -98,12 +97,12 @@ func main() {
 	}
 	parentCtx = context.WithValue(parentCtx, config.ContextKey("suffix"), suffix)
 
-	if loadedConfig.Log.FileDir == "" {
-		loadedConfig.Log.FileDir = "./"
-	}
-	if loadedConfig.PidFileDir == "" {
-		loadedConfig.PidFileDir = "./"
-	}
+	// if loadedConfig.Log.FileDir == "" {
+	// 	loadedConfig.Log.FileDir = "./"
+	// }
+	// if loadedConfig.PidFileDir == "" {
+	// 	loadedConfig.PidFileDir = "./"
+	// }
 	if loadedConfig.WorkDir == "" {
 		loadedConfig.WorkDir = "./"
 	}
@@ -111,27 +110,27 @@ func main() {
 	logger.DebugContext(parentCtx, "loaded config", slog.Any("config", loadedConfig))
 	parentCtx = context.WithValue(parentCtx, config.ContextKey("config"), &loadedConfig)
 
-	daemonContext := &daemon.Context{
-		PidFileName: loadedConfig.PidFileDir + "anklet" + suffix + ".pid",
-		PidFilePerm: 0644,
-		LogFileName: loadedConfig.Log.FileDir + "anklet" + suffix + ".log",
-		LogFilePerm: 0640,
-		WorkDir:     loadedConfig.WorkDir,
-		Umask:       027,
-		Args:        []string{"anklet", "-c", configPath},
-	}
+	// daemonContext := &daemon.Context{
+	// 	PidFileName: loadedConfig.PidFileDir + "anklet" + suffix + ".pid",
+	// 	PidFilePerm: 0644,
+	// 	LogFileName: loadedConfig.Log.FileDir + "anklet" + suffix + ".log",
+	// 	LogFilePerm: 0640,
+	// 	WorkDir:     loadedConfig.WorkDir,
+	// 	Umask:       027,
+	// 	Args:        []string{"anklet", "-c", configPath},
+	// }
 
-	if len(daemon.ActiveFlags()) > 0 {
-		d, err := daemonContext.Search()
-		if err != nil {
-			log.Fatalf("Unable send signal to the daemon: %s", err.Error())
-		}
-		err = daemon.SendCommands(d)
-		if err != nil {
-			log.Fatalln(err.Error())
-		}
-		return
-	}
+	// if len(daemon.ActiveFlags()) > 0 {
+	// 	d, err := daemonContext.Search()
+	// 	if err != nil {
+	// 		log.Fatalf("Unable send signal to the daemon: %s", err.Error())
+	// 	}
+	// 	err = daemon.SendCommands(d)
+	// 	if err != nil {
+	// 		log.Fatalln(err.Error())
+	// 	}
+	// 	return
+	// }
 
 	pluginsPath := filepath.Join(homeDir, ".config", "anklet", "plugins")
 	parentCtx = context.WithValue(parentCtx, config.ContextKey("globals"), config.Globals{
@@ -143,71 +142,83 @@ func main() {
 	httpTransport := http.DefaultTransport
 	parentCtx = context.WithValue(parentCtx, config.ContextKey("httpTransport"), httpTransport)
 
-	if !loadedConfig.Metrics.Aggregator {
-		githubServiceExists := false
-		for _, service := range loadedConfig.Services {
-			if service.Plugin == "github" {
-				githubServiceExists = true
-			}
-		}
-		if githubServiceExists {
-			rateLimiter, err := github_ratelimit.NewRateLimitWaiterClient(httpTransport)
-			if err != nil {
-				logger.ErrorContext(parentCtx, "error creating github_ratelimit.NewRateLimitWaiterClient", "err", err)
-				return
-			}
-			parentCtx = context.WithValue(parentCtx, config.ContextKey("rateLimiter"), rateLimiter)
+	githubServiceExists := false
+	for _, service := range loadedConfig.Services {
+		if service.Plugin == "github" || service.Plugin == "github_controller" {
+			githubServiceExists = true
 		}
 	}
-
-	if !*attachFlag {
-		d, err := daemonContext.Reborn()
+	if githubServiceExists {
+		rateLimiter, err := github_ratelimit.NewRateLimitWaiterClient(httpTransport)
 		if err != nil {
-			log.Fatalln(err)
-		}
-		if d != nil {
+			logger.ErrorContext(parentCtx, "error creating github_ratelimit.NewRateLimitWaiterClient", "err", err)
 			return
 		}
-		defer daemonContext.Release()
+		parentCtx = context.WithValue(parentCtx, config.ContextKey("rateLimiter"), rateLimiter)
 	}
 
-	go worker(parentCtx, logger, loadedConfig)
+	// if !*attachFlag {
+	// 	d, err := daemonContext.Reborn()
+	// 	if err != nil {
+	// 		log.Fatalln(err)
+	// 	}
+	// 	if d != nil {
+	// 		return
+	// 	}
+	// 	defer daemonContext.Release()
+	// }
 
-	err = daemon.ServeSignals()
-	if err != nil {
-		log.Printf("Error: %s", err.Error())
-	}
+	// Capture ctrl+c and handle sending cancellation
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
+
+	//go
+	worker(parentCtx, logger, loadedConfig, sigChan)
+
+	// err = daemon.ServeSignals()
+	// if err != nil {
+	// 	log.Printf("Error: %s", err.Error())
+	// }
 }
 
-func worker(parentCtx context.Context, logger *slog.Logger, loadedConfig config.Config) {
+func worker(parentCtx context.Context, logger *slog.Logger, loadedConfig config.Config, sigChan chan os.Signal) {
 	globals := config.GetGlobalsFromContext(parentCtx)
 	toRunOnce := globals.RunOnce
 	workerCtx, workerCancel := context.WithCancel(parentCtx)
 	suffix := parentCtx.Value(config.ContextKey("suffix")).(string)
 	logger.InfoContext(workerCtx, "starting anklet"+suffix)
+	returnToMainQueue := make(chan bool, 1)
+	workerCtx = context.WithValue(workerCtx, config.ContextKey("returnToMainQueue"), returnToMainQueue)
 	var wg sync.WaitGroup
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGTERM, syscall.SIGQUIT)
 	go func() {
 		defer signal.Stop(sigChan)
 		defer close(sigChan)
 		for sig := range sigChan {
 			switch sig {
-			case syscall.SIGTERM:
-				logger.WarnContext(workerCtx, "best effort graceful shutdown, interrupting the job as soon as possible...")
-				workerCancel()
-			case syscall.SIGQUIT:
+			// case syscall.SIGTERM:
+			// 	logger.WarnContext(workerCtx, "best effort graceful shutdown, interrupting the job as soon as possible...")
+			// 	workerCancel()
+			case syscall.SIGQUIT: // doesn't work for controllers since they don't loop
 				logger.WarnContext(workerCtx, "graceful shutdown, waiting for jobs to finish...")
 				toRunOnce = "true"
+			default:
+				logger.WarnContext(workerCtx, "best effort graceful shutdown, interrupting the job as soon as possible...")
+				workerCancel()
+				returnToMainQueue <- true
 			}
 		}
 	}()
-
 	// Setup Metrics Server and context
 	metricsPort := "8080"
 	if loadedConfig.Metrics.Port != "" {
 		metricsPort = loadedConfig.Metrics.Port
 	}
+	ln, err := net.Listen("tcp", ":"+metricsPort)
+	if err != nil {
+		logger.ErrorContext(workerCtx, "port already in use", "port", metricsPort, "error", err)
+		panic(fmt.Sprintf("port %s is already in use", metricsPort))
+	}
+	ln.Close()
 	metricsService := metrics.NewServer(metricsPort)
 	if loadedConfig.Metrics.Aggregator {
 		workerCtx = logging.AppendCtx(workerCtx, slog.Any("metrics_urls", loadedConfig.Metrics.MetricsURLs))
@@ -254,6 +265,10 @@ func worker(parentCtx context.Context, logger *slog.Logger, loadedConfig config.
 			}(metricsURL)
 		}
 	} else {
+		// firstServiceStarted: always make sure the first service in the config starts first before any others.
+		// this allows users to mix a controller with multiple other plugins,
+		// and let the controller do its thing to prepare the db first.
+		firstServiceStarted := make(chan bool, 1)
 		metricsData := &metrics.MetricsDataLock{}
 		workerCtx = context.WithValue(workerCtx, config.ContextKey("metrics"), metricsData)
 		go metricsService.Start(workerCtx, logger)
@@ -266,20 +281,6 @@ func worker(parentCtx context.Context, logger *slog.Logger, loadedConfig config.
 			go func(service config.Service) {
 				defer wg.Done()
 				serviceCtx, serviceCancel := context.WithCancel(workerCtx) // Inherit from parent context
-				// sigChan := make(chan os.Signal, 1)
-				// signal.Notify(sigChan, syscall.SIGTERM, syscall.SIGQUIT)
-				// go func() {
-				// 	defer signal.Stop(sigChan)
-				// 	defer close(sigChan)
-				// 	for sig := range sigChan {
-				// 		switch sig {
-				// 		case syscall.SIGTERM:
-				// 			serviceCancel()
-				// 		case syscall.SIGQUIT:
-				// 			runOnce = "true"
-				// 		}
-				// 	}
-				// }()
 
 				if service.Name == "" {
 					panic("name is required for services")
@@ -304,7 +305,8 @@ func worker(parentCtx context.Context, logger *slog.Logger, loadedConfig config.
 					serviceCtx = context.WithValue(serviceCtx, config.ContextKey("database"), databaseClient)
 				}
 
-				logger.InfoContext(serviceCtx, "started service")
+				logger.InfoContext(serviceCtx, "starting service")
+
 				metricsData.AddService(metrics.Service{
 					Name:               service.Name,
 					PluginName:         service.Plugin,
@@ -317,17 +319,18 @@ func worker(parentCtx context.Context, logger *slog.Logger, loadedConfig config.
 				for {
 					select {
 					case <-serviceCtx.Done():
-						serviceCancel()
-						logger.WarnContext(serviceCtx, shutDownMessage)
 						metrics.UpdateService(workerCtx, serviceCtx, logger, metrics.Service{
 							Status: "stopped",
 						})
+						logger.WarnContext(serviceCtx, shutDownMessage)
+						serviceCancel()
 						return
 					default:
-						run.Plugin(workerCtx, serviceCtx, logger)
+						run.Plugin(workerCtx, serviceCtx, serviceCancel, logger, firstServiceStarted)
 						if workerCtx.Err() != nil || toRunOnce == "true" {
 							serviceCancel()
-							break
+							logger.WarnContext(serviceCtx, shutDownMessage)
+							return
 						}
 						metrics.UpdateService(workerCtx, serviceCtx, logger, metrics.Service{
 							Status: "idle",
@@ -335,6 +338,7 @@ func worker(parentCtx context.Context, logger *slog.Logger, loadedConfig config.
 						select {
 						case <-time.After(time.Duration(service.SleepInterval) * time.Second):
 						case <-serviceCtx.Done():
+							fmt.Println("serviceCtx.Done()")
 							break
 						}
 					}
