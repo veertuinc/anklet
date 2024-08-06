@@ -214,8 +214,10 @@ func CheckForCompletedJobs(
 	completedJobChannel chan github.WorkflowJobEvent,
 	ranOnce chan struct{},
 	runOnce bool,
+	failureChannel chan bool,
 ) {
-	fmt.Println("CheckForCompletedJobs")
+	service := config.GetServiceFromContext(serviceCtx)
+	logger.DebugContext(serviceCtx, "CheckForCompletedJobs")
 	databaseContainer, err := database.GetDatabaseFromContext(serviceCtx)
 	if err != nil {
 		logger.ErrorContext(serviceCtx, "error getting database from context", "err", err)
@@ -238,18 +240,26 @@ func CheckForCompletedJobs(
 		// do not use 'continue' in the loop or else the ranOnce won't happen
 		// fmt.Println("CheckForCompletedJobs loop start: " + fmt.Sprint(runOnce))
 		select {
+		case <-failureChannel:
+			logger.ErrorContext(serviceCtx, "CheckForCompletedJobs failureChannel")
+			returnToMainQueue, ok := workerCtx.Value(config.ContextKey("returnToMainQueue")).(chan bool)
+			if !ok {
+				logger.ErrorContext(serviceCtx, "error getting returnToMainQueue from context")
+				return
+			}
+			returnToMainQueue <- true
+			return
 		case <-completedJobChannel:
 			return
 		case <-serviceCtx.Done():
-			fmt.Println("CheckForCompletedJobs serviceCtx.Done()")
+			logger.ErrorContext(serviceCtx, "CheckForCompletedJobs serviceCtx.Done()")
 			return
 		default:
 		}
-		service := config.GetServiceFromContext(serviceCtx)
 		// get the job ID
 		existingJobString, err := databaseContainer.Client.LIndex(serviceCtx, "anklet/jobs/github/queued/"+service.Name, 0).Result()
 		if runOnce && err == redis.Nil { // handle no job for service; needed so the github plugin resets and looks for new jobs again
-			fmt.Println("CheckForCompletedJobs err == redis.Nil")
+			logger.ErrorContext(serviceCtx, "CheckForCompletedJobs err == redis.Nil")
 			return
 		} else {
 			if err == nil {
@@ -328,7 +338,7 @@ func CheckForCompletedJobs(
 		default:
 			close(ranOnce)
 		}
-		fmt.Println("CheckForCompletedJobs runOnce: " + fmt.Sprint(runOnce))
+		logger.DebugContext(serviceCtx, "CheckForCompletedJobs runOnce: "+fmt.Sprint(runOnce))
 		if runOnce {
 			return
 		}
@@ -524,6 +534,8 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 	checkForCompletedJobsMu := &sync.Mutex{}
 	cleanupMu := &sync.Mutex{}
 
+	failureChannel := make(chan bool, 1)
+
 	completedJobChannel := make(chan github.WorkflowJobEvent, 1)
 	// wait group so we can wait for the goroutine to finish before exiting the service
 	var wg sync.WaitGroup
@@ -544,7 +556,7 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 	// check constantly for a cancelled webhook to be received for our job
 	ranOnce := make(chan struct{})
 	go func() {
-		CheckForCompletedJobs(workerCtx, serviceCtx, logger, checkForCompletedJobsMu, completedJobChannel, ranOnce, false)
+		CheckForCompletedJobs(workerCtx, serviceCtx, logger, checkForCompletedJobsMu, completedJobChannel, ranOnce, false, failureChannel)
 		wg.Done()
 	}()
 	<-ranOnce // wait for the goroutine to run at least once
@@ -595,7 +607,7 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 
 	// check if the job is already completed, so we don't orphan if there is
 	// a job in anklet/jobs/github/queued and also a anklet/jobs/github/completed
-	CheckForCompletedJobs(workerCtx, serviceCtx, logger, checkForCompletedJobsMu, completedJobChannel, ranOnce, true)
+	CheckForCompletedJobs(workerCtx, serviceCtx, logger, checkForCompletedJobsMu, completedJobChannel, ranOnce, true, failureChannel)
 	select {
 	case <-completedJobChannel:
 		logger.InfoContext(serviceCtx, "completed job found")
@@ -684,29 +696,34 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 
 	// Obtain Anka VM (and name)
 	serviceCtx, vm, err := ankaCLI.ObtainAnkaVM(workerCtx, serviceCtx, workflowJob.AnkaTemplate)
-	// defer ankaCLI.AnkaDelete(workerCtx, serviceCtx, vm)
-	if err != nil {
-		logger.ErrorContext(serviceCtx, "error obtaining anka vm", "err", err)
-		return
-	}
-
 	wrappedVM := map[string]interface{}{
 		"type":    "anka.VM",
 		"payload": vm,
 	}
-	wrappedVmJSON, err := json.Marshal(wrappedVM)
-	if err != nil {
-		logger.ErrorContext(serviceCtx, "error marshalling vm to json", "err", err)
+	wrappedVmJSON, wrappedVmErr := json.Marshal(wrappedVM)
+	if wrappedVmErr != nil {
+		logger.ErrorContext(serviceCtx, "error marshalling vm to json", "err", wrappedVmErr)
+		ankaCLI.AnkaDelete(workerCtx, serviceCtx, vm)
+		failureChannel <- true
 		return
 	}
-	err = databaseContainer.Client.RPush(serviceCtx, "anklet/jobs/github/queued/"+service.Name, wrappedVmJSON).Err()
+	dbErr := databaseContainer.Client.RPush(serviceCtx, "anklet/jobs/github/queued/"+service.Name, wrappedVmJSON).Err()
+	if dbErr != nil {
+		logger.ErrorContext(serviceCtx, "error pushing vm data to database", "err", dbErr)
+		failureChannel <- true
+		return
+	}
 	if err != nil {
-		logger.ErrorContext(serviceCtx, "error pushing vm data to database", "err", err)
+		// this is thrown, for example, when there is no capacity on the host
+		// we must be sure to create the DB entry so cleanup happens properly
+		logger.ErrorContext(serviceCtx, "error obtaining anka vm", "err", err)
+		failureChannel <- true
 		return
 	}
 
 	if serviceCtx.Err() != nil {
 		logger.WarnContext(serviceCtx, "context canceled after ObtainAnkaVM")
+		failureChannel <- true
 		return
 	}
 
@@ -720,6 +737,7 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 	)
 	if err != nil {
 		logger.ErrorContext(serviceCtx, "error executing anka copy", "err", err)
+		failureChannel <- true
 		return
 	}
 
@@ -737,6 +755,7 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 	installRunnerErr := ankaCLI.AnkaRun(serviceCtx, "./install-runner.bash")
 	if installRunnerErr != nil {
 		logger.ErrorContext(serviceCtx, "error executing install-runner.bash", "err", installRunnerErr)
+		failureChannel <- true
 		return
 	}
 	// Register runner
@@ -756,6 +775,7 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 	)
 	if registerRunnerErr != nil {
 		logger.ErrorContext(serviceCtx, "error executing register-runner.bash", "err", registerRunnerErr)
+		failureChannel <- true
 		return
 	}
 	defer removeSelfHostedRunner(serviceCtx, *vm, workflowJob.RunID)
@@ -773,6 +793,7 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 	startRunnerErr := ankaCLI.AnkaRun(serviceCtx, "./start-runner.bash")
 	if startRunnerErr != nil {
 		logger.ErrorContext(serviceCtx, "error executing start-runner.bash", "err", startRunnerErr)
+		failureChannel <- true
 		return
 	}
 	select {

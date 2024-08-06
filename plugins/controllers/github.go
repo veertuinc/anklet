@@ -65,11 +65,9 @@ func InQueue(serviceCtx context.Context, logger *slog.Logger, jobID int64, queue
 			logger.ErrorContext(serviceCtx, "error unmarshalling job", "err", err)
 			return false, err
 		}
-		logger.DebugContext(serviceCtx, "workflowJobEvent", "workflowJobEvent", workflowJobEvent)
 		if typeErr != nil { // not the type we want
 			continue
 		}
-		fmt.Println("jobs", *workflowJobEvent.WorkflowJob.ID, jobID)
 		if *workflowJobEvent.WorkflowJob.ID == jobID {
 			return true, fmt.Errorf("job already in queue")
 		}
@@ -204,12 +202,10 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 
 					results := make(chan bool, len(queues))
 					var wg sync.WaitGroup
-
 					for _, queue := range queues {
 						wg.Add(1)
 						go func(queue string) {
 							defer wg.Done()
-							fmt.Println("queue", queue)
 							inQueue, err := InQueue(serviceCtx, logger, *workflowJob.WorkflowJob.ID, queue)
 							if err != nil {
 								logger.WarnContext(serviceCtx, err.Error(), "queue", queue)
@@ -217,22 +213,17 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 							results <- inQueue
 						}(queue)
 					}
-
 					go func() {
 						wg.Wait()
 						close(results)
 					}()
-
 					inAQueue := false
 					for result := range results {
-						fmt.Println("result", result)
 						if result {
 							inAQueue = true
 							break
 						}
 					}
-
-					logger.DebugContext(serviceCtx, "inAQueue", "inAQueue", inAQueue)
 					if inAQueue { // only add completed if it's in a queue
 						inCompletedQueue, err := InQueue(serviceCtx, logger, *workflowJob.WorkflowJob.ID, "anklet/jobs/github/completed")
 						if err != nil {
@@ -328,7 +319,7 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 			return
 		}
 		for _, hookDelivery := range *hookDeliveries {
-			fmt.Println("hookDelivery", *hookDelivery.ID, *hookDelivery.StatusCode, *hookDelivery.Redelivery, *hookDelivery.DeliveredAt)
+			// fmt.Println("hookDelivery", *hookDelivery.ID, *hookDelivery.StatusCode, *hookDelivery.Redelivery, *hookDelivery.DeliveredAt)
 			if hookDelivery.StatusCode != nil && !*hookDelivery.Redelivery && *hookDelivery.Action != "in_progress" {
 				serviceCtx, gottenHookDelivery, _, err := ExecuteGitHubClientFunction(serviceCtx, logger, func() (*github.HookDelivery, *github.Response, error) {
 					gottenHookDelivery, response, err := githubClient.Repositories.GetHookDelivery(serviceCtx, service.Owner, service.Repo, service.HookID, *hookDelivery.ID)
@@ -410,8 +401,8 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 			inCompletedListKey := ""
 			inCompletedIndex := 0
 
-			logger.DebugContext(serviceCtx, "hookDelivery", "hookDelivery", hookDelivery)
-			logger.DebugContext(serviceCtx, "workflowJobEvent", "workflowJobEvent", workflowJobEvent)
+			// logger.DebugContext(serviceCtx, "hookDelivery", "hookDelivery", hookDelivery)
+			// logger.DebugContext(serviceCtx, "workflowJobEvent", "workflowJobEvent", workflowJobEvent)
 
 			// Check if the job is already in the queue
 			if workflowJobEvent.WorkflowJob == nil || workflowJobEvent.WorkflowJob.ID == nil {
@@ -440,8 +431,6 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 					if workflowJobEvent.WorkflowJob.ID == nil {
 						continue
 					}
-					fmt.Println("wrappedPayload.WorkflowJob.ID", *wrappedPayload.WorkflowJob.ID)
-					fmt.Println("workflowJobEvent.WorkflowJob.ID", *workflowJobEvent.WorkflowJob.ID)
 					if *wrappedPayload.WorkflowJob.ID == *workflowJobEvent.WorkflowJob.ID {
 						inQueued = true
 						// inQueuedListKey = key
@@ -538,7 +527,6 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 	}
 	logger.InfoContext(serviceCtx, "started service")
 	// wait for the context to be canceled
-	fmt.Println("serviceCtx.Done()")
 	<-serviceCtx.Done()
 	logger.InfoContext(serviceCtx, "shutting down controller")
 	if err := server.Shutdown(serviceCtx); err != nil {
