@@ -276,8 +276,21 @@ func worker(parentCtx context.Context, logger *slog.Logger, loadedConfig config.
 		metrics.UpdateSystemMetrics(workerCtx, logger, metricsData)
 		/////////////
 		// Services
-		for _, service := range loadedConfig.Services {
+		for index, service := range loadedConfig.Services {
 			wg.Add(1)
+			if index != 0 {
+			waitLoop:
+				for {
+					select {
+					case <-firstServiceStarted:
+						break waitLoop
+					case <-workerCtx.Done():
+						return
+					default:
+						time.Sleep(100 * time.Millisecond)
+					}
+				}
+			}
 			go func(service config.Service) {
 				defer wg.Done()
 				serviceCtx, serviceCancel := context.WithCancel(workerCtx) // Inherit from parent context
@@ -292,7 +305,9 @@ func worker(parentCtx context.Context, logger *slog.Logger, loadedConfig config.
 
 				ankaCLI, err := anka.NewCLI(serviceCtx)
 				if err != nil {
-					panic(fmt.Sprintf("unable to create anka cli: %v", err))
+					serviceCancel()
+					logger.ErrorContext(serviceCtx, "unable to create anka cli", "error", err)
+					return
 				}
 
 				serviceCtx = context.WithValue(serviceCtx, config.ContextKey("ankacli"), ankaCLI)
@@ -317,6 +332,7 @@ func worker(parentCtx context.Context, logger *slog.Logger, loadedConfig config.
 				})
 
 				for {
+					fmt.Println("for" + service.Name)
 					select {
 					case <-serviceCtx.Done():
 						metrics.UpdateService(workerCtx, serviceCtx, logger, metrics.Service{

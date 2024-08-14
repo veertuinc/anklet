@@ -477,3 +477,7 @@ Any of the services you run are done from within worker context. Each service al
 For example, the `github` plugin will update the metrics for the service it is running in to be `running`, `pulling`, and `idle` when it is done or has yet to pick up a new job. To do this, it uses `metrics.UpdateService` with the worker and service context. See `github` plugin for an example.
 
 But metrics.UpdateService can also update things like `LastSuccess`, and `LastFailure`. See `metrics.UpdateService` for more information.
+
+
+## Copyright
+All rights reserved, Veertu Inc.

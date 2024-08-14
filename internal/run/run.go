@@ -3,7 +3,6 @@ package run
 import (
 	"context"
 	"log/slog"
-	"time"
 
 	"github.com/veertuinc/anklet/internal/config"
 	"github.com/veertuinc/anklet/internal/logging"
@@ -21,16 +20,19 @@ func Plugin(workerCtx context.Context, serviceCtx context.Context, serviceCancel
 	if service.Plugin == "github" {
 		for {
 			select {
-			case <-firstServiceStarted:
-				github.Run(workerCtx, serviceCtx, serviceCancel, logger, firstServiceStarted)
-				return
 			case <-serviceCtx.Done():
 				logger.InfoContext(serviceCtx, "context cancelled before service started")
 				serviceCancel()
 				return
 			default:
-				time.Sleep(1 * time.Second)
-				firstServiceStarted <- true // if there is no controller in the config, we need to send this to the first service started channel to start the service
+				// notify the main thread that the service has started
+				select {
+				case <-firstServiceStarted:
+					logger.InfoContext(serviceCtx, "first service started")
+				default:
+					close(firstServiceStarted)
+				}
+				github.Run(workerCtx, serviceCtx, serviceCancel, logger)
 			}
 		}
 	} else if service.Plugin == "github_controller" {

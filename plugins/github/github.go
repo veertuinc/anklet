@@ -252,7 +252,7 @@ func CheckForCompletedJobs(
 		case <-completedJobChannel:
 			return
 		case <-serviceCtx.Done():
-			logger.ErrorContext(serviceCtx, "CheckForCompletedJobs serviceCtx.Done()")
+			logger.WarnContext(serviceCtx, "CheckForCompletedJobs serviceCtx.Done()")
 			return
 		default:
 		}
@@ -485,7 +485,7 @@ func cleanup(
 	// databaseContainer.Client.Del(cleanupContext, "anklet/jobs/github/queued/"+service.Name)
 }
 
-func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel context.CancelFunc, logger *slog.Logger, firstServiceStarted chan bool) {
+func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel context.CancelFunc, logger *slog.Logger) {
 	fmt.Println(" ====================================================== ")
 	logger.InfoContext(serviceCtx, "github plugin checking for jobs")
 
