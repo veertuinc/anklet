@@ -21,14 +21,12 @@ func Plugin(workerCtx context.Context, serviceCtx context.Context, serviceCancel
 		for {
 			select {
 			case <-serviceCtx.Done():
-				logger.InfoContext(serviceCtx, "context cancelled before service started")
 				serviceCancel()
 				return
 			default:
 				// notify the main thread that the service has started
 				select {
 				case <-firstServiceStarted:
-					logger.InfoContext(serviceCtx, "first service started")
 				default:
 					close(firstServiceStarted)
 				}

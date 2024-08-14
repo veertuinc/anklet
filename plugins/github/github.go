@@ -486,8 +486,7 @@ func cleanup(
 }
 
 func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel context.CancelFunc, logger *slog.Logger) {
-	fmt.Println(" ====================================================== ")
-	logger.InfoContext(serviceCtx, "github plugin checking for jobs")
+	logger.InfoContext(serviceCtx, "checking for jobs....")
 
 	service := config.GetServiceFromContext(serviceCtx)
 

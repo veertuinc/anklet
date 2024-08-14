@@ -521,7 +521,6 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 	// notify the main thread that the service has started
 	select {
 	case <-firstServiceStarted:
-		logger.InfoContext(serviceCtx, "first service started")
 	default:
 		close(firstServiceStarted)
 	}
