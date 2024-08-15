@@ -217,7 +217,7 @@ func CheckForCompletedJobs(
 	failureChannel chan bool,
 ) {
 	service := config.GetServiceFromContext(serviceCtx)
-	logger.DebugContext(serviceCtx, "CheckForCompletedJobs")
+	fmt.Printf("CheckForCompletedJobs " + service.Name + " runOnce: " + fmt.Sprint(runOnce) + "\n")
 	databaseContainer, err := database.GetDatabaseFromContext(serviceCtx)
 	if err != nil {
 		logger.ErrorContext(serviceCtx, "error getting database from context", "err", err)
@@ -225,6 +225,7 @@ func CheckForCompletedJobs(
 	}
 	defer func() {
 		if checkForCompletedJobsMu != nil {
+			fmt.Printf("CheckForCompletedJobs " + service.Name + " UNLOCKING (defer) runOnce: " + fmt.Sprint(runOnce) + "\n")
 			checkForCompletedJobsMu.Unlock()
 		}
 		// ensure, outside of needing to return on error, that the following always runs
@@ -236,12 +237,14 @@ func CheckForCompletedJobs(
 		}
 	}()
 	for {
+		fmt.Printf("CheckForCompletedJobs " + service.Name + " LOCKING runOnce: " + fmt.Sprint(runOnce) + "\n")
 		checkForCompletedJobsMu.Lock()
+		fmt.Printf("CheckForCompletedJobs " + service.Name + " LOCKED runOnce: " + fmt.Sprint(runOnce) + "\n")
 		// do not use 'continue' in the loop or else the ranOnce won't happen
 		// fmt.Println("CheckForCompletedJobs loop start: " + fmt.Sprint(runOnce))
 		select {
 		case <-failureChannel:
-			logger.ErrorContext(serviceCtx, "CheckForCompletedJobs failureChannel")
+			logger.ErrorContext(serviceCtx, "CheckForCompletedJobs"+service.Name+" failureChannel")
 			returnToMainQueue, ok := workerCtx.Value(config.ContextKey("returnToMainQueue")).(chan bool)
 			if !ok {
 				logger.ErrorContext(serviceCtx, "error getting returnToMainQueue from context")
@@ -252,14 +255,14 @@ func CheckForCompletedJobs(
 		case <-completedJobChannel:
 			return
 		case <-serviceCtx.Done():
-			logger.WarnContext(serviceCtx, "CheckForCompletedJobs serviceCtx.Done()")
+			logger.WarnContext(serviceCtx, "CheckForCompletedJobs"+service.Name+" serviceCtx.Done()")
 			return
 		default:
 		}
 		// get the job ID
 		existingJobString, err := databaseContainer.Client.LIndex(serviceCtx, "anklet/jobs/github/queued/"+service.Name, 0).Result()
 		if runOnce && err == redis.Nil { // handle no job for service; needed so the github plugin resets and looks for new jobs again
-			logger.ErrorContext(serviceCtx, "CheckForCompletedJobs err == redis.Nil")
+			logger.ErrorContext(serviceCtx, "CheckForCompletedJobs"+service.Name+" err == redis.Nil")
 			return
 		} else {
 			if err == nil {
@@ -324,7 +327,7 @@ func CheckForCompletedJobs(
 								return
 							}
 							completedJobChannel <- completedJobWebhookEvent
-							fmt.Println("completedJobChannel <- existingJobEvent")
+							fmt.Printf("CheckForCompletedJobs " + service.Name + " completedJobChannel <- existingJobEvent\n")
 							return
 						}
 					}
@@ -338,11 +341,13 @@ func CheckForCompletedJobs(
 		default:
 			close(ranOnce)
 		}
-		logger.DebugContext(serviceCtx, "CheckForCompletedJobs runOnce: "+fmt.Sprint(runOnce))
 		if runOnce {
 			return
 		}
-		checkForCompletedJobsMu.Unlock()
+		if checkForCompletedJobsMu != nil {
+			fmt.Printf("CheckForCompletedJobs " + service.Name + " UNLOCKING (end) runOnce: " + fmt.Sprint(runOnce) + "\n")
+			checkForCompletedJobsMu.Unlock()
+		}
 		time.Sleep(3 * time.Second)
 	}
 }
@@ -356,7 +361,6 @@ func cleanup(
 	completedJobChannel chan github.WorkflowJobEvent,
 	cleanupMu *sync.Mutex,
 ) {
-	logger.DebugContext(serviceCtx, "cleaning up")
 	cleanupMu.Lock()
 	// create an idependent copy of the serviceCtx so we can do cleanup even if serviceCtx got "context canceled"
 	cleanupContext := context.Background()
@@ -550,6 +554,7 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 		wg.Wait()
 		cleanup(workerCtx, serviceCtx, logger, completedJobChannel, cleanupMu)
 		close(completedJobChannel)
+		logger.ErrorContext(serviceCtx, "finished")
 	}()
 
 	// check constantly for a cancelled webhook to be received for our job
@@ -564,7 +569,7 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 
 	select {
 	case <-completedJobChannel:
-		logger.InfoContext(serviceCtx, "completed job found")
+		logger.InfoContext(serviceCtx, "completed job found at start")
 		completedJobChannel <- github.WorkflowJobEvent{}
 		return
 	case <-serviceCtx.Done():
@@ -601,6 +606,8 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 		return
 	}
 	serviceCtx = logging.AppendCtx(serviceCtx, slog.Int64("workflowJobID", *queuedJob.WorkflowJob.ID))
+	serviceCtx = logging.AppendCtx(serviceCtx, slog.String("workflowJobName", *queuedJob.WorkflowJob.Name))
+	serviceCtx = logging.AppendCtx(serviceCtx, slog.Int64("workflowJobRunID", *queuedJob.WorkflowJob.RunID))
 
 	logger.DebugContext(serviceCtx, "queued job found", "queuedJob", queuedJob.Action)
 
@@ -609,7 +616,7 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 	CheckForCompletedJobs(workerCtx, serviceCtx, logger, checkForCompletedJobsMu, completedJobChannel, ranOnce, true, failureChannel)
 	select {
 	case <-completedJobChannel:
-		logger.InfoContext(serviceCtx, "completed job found")
+		logger.InfoContext(serviceCtx, "completed job found by CheckForCompletedJobs")
 		completedJobChannel <- github.WorkflowJobEvent{} // send true to the channel to stop the check for completed jobs goroutine
 		return
 	case <-serviceCtx.Done():
@@ -658,6 +665,8 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 		Status: "running",
 	})
 
+	skipPrep := false // allows us to wait for the cancellation we sent to be received so we can clean up properly
+
 	// See if VM Template existing already
 	//TODO: be able to interrupt this
 	templateTagExistsError := ankaCLI.EnsureVMTemplateExists(workerCtx, serviceCtx, workflowJob.AnkaTemplate, workflowJob.AnkaTemplateTag)
@@ -667,144 +676,149 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 		if err != nil {
 			logger.ErrorContext(serviceCtx, "error sending cancel workflow run", "err", err)
 		}
-		return
+		skipPrep = true
 	}
+
 	if serviceCtx.Err() != nil {
 		logger.WarnContext(serviceCtx, "context canceled during vm template check")
 		return
 	}
 
-	// Get runner registration token
-	serviceCtx, repoRunnerRegistration, response, err := executeGitHubClientFunction[github.RegistrationToken](serviceCtx, logger, func() (*github.RegistrationToken, *github.Response, error) {
-		repoRunnerRegistration, resp, err := githubClient.Actions.CreateRegistrationToken(context.Background(), service.Owner, service.Repo)
-		return repoRunnerRegistration, resp, err
-	})
-	if err != nil {
-		logger.ErrorContext(serviceCtx, "error creating registration token", "err", err, "response", response)
-		return
-	}
-	if *repoRunnerRegistration.Token == "" {
-		logger.ErrorContext(serviceCtx, "registration token is empty; something wrong with github or your service token", "response", response)
-		return
-	}
+	if !skipPrep {
 
-	if serviceCtx.Err() != nil {
-		logger.WarnContext(serviceCtx, "context canceled before ObtainAnkaVM")
-		return
-	}
+		// Get runner registration token
+		serviceCtx, repoRunnerRegistration, response, err := executeGitHubClientFunction[github.RegistrationToken](serviceCtx, logger, func() (*github.RegistrationToken, *github.Response, error) {
+			repoRunnerRegistration, resp, err := githubClient.Actions.CreateRegistrationToken(context.Background(), service.Owner, service.Repo)
+			return repoRunnerRegistration, resp, err
+		})
+		if err != nil {
+			logger.ErrorContext(serviceCtx, "error creating registration token", "err", err, "response", response)
+			return
+		}
+		if *repoRunnerRegistration.Token == "" {
+			logger.ErrorContext(serviceCtx, "registration token is empty; something wrong with github or your service token", "response", response)
+			return
+		}
 
-	// Obtain Anka VM (and name)
-	serviceCtx, vm, err := ankaCLI.ObtainAnkaVM(workerCtx, serviceCtx, workflowJob.AnkaTemplate)
-	wrappedVM := map[string]interface{}{
-		"type":    "anka.VM",
-		"payload": vm,
-	}
-	wrappedVmJSON, wrappedVmErr := json.Marshal(wrappedVM)
-	if wrappedVmErr != nil {
-		logger.ErrorContext(serviceCtx, "error marshalling vm to json", "err", wrappedVmErr)
-		ankaCLI.AnkaDelete(workerCtx, serviceCtx, vm)
-		failureChannel <- true
-		return
-	}
-	dbErr := databaseContainer.Client.RPush(serviceCtx, "anklet/jobs/github/queued/"+service.Name, wrappedVmJSON).Err()
-	if dbErr != nil {
-		logger.ErrorContext(serviceCtx, "error pushing vm data to database", "err", dbErr)
-		failureChannel <- true
-		return
-	}
-	if err != nil {
-		// this is thrown, for example, when there is no capacity on the host
-		// we must be sure to create the DB entry so cleanup happens properly
-		logger.ErrorContext(serviceCtx, "error obtaining anka vm", "err", err)
-		failureChannel <- true
-		return
-	}
+		if serviceCtx.Err() != nil {
+			logger.WarnContext(serviceCtx, "context canceled before ObtainAnkaVM")
+			return
+		}
 
-	if serviceCtx.Err() != nil {
-		logger.WarnContext(serviceCtx, "context canceled after ObtainAnkaVM")
-		failureChannel <- true
-		return
-	}
+		// Obtain Anka VM (and name)
+		serviceCtx, vm, err := ankaCLI.ObtainAnkaVM(workerCtx, serviceCtx, workflowJob.AnkaTemplate)
+		wrappedVM := map[string]interface{}{
+			"type":    "anka.VM",
+			"payload": vm,
+		}
+		wrappedVmJSON, wrappedVmErr := json.Marshal(wrappedVM)
+		if wrappedVmErr != nil {
+			logger.ErrorContext(serviceCtx, "error marshalling vm to json", "err", wrappedVmErr)
+			ankaCLI.AnkaDelete(workerCtx, serviceCtx, vm)
+			failureChannel <- true
+			return
+		}
+		dbErr := databaseContainer.Client.RPush(serviceCtx, "anklet/jobs/github/queued/"+service.Name, wrappedVmJSON).Err()
+		if dbErr != nil {
+			logger.ErrorContext(serviceCtx, "error pushing vm data to database", "err", dbErr)
+			failureChannel <- true
+			return
+		}
+		if err != nil {
+			// this is thrown, for example, when there is no capacity on the host
+			// we must be sure to create the DB entry so cleanup happens properly
+			logger.ErrorContext(serviceCtx, "error obtaining anka vm", "err", err)
+			failureChannel <- true
+			return
+		}
 
-	// Install runner
-	globals := config.GetGlobalsFromContext(serviceCtx)
-	logger.InfoContext(serviceCtx, "installing github runner inside of vm")
-	err = ankaCLI.AnkaCopy(serviceCtx,
-		globals.PluginsPath+"/github/install-runner.bash",
-		globals.PluginsPath+"/github/register-runner.bash",
-		globals.PluginsPath+"/github/start-runner.bash",
-	)
-	if err != nil {
-		logger.ErrorContext(serviceCtx, "error executing anka copy", "err", err)
-		failureChannel <- true
-		return
-	}
+		if serviceCtx.Err() != nil {
+			logger.WarnContext(serviceCtx, "context canceled after ObtainAnkaVM")
+			failureChannel <- true
+			return
+		}
 
-	select {
-	case <-completedJobChannel:
-		logger.InfoContext(serviceCtx, "completed job found")
-		completedJobChannel <- github.WorkflowJobEvent{} // send true to the channel to stop the check for completed jobs goroutine
-		return
-	case <-serviceCtx.Done():
-		logger.WarnContext(serviceCtx, "context canceled before install runner")
-		return
-	default:
-	}
+		// Install runner
+		globals := config.GetGlobalsFromContext(serviceCtx)
+		logger.InfoContext(serviceCtx, "installing github runner inside of vm")
+		err = ankaCLI.AnkaCopy(serviceCtx,
+			globals.PluginsPath+"/github/install-runner.bash",
+			globals.PluginsPath+"/github/register-runner.bash",
+			globals.PluginsPath+"/github/start-runner.bash",
+		)
+		if err != nil {
+			logger.ErrorContext(serviceCtx, "error executing anka copy", "err", err)
+			failureChannel <- true
+			return
+		}
 
-	installRunnerErr := ankaCLI.AnkaRun(serviceCtx, "./install-runner.bash")
-	if installRunnerErr != nil {
-		logger.ErrorContext(serviceCtx, "error executing install-runner.bash", "err", installRunnerErr)
-		failureChannel <- true
-		return
-	}
-	// Register runner
-	select {
-	case <-completedJobChannel:
-		logger.InfoContext(serviceCtx, "completed job found")
-		completedJobChannel <- github.WorkflowJobEvent{} // send true to the channel to stop the check for completed jobs goroutine
-		return
-	case <-serviceCtx.Done():
-		logger.WarnContext(serviceCtx, "context canceled before register runner")
-		return
-	default:
-	}
-	registerRunnerErr := ankaCLI.AnkaRun(serviceCtx,
-		"./register-runner.bash",
-		vm.Name, *repoRunnerRegistration.Token, repositoryURL, strings.Join(workflowJob.Labels, ","),
-	)
-	if registerRunnerErr != nil {
-		logger.ErrorContext(serviceCtx, "error executing register-runner.bash", "err", registerRunnerErr)
-		failureChannel <- true
-		return
-	}
-	defer removeSelfHostedRunner(serviceCtx, *vm, workflowJob.RunID)
-	// Install and Start runner
-	select {
-	case <-completedJobChannel:
-		logger.InfoContext(serviceCtx, "completed job found")
-		completedJobChannel <- github.WorkflowJobEvent{} // send true to the channel to stop the check for completed jobs goroutine
-		return
-	case <-serviceCtx.Done():
-		logger.WarnContext(serviceCtx, "context canceled before start runner")
-		return
-	default:
-	}
-	startRunnerErr := ankaCLI.AnkaRun(serviceCtx, "./start-runner.bash")
-	if startRunnerErr != nil {
-		logger.ErrorContext(serviceCtx, "error executing start-runner.bash", "err", startRunnerErr)
-		failureChannel <- true
-		return
-	}
-	select {
-	case <-completedJobChannel:
-		logger.InfoContext(serviceCtx, "completed job found")
-		completedJobChannel <- github.WorkflowJobEvent{} // send true to the channel to stop the check for completed jobs goroutine
-		return
-	case <-serviceCtx.Done():
-		logger.WarnContext(serviceCtx, "context canceled before jobCompleted checks")
-		return
-	default:
-	}
+		select {
+		case <-completedJobChannel:
+			logger.InfoContext(serviceCtx, "completed job found before installing runner")
+			completedJobChannel <- github.WorkflowJobEvent{} // send true to the channel to stop the check for completed jobs goroutine
+			return
+		case <-serviceCtx.Done():
+			logger.WarnContext(serviceCtx, "context canceled before install runner")
+			return
+		default:
+		}
+
+		installRunnerErr := ankaCLI.AnkaRun(serviceCtx, "./install-runner.bash")
+		if installRunnerErr != nil {
+			logger.ErrorContext(serviceCtx, "error executing install-runner.bash", "err", installRunnerErr)
+			failureChannel <- true
+			return
+		}
+		// Register runner
+		select {
+		case <-completedJobChannel:
+			logger.InfoContext(serviceCtx, "completed job found before registering runner")
+			completedJobChannel <- github.WorkflowJobEvent{} // send true to the channel to stop the check for completed jobs goroutine
+			return
+		case <-serviceCtx.Done():
+			logger.WarnContext(serviceCtx, "context canceled before register runner")
+			return
+		default:
+		}
+		registerRunnerErr := ankaCLI.AnkaRun(serviceCtx,
+			"./register-runner.bash",
+			vm.Name, *repoRunnerRegistration.Token, repositoryURL, strings.Join(workflowJob.Labels, ","),
+		)
+		if registerRunnerErr != nil {
+			logger.ErrorContext(serviceCtx, "error executing register-runner.bash", "err", registerRunnerErr)
+			failureChannel <- true
+			return
+		}
+		defer removeSelfHostedRunner(serviceCtx, *vm, workflowJob.RunID)
+		// Install and Start runner
+		select {
+		case <-completedJobChannel:
+			logger.InfoContext(serviceCtx, "completed job found before starting runner")
+			completedJobChannel <- github.WorkflowJobEvent{} // send true to the channel to stop the check for completed jobs goroutine
+			return
+		case <-serviceCtx.Done():
+			logger.WarnContext(serviceCtx, "context canceled before start runner")
+			return
+		default:
+		}
+		startRunnerErr := ankaCLI.AnkaRun(serviceCtx, "./start-runner.bash")
+		if startRunnerErr != nil {
+			logger.ErrorContext(serviceCtx, "error executing start-runner.bash", "err", startRunnerErr)
+			failureChannel <- true
+			return
+		}
+		select {
+		case <-completedJobChannel:
+			logger.InfoContext(serviceCtx, "completed job found before jobCompleted checks")
+			completedJobChannel <- github.WorkflowJobEvent{} // send true to the channel to stop the check for completed jobs goroutine
+			return
+		case <-serviceCtx.Done():
+			logger.WarnContext(serviceCtx, "context canceled before jobCompleted checks")
+			return
+		default:
+		}
+
+	} // skipPrep
 
 	logger.InfoContext(serviceCtx, "watching for job completion")
 
