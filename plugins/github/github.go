@@ -130,7 +130,9 @@ func sendCancelWorkflowRun(serviceCtx context.Context, logger *slog.Logger, work
 			logger.ErrorContext(serviceCtx, "error getting workflow run by ID", "err", err)
 			return err
 		}
-		if *workflowRun.Status == "completed" || (workflowRun.Conclusion != nil && *workflowRun.Conclusion == "cancelled") {
+		if *workflowRun.Status == "completed" ||
+			(workflowRun.Conclusion != nil && *workflowRun.Conclusion == "cancelled") ||
+			cancelSent {
 			break
 		} else {
 			logger.WarnContext(serviceCtx, "workflow run is still active... waiting for cancellation so we can clean up...", "workflow_run_id", workflowRunID)
@@ -227,6 +229,7 @@ func CheckForCompletedJobs(
 		if checkForCompletedJobsMu != nil {
 			fmt.Printf("CheckForCompletedJobs " + service.Name + " UNLOCKING (defer) runOnce: " + fmt.Sprint(runOnce) + "\n")
 			checkForCompletedJobsMu.Unlock()
+			fmt.Println("CheckForCompletedJobs " + service.Name + " UNLOCKED (defer) runOnce: " + fmt.Sprint(runOnce))
 		}
 		// ensure, outside of needing to return on error, that the following always runs
 		select {
@@ -237,9 +240,8 @@ func CheckForCompletedJobs(
 		}
 	}()
 	for {
-		fmt.Printf("CheckForCompletedJobs " + service.Name + " LOCKING runOnce: " + fmt.Sprint(runOnce) + "\n")
+		// BE VERY CAREFUL when you use return here. You could orphan the job if you're not careful.
 		checkForCompletedJobsMu.Lock()
-		fmt.Printf("CheckForCompletedJobs " + service.Name + " LOCKED runOnce: " + fmt.Sprint(runOnce) + "\n")
 		// do not use 'continue' in the loop or else the ranOnce won't happen
 		// fmt.Println("CheckForCompletedJobs loop start: " + fmt.Sprint(runOnce))
 		select {
@@ -289,7 +291,6 @@ func CheckForCompletedJobs(
 							return
 						}
 					}
-					return
 				} else {
 					completedJobs, err := databaseContainer.Client.LRange(serviceCtx, "anklet/jobs/github/completed", 0, -1).Result()
 					if err != nil {
@@ -345,7 +346,6 @@ func CheckForCompletedJobs(
 			return
 		}
 		if checkForCompletedJobsMu != nil {
-			fmt.Printf("CheckForCompletedJobs " + service.Name + " UNLOCKING (end) runOnce: " + fmt.Sprint(runOnce) + "\n")
 			checkForCompletedJobsMu.Unlock()
 		}
 		time.Sleep(3 * time.Second)
@@ -434,7 +434,6 @@ func cleanup(
 		}
 		switch typedJob["type"] {
 		case "anka.VM":
-			fmt.Println("cleanup anka.VM")
 			var vm anka.VM
 			err = json.Unmarshal(payloadBytes, &vm)
 			if err != nil {
@@ -566,7 +565,6 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 	<-ranOnce // wait for the goroutine to run at least once
 	// finalize cleanup if the service crashed mid-cleanup
 	cleanup(workerCtx, serviceCtx, logger, completedJobChannel, cleanupMu)
-
 	select {
 	case <-completedJobChannel:
 		logger.InfoContext(serviceCtx, "completed job found at start")

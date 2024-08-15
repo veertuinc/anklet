@@ -332,7 +332,6 @@ func worker(parentCtx context.Context, logger *slog.Logger, loadedConfig config.
 				})
 
 				for {
-					fmt.Println("for" + service.Name)
 					select {
 					case <-serviceCtx.Done():
 						metrics.UpdateService(workerCtx, serviceCtx, logger, metrics.Service{
