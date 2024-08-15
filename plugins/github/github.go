@@ -219,7 +219,6 @@ func CheckForCompletedJobs(
 	failureChannel chan bool,
 ) {
 	service := config.GetServiceFromContext(serviceCtx)
-	fmt.Printf("CheckForCompletedJobs " + service.Name + " runOnce: " + fmt.Sprint(runOnce) + "\n")
 	databaseContainer, err := database.GetDatabaseFromContext(serviceCtx)
 	if err != nil {
 		logger.ErrorContext(serviceCtx, "error getting database from context", "err", err)
@@ -227,9 +226,7 @@ func CheckForCompletedJobs(
 	}
 	defer func() {
 		if checkForCompletedJobsMu != nil {
-			fmt.Printf("CheckForCompletedJobs " + service.Name + " UNLOCKING (defer) runOnce: " + fmt.Sprint(runOnce) + "\n")
 			checkForCompletedJobsMu.Unlock()
-			fmt.Println("CheckForCompletedJobs " + service.Name + " UNLOCKED (defer) runOnce: " + fmt.Sprint(runOnce))
 		}
 		// ensure, outside of needing to return on error, that the following always runs
 		select {
@@ -328,7 +325,6 @@ func CheckForCompletedJobs(
 								return
 							}
 							completedJobChannel <- completedJobWebhookEvent
-							fmt.Printf("CheckForCompletedJobs " + service.Name + " completedJobChannel <- existingJobEvent\n")
 							return
 						}
 					}
@@ -455,7 +451,6 @@ func cleanup(
 			// if we don't, we could suffer from a situation where a completed job comes in and is orphaned
 			select {
 			case <-completedJobChannel:
-				logger.WarnContext(serviceCtx, "completed job found")
 				databaseContainer.Client.Del(cleanupContext, "anklet/jobs/github/completed/"+service.Name)
 				databaseContainer.Client.Del(cleanupContext, "anklet/jobs/github/queued/"+service.Name+"/cleaning")
 				break // break loop and delete /queued/servicename
@@ -553,7 +548,6 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 		wg.Wait()
 		cleanup(workerCtx, serviceCtx, logger, completedJobChannel, cleanupMu)
 		close(completedJobChannel)
-		logger.ErrorContext(serviceCtx, "finished")
 	}()
 
 	// check constantly for a cancelled webhook to be received for our job

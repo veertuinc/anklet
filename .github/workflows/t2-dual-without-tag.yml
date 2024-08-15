@@ -7,7 +7,7 @@ jobs:
     runs-on: [ 
       "self-hosted", 
       "anka", 
-      "anka-template:ae1d3b9b-314e-44bc-9e6b-0b8e2bbc823b",
+      "anka-template:d792c6f6-198c-470f-9526-9c998efe7ab4",
       "run-id:${{ github.run_id }}", 
       "unique-id:1"
     ]
@@ -22,7 +22,7 @@ jobs:
     runs-on: [ 
       "self-hosted", 
       "anka", 
-      "anka-template:ae1d3b9b-314e-44bc-9e6b-0b8e2bbc823b",
+      "anka-template:c0847bc9-5d2d-4dbc-ba6a-240f7ff08032",
       "run-id:${{ github.run_id }}", 
       "unique-id:2"
     ]
