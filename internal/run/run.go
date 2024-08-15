@@ -6,6 +6,7 @@ import (
 
 	"github.com/veertuinc/anklet/internal/config"
 	"github.com/veertuinc/anklet/internal/logging"
+	"github.com/veertuinc/anklet/internal/metrics"
 	github_controller "github.com/veertuinc/anklet/plugins/controllers"
 	"github.com/veertuinc/anklet/plugins/github"
 )
@@ -31,6 +32,9 @@ func Plugin(workerCtx context.Context, serviceCtx context.Context, serviceCancel
 					close(firstServiceStarted)
 				}
 				github.Run(workerCtx, serviceCtx, serviceCancel, logger)
+				metrics.UpdateService(workerCtx, serviceCtx, logger, metrics.Service{
+					Status: "idle",
+				})
 			}
 		}
 	} else if service.Plugin == "github_controller" {
