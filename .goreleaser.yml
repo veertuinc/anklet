@@ -37,6 +37,6 @@ release:
   # extra_files:
   # - glob: ./docs.zip
   # disable: true
-# changelog:
-#   disable: true
+changelog:
+  disable: true
 
