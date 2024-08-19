@@ -1,0 +1,14 @@
+{
+	"folders": [
+		{
+			"path": "."
+		},
+		{
+			"path": "../ci-tools"
+		},
+		{
+			"path": "../webhooks"
+		}
+	],
+	"settings": {}
+}

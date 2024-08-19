@@ -1,0 +1,82 @@
+# GITHUB SERVICE PLUGIN
+
+The Github Service Plugin is responsible for pulling a job from the database/queue, preparing a macOS VM, and registering it to the github repo as an action runner so it can execute the job inside.
+
+Workflow Run Jobs are processed in order of creation. The Github Controller Plugin will place the jobs in the database/queue in the order they're created. Be sure to run the [Controller](../services/github/controller) first!
+
+For help setting up the database, see [Database Setup](https://github.com/veertuinc/anklet/blob/main/docs/database.md#database-setup).
+
+In the `config.yml`, you can define the `github` plugin as follows:
+
+```
+services:
+  - name: RUNNER1
+    plugin: github
+    token: github_pat_XXX
+    # Instead of PAT, you can create a github app for your org/repo and use its credentials instead.
+    # private_key: /path/to/private/key
+    # app_id: 12345678 # Org > Settings > Developer settings > GitHub Apps > New GitHub App
+    # installation_id: 12345678 # You need to install the app (Org > Settings > Developer settings > GitHub Apps > click Edit for the app > Install App > select your Repo > then check the URL bar for the installation ID)
+    registration: repo
+    repo: anklet
+    owner: veertuinc
+    registry_url: http://anka.registry:8089
+    # sleep_interval: 5 # Optional; defaults to 1 second.
+    database:
+      enabled: true
+      url: localhost
+      port: 6379
+      user: ""
+      password: ""
+      database: 0
+```
+
+- Your PAT or Github App must have **Actions** and **Administration** Read & Write permissions.
+- The `database` is required. You can find installation instructions in the anklet main [README.md](../../README.md#database-setup).
+
+
+Next, in your workflow yml you need to add several labels to `runs-on`. Here is the list and an example:
+
+1. `self-hosted` (required)
+1. `anka` (required)
+1. `anka-template:{UUID OF TEMPLATE HERE}` (required)
+1. `anka-template-tag:{TAG NAME OF TEMPLATE HERE}` (optional; uses latest if not populated)
+1. `run-id:${{ github.run_id }}` (do not change this) - label that is used to ensure that jobs in the same workspace don't compete for the same runner.
+1. `unique-id:{UNIQUE ID OF JOB HERE}` - a label that is used to ensure multiple jobs in the same run don't compete for the same runner.
+
+(from [t1-with-tag-1.yml](.github/workflows/t1-with-tag-1.yml))
+
+```
+name: 't1-with-tag-1'
+on:
+  workflow_dispatch:
+
+jobs:
+  testJob:
+    runs-on: [ 
+      "self-hosted", 
+      "anka", 
+      "anka-template:d792c6f6-198c-470f-9526-9c998efe7ab4", 
+      "anka-template-tag:vanilla+port-forward-22+brew-git",
+      "run-id:${{ github.run_id }}", 
+      "unique-id:1"
+    ]
+    steps:
+      - uses: actions/checkout@v3
+      - run: |
+          ls -laht
+          sw_vers
+          hostname
+          echo "123"
+```
+
+Finally, the `github` plugin requires three different bash scripts available on the host, which it will copy into the VM and run. You can find them under https://github.com/veertuinc/anklet/tree/main/plugins/services/github. They can be customized to fit your needs. You'll need to place all three in `~/.config/anklet/plugins/services/github/`.
+
+---
+
+## API LIMITS
+
+The following logic consumes [API limits](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api?apiVersion=2022-11-28). Should you run out, all processing will pause until the limits are reset after the specific github duration and then resume where it left off.
+  - Obtaining a registration token.
+  - Should the runner be orphaned and not have been shut down cleanly so it unregistred itself, we will send a removal request.
+  - Should the job request a template or tag that doesn't exist, we need to forcefully cancel the job in github or else other anklets will attempt processing indefinitely.

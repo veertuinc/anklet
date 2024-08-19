@@ -1,0 +1,20 @@
+name: 't1-without-tag'
+on:
+  workflow_dispatch:
+
+jobs:
+  testJob:
+    runs-on: [ 
+      "self-hosted", 
+      "anka", 
+      "anka-template:d792c6f6-198c-470f-9526-9c998efe7ab4", 
+      "run-id:${{ github.run_id }}", 
+      "unique-id:1"
+    ]
+    steps:
+      - uses: actions/checkout@v3
+      - run: |
+          ls -laht
+          sw_vers
+          hostname
+          echo "123"

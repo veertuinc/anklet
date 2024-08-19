@@ -1,0 +1,42 @@
+# This is an example goreleaser.yaml file with some defaults.
+# Make sure to check the documentation at http://goreleaser.com
+# env:
+#   - CGO_ENABLED=1
+before:
+  hooks:
+    - make go.lint
+    - make go.test
+builds:
+  - id: build
+    mod_timestamp: '{{ .CommitTimestamp }}'
+    hooks:
+      post:
+        - cmd: bash -c "chmod +x {{ .ProjectName }}_v{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+          dir: "{{ dir .Path }}"
+    flags:
+      - -trimpath #removes all file system paths from the compiled executable
+    ldflags:
+      - '-s -w -X main.version={{ .Version }} -X main.commit={{ .Commit }}'
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - arm64
+      - amd64
+    binary: '{{ .ProjectName }}_v{{ .Version }}_{{ .Os }}_{{ .Arch }}'
+    no_unique_dist_dir: true
+archives:
+  - format: zip
+    files:
+      - none*
+    name_template: '{{ .ProjectName }}_v{{ .Version }}_{{ .Os }}_{{ .Arch }}'
+# checksum:
+#   name_template: 'checksums.txt'
+release:
+  disable: true
+  # extra_files:
+  # - glob: ./docs.zip
+  # disable: true
+# changelog:
+#   disable: true
+

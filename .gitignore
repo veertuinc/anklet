@@ -1,0 +1,7 @@
+*.rdb
+*config.y*
+dist
+.DS_Store
+*.log
+*.pid
+docker/anklet*
