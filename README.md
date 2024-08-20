@@ -24,7 +24,26 @@ Note: It does not run as root, and will use the current user's space/environment
     - It is `disabled: true` by default to make anklet more lightweight by default.
 1. Logs are in JSON format and are written to `./anklet.log` (unless otherwise specified). Here is an example of the log structure:
     ```JSON
-    {"time":"2024-04-03T17:10:08.726639-04:00","level":"INFO","msg":"handling anka workflow run job","ankletVersion":"dev","serviceName":"RUNNER1","plugin":"github","repo":"anklet","owner":"veertuinc","workflowName":"t1-without-tag","workflowRunName":"t1-without-tag","workflowRunId":8544945071,"workflowJobId":23414111000,"workflowJobName":"testJob","uniqueId":"1","ankaTemplate":"d792c6f6-198c-470f-9526-9c998efe7ab4","ankaTemplateTag":"(using latest)","jobURL":"https://github.com/veertuinc/anklet/actions/runs/8544945071/job/23414111000","uniqueRunKey":"8544945071:1"}
+    {
+      "time": "2024-04-03T17:10:08.726639-04:00",
+      "level": "INFO",
+      "msg": "handling anka workflow run job",
+      "ankletVersion": "dev",
+      "serviceName": "RUNNER1",
+      "plugin": "github",
+      "repo": "anklet",
+      "owner": "veertuinc",
+      "workflowName": "t1-without-tag",
+      "workflowRunName": "t1-without-tag",
+      "workflowRunId": 8544945071,
+      "workflowJobId": 23414111000,
+      "workflowJobName": "testJob",
+      "uniqueId": "1",
+      "ankaTemplate": "d792c6f6-198c-470f-9526-9c998efe7ab4",
+      "ankaTemplateTag": "(using latest)",
+      "jobURL": "https://github.com/veertuinc/anklet/actions/runs/8544945071/job/23414111000",
+      "uniqueRunKey": "8544945071:1"
+    }
     ```
     - All critical errors your Ops team needs to watch for are level `ERROR`.
 
