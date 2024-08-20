@@ -69,7 +69,7 @@ func (s *Server) handleAggregatorPrometheusMetrics(workerCtx context.Context, lo
 				logger.ErrorContext(workerCtx, "error getting value from Redis", "key", metricsURL, "error", err)
 				return
 			}
-			var metricsData MetricsDataLock
+			var metricsData MetricsData
 			err = json.Unmarshal([]byte(value), &metricsData)
 			if err != nil {
 				logger.ErrorContext(workerCtx, "error unmarshalling metrics data", "error", err)
@@ -133,6 +133,7 @@ func (s *Server) handleAggregatorPrometheusMetrics(workerCtx context.Context, lo
 				w.Write([]byte(fmt.Sprintf("total_successful_runs_since_start{metricsUrl=%s} %d\n", metricsURL, metricsData.TotalSuccessfulRunsSinceStart)))
 				w.Write([]byte(fmt.Sprintf("total_failed_runs_since_start{metricsUrl=%s} %d\n", metricsURL, metricsData.TotalFailedRunsSinceStart)))
 			}
+
 			w.Write([]byte(fmt.Sprintf("host_cpu_count{metricsUrl=%s} %d\n", metricsURL, metricsData.HostCPUCount)))
 			w.Write([]byte(fmt.Sprintf("host_cpu_used_count{metricsUrl=%s} %d\n", metricsURL, metricsData.HostCPUUsedCount)))
 			w.Write([]byte(fmt.Sprintf("host_cpu_usage_percentage{metricsUrl=%s} %f\n", metricsURL, metricsData.HostCPUUsagePercentage)))

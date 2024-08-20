@@ -39,21 +39,21 @@ type Service struct {
 }
 
 type MetricsData struct {
-	TotalRunningVMs               int
-	TotalSuccessfulRunsSinceStart int
-	TotalFailedRunsSinceStart     int
-	HostCPUCount                  int
-	HostCPUUsedCount              int
-	HostCPUUsagePercentage        float64
-	HostMemoryTotalBytes          uint64
-	HostMemoryUsedBytes           uint64
-	HostMemoryAvailableBytes      uint64
-	HostMemoryUsagePercentage     float64
-	HostDiskTotalBytes            uint64
-	HostDiskUsedBytes             uint64
-	HostDiskAvailableBytes        uint64
-	HostDiskUsagePercentage       float64
-	Services                      []interface{}
+	TotalRunningVMs               int           `json:"total_running_vms"`
+	TotalSuccessfulRunsSinceStart int           `json:"total_successful_runs_since_start"`
+	TotalFailedRunsSinceStart     int           `json:"total_failed_runs_since_start"`
+	HostCPUCount                  int           `json:"host_cpu_count"`
+	HostCPUUsedCount              int           `json:"host_cpu_used_count"`
+	HostCPUUsagePercentage        float64       `json:"host_cpu_usage_percentage"`
+	HostMemoryTotalBytes          uint64        `json:"host_memory_total_bytes"`
+	HostMemoryUsedBytes           uint64        `json:"host_memory_used_bytes"`
+	HostMemoryAvailableBytes      uint64        `json:"host_memory_available_bytes"`
+	HostMemoryUsagePercentage     float64       `json:"host_memory_usage_percentage"`
+	HostDiskTotalBytes            uint64        `json:"host_disk_total_bytes"`
+	HostDiskUsedBytes             uint64        `json:"host_disk_used_bytes"`
+	HostDiskAvailableBytes        uint64        `json:"host_disk_available_bytes"`
+	HostDiskUsagePercentage       float64       `json:"host_disk_usage_percentage"`
+	Services                      []interface{} `json:"services"`
 }
 
 type MetricsDataLock struct {
