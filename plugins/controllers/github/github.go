@@ -115,8 +115,23 @@ func ExecuteGitHubClientFunction[T any](serviceCtx context.Context, logger *slog
 }
 
 // Start runs the HTTP server
-func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel context.CancelFunc, logger *slog.Logger, firstServiceStarted chan bool) {
+func Run(
+	workerCtx context.Context,
+	serviceCtx context.Context,
+	serviceCancel context.CancelFunc,
+	logger *slog.Logger,
+	firstServiceStarted chan bool,
+	metricsData *metrics.MetricsDataLock,
+) {
 	service := config.GetServiceFromContext(serviceCtx)
+	metricsData.AddService(metrics.ServiceBase{
+		Name:        service.Name,
+		PluginName:  service.Plugin,
+		RepoName:    service.Repo,
+		OwnerName:   service.Owner,
+		Status:      "initializing",
+		StatusSince: time.Now(),
+	})
 	databaseContainer, err := database.GetDatabaseFromContext(serviceCtx)
 	if err != nil {
 		logger.ErrorContext(serviceCtx, "error getting database client from context", "error", err)

@@ -61,3 +61,68 @@ The following logic consumes [API limits](https://docs.github.com/en/rest/using-
   - Requesting all hook deliveries for the past 24 hours.
   - To get verbose information for each hook delivery that's `in_progress` still.
   - Then again to post the redelivery request if all other conditions are met indicating it was orphaned.
+
+
+---
+
+## Metrics
+
+#### Key Names and Descriptions
+
+| Key | Description | 
+| ------ | ----------- |
+| service_status | Status of the service (idle, running, limit_paused, stopped) |
+| host_cpu_count | Total CPU count of the host |
+| host_cpu_used_count | Total in use CPU count of the host |
+| host_cpu_usage_percentage | CPU usage percentage of the host |
+| host_memory_total_bytes | Total memory of the host (bytes) |
+| host_memory_used_bytes | Used memory of the host (bytes) |
+| host_memory_available_bytes | Available memory of the host (bytes) |
+| host_memory_usage_percentage | Memory usage percentage of the host |
+| host_disk_total_bytes | Total disk space of the host (bytes) |
+| host_disk_used_bytes | Used disk space of the host (bytes) |
+| host_disk_available_bytes | Available disk space of the host (bytes) |
+| host_disk_usage_percentage | Disk usage percentage of the host |
+
+```
+❯ curl -s http://127.0.0.1:8080/metrics/v1\?format\=prometheus
+service_status{service_name=github_controller,plugin=github_controller,owner=veertuinc,repo=anklet} running
+host_cpu_count 12
+host_cpu_used_count 2
+host_cpu_usage_percentage 17.010309
+host_memory_total_bytes 38654705664
+host_memory_used_bytes 19195559936
+host_memory_available_bytes 19459145728
+host_memory_usage_percentage 49.659051
+host_disk_total_bytes 994662584320
+host_disk_used_bytes 537421299712
+host_disk_available_bytes 457241284608
+host_disk_usage_percentage 54.030513
+```
+
+```
+❯ curl -s http://127.0.0.1:8080/metrics/v1\?format\=json | jq
+{
+  "host_cpu_count": 12,
+  "host_cpu_used_count": 1,
+  "host_cpu_usage_percentage": 12.126155512441432,
+  "host_memory_total_bytes": 38654705664,
+  "host_memory_used_bytes": 19213762560,
+  "host_memory_available_bytes": 19440943104,
+  "host_memory_usage_percentage": 49.70614115397135,
+  "host_disk_total_bytes": 994662584320,
+  "host_disk_used_bytes": 537423970304,
+  "host_disk_available_bytes": 457238614016,
+  "host_disk_usage_percentage": 54.03078177223378,
+  "services": [
+    {
+      "name": "github_controller",
+      "plugin_name": "github_controller",
+      "repo_name": "anklet",
+      "owner_name": "veertuinc",
+      "status": "running",
+      "status_since": "2024-08-20T14:58:35.730418-05:00"
+    }
+  ]
+}
+```

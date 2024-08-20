@@ -185,16 +185,13 @@ func (cli *Cli) AnkaRegistryPull(workerCtx context.Context, serviceCtx context.C
 		args = append(args, "pull", "--shrink", template)
 	}
 	logger.DebugContext(serviceCtx, "pulling template to host")
-	defer metrics.UpdateService(workerCtx, serviceCtx, logger, metrics.Service{
-		ServiceBase: &metrics.ServiceBase{
-			Status: "running",
-		},
-	})
-	metrics.UpdateService(workerCtx, serviceCtx, logger, metrics.Service{
-		ServiceBase: &metrics.ServiceBase{
-			Status: "pulling",
-		},
-	})
+
+	metricsData := metrics.GetMetricsDataFromContext(workerCtx)
+
+	defer metricsData.SetStatus(serviceCtx, logger, "running")
+
+	metricsData.SetStatus(serviceCtx, logger, "pulling")
+
 	pullJson, err := cli.ExecuteParseJson(serviceCtx, args...)
 	if err != nil {
 		return pullJson, err

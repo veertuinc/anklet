@@ -167,21 +167,10 @@ func executeGitHubClientFunction[T any](serviceCtx context.Context, logger *slog
 			sleepDuration := time.Until(response.Rate.Reset.Time) + time.Second // Adding a second to ensure we're past the reset time
 			logger.WarnContext(serviceCtx, "GitHub API rate limit exceeded, sleeping until reset")
 			metricsData := metrics.GetMetricsDataFromContext(serviceCtx)
-			service := config.GetServiceFromContext(serviceCtx)
-			metricsData.UpdateService(serviceCtx, logger, metrics.Service{
-				ServiceBase: &metrics.ServiceBase{
-					Name:   service.Name,
-					Status: "limit_paused",
-				},
-			})
+			metricsData.SetStatus(serviceCtx, logger, "limit_paused")
 			select {
 			case <-time.After(sleepDuration):
-				metricsData.UpdateService(serviceCtx, logger, metrics.Service{
-					ServiceBase: &metrics.ServiceBase{
-						Name:   service.Name,
-						Status: "running",
-					},
-				})
+				metricsData.SetStatus(serviceCtx, logger, "running")
 				return executeGitHubClientFunction(serviceCtx, logger, executeFunc) // Retry the function after waiting
 			case <-serviceCtx.Done():
 				return serviceCtx, nil, nil, serviceCtx.Err()
@@ -474,10 +463,27 @@ func cleanup(
 	// databaseContainer.Client.Del(cleanupContext, "anklet/jobs/github/queued/"+service.Name)
 }
 
-func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel context.CancelFunc, logger *slog.Logger) {
-	logger.InfoContext(serviceCtx, "checking for jobs....")
-
+func Run(
+	workerCtx context.Context,
+	serviceCtx context.Context,
+	serviceCancel context.CancelFunc,
+	logger *slog.Logger,
+	metricsData *metrics.MetricsDataLock,
+) {
 	service := config.GetServiceFromContext(serviceCtx)
+
+	metricsData.AddService(metrics.Service{
+		ServiceBase: &metrics.ServiceBase{
+			Name:        service.Name,
+			PluginName:  service.Plugin,
+			RepoName:    service.Repo,
+			OwnerName:   service.Owner,
+			Status:      "idle",
+			StatusSince: time.Now(),
+		},
+	})
+
+	logger.InfoContext(serviceCtx, "checking for jobs....")
 
 	if service.Token == "" && service.PrivateKey == "" {
 		logging.Panic(workerCtx, serviceCtx, "token and private_key are not set in ankalet.yaml:services:"+service.Name+":token/private_key")
@@ -504,6 +510,7 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 	if service.PrivateKey != "" {
 		itr, err := ghinstallation.NewKeyFromFile(httpTransport, int64(service.AppID), int64(service.InstallationID), service.PrivateKey)
 		if err != nil {
+			metricsData.IncrementTotalFailedRunsSinceStart()
 			logger.ErrorContext(serviceCtx, "error creating github app installation token", "err", err)
 			return
 		}
@@ -576,6 +583,7 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 			return
 		}
 		if err != nil {
+			metricsData.IncrementTotalFailedRunsSinceStart()
 			logger.ErrorContext(serviceCtx, "error getting queued jobs", "err", err)
 			return
 		}
@@ -646,11 +654,7 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 	ankaCLI := anka.GetAnkaCLIFromContext(serviceCtx)
 
 	logger.InfoContext(serviceCtx, "handling anka workflow run job")
-	metrics.UpdateService(workerCtx, serviceCtx, logger, metrics.Service{
-		ServiceBase: &metrics.ServiceBase{
-			Status: "running",
-		},
-	})
+	metricsData.SetStatus(serviceCtx, logger, "running")
 
 	skipPrep := false // allows us to wait for the cancellation we sent to be received so we can clean up properly
 
@@ -664,8 +668,10 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 	}
 	if noTemplateTagExistsError != nil {
 		logger.ErrorContext(serviceCtx, "error ensuring vm template exists on host", "err", noTemplateTagExistsError)
+		metricsData.IncrementTotalFailedRunsSinceStart()
 		err := sendCancelWorkflowRun(serviceCtx, logger, workflowJob.RunID)
 		if err != nil {
+			metricsData.IncrementTotalFailedRunsSinceStart()
 			logger.ErrorContext(serviceCtx, "error sending cancel workflow run", "err", err)
 		}
 		skipPrep = true
@@ -684,6 +690,7 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 			return repoRunnerRegistration, resp, err
 		})
 		if err != nil {
+			metricsData.IncrementTotalFailedRunsSinceStart()
 			logger.ErrorContext(serviceCtx, "error creating registration token", "err", err, "response", response)
 			return
 		}
@@ -740,6 +747,7 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 		_, registerRunnerErr := os.Stat(registerRunnerPath)
 		_, startRunnerErr := os.Stat(startRunnerPath)
 		if installRunnerErr != nil || registerRunnerErr != nil || startRunnerErr != nil {
+			metricsData.IncrementTotalFailedRunsSinceStart()
 			logger.ErrorContext(serviceCtx, "must include install-runner.bash, register-runner.bash, and start-runner.bash in "+globals.PluginsPath+"/services/github/", "err", err)
 			err := sendCancelWorkflowRun(serviceCtx, logger, workflowJob.RunID)
 			if err != nil {
@@ -753,6 +761,7 @@ func Run(workerCtx context.Context, serviceCtx context.Context, serviceCancel co
 			startRunnerPath,
 		)
 		if err != nil {
+			metricsData.IncrementTotalFailedRunsSinceStart()
 			logger.ErrorContext(serviceCtx, "error executing anka copy", "err", err)
 			failureChannel <- true
 			return

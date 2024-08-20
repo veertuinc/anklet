@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -227,7 +228,7 @@ func worker(parentCtx context.Context, logger *slog.Logger, loadedConfig config.
 			panic(fmt.Sprintf("unable to access database: %v", err))
 		}
 		workerCtx = context.WithValue(workerCtx, config.ContextKey("database"), databaseContainer)
-		go metricsService.StartAggregatorServer(workerCtx, logger)
+		go metricsService.StartAggregatorServer(workerCtx, logger, false)
 		logger.InfoContext(workerCtx, "metrics aggregator started on port "+metricsPort)
 		for _, metricsURL := range loadedConfig.Metrics.MetricsURLs {
 			wg.Add(1)
@@ -271,11 +272,11 @@ func worker(parentCtx context.Context, logger *slog.Logger, loadedConfig config.
 		firstServiceStarted := make(chan bool, 1)
 		metricsData := &metrics.MetricsDataLock{}
 		workerCtx = context.WithValue(workerCtx, config.ContextKey("metrics"), metricsData)
-		go metricsService.Start(workerCtx, logger)
 		logger.InfoContext(workerCtx, "metrics server started on port "+metricsPort)
 		metrics.UpdateSystemMetrics(workerCtx, logger, metricsData)
 		/////////////
 		// Services
+		soloController := false
 		for index, service := range loadedConfig.Services {
 			wg.Add(1)
 			if index != 0 {
@@ -322,38 +323,21 @@ func worker(parentCtx context.Context, logger *slog.Logger, loadedConfig config.
 
 				logger.InfoContext(serviceCtx, "starting service")
 
-				metricsData.AddService(metrics.ServiceBase{
-					Name:               service.Name,
-					PluginName:         service.Plugin,
-					RepoName:           service.Repo,
-					OwnerName:          service.Owner,
-					Status:             "idle",
-					StatusRunningSince: time.Now(),
-				})
-
 				for {
 					select {
 					case <-serviceCtx.Done():
-						metrics.UpdateService(workerCtx, serviceCtx, logger, metrics.Service{
-							ServiceBase: &metrics.ServiceBase{
-								Status: "stopped",
-							},
-						})
+						metricsData.SetStatus(serviceCtx, logger, "stopped")
 						logger.WarnContext(serviceCtx, shutDownMessage)
 						serviceCancel()
 						return
 					default:
-						run.Plugin(workerCtx, serviceCtx, serviceCancel, logger, firstServiceStarted)
+						run.Plugin(workerCtx, serviceCtx, serviceCancel, logger, firstServiceStarted, metricsData)
 						if workerCtx.Err() != nil || toRunOnce == "true" {
 							serviceCancel()
 							logger.WarnContext(serviceCtx, shutDownMessage)
 							return
 						}
-						metrics.UpdateService(workerCtx, serviceCtx, logger, metrics.Service{
-							ServiceBase: &metrics.ServiceBase{
-								Status: "idle",
-							},
-						})
+						metricsData.SetStatus(serviceCtx, logger, "idle")
 						select {
 						case <-time.After(time.Duration(service.SleepInterval) * time.Second):
 						case <-serviceCtx.Done():
@@ -363,7 +347,14 @@ func worker(parentCtx context.Context, logger *slog.Logger, loadedConfig config.
 					}
 				}
 			}(service)
+			// if the only service is a controller, set the soloController flag to true
+			if strings.Contains(service.Plugin, "_controller") {
+				soloController = true
+			} else { // otherwise disable it if other services exist
+				soloController = false
+			}
 		}
+		go metricsService.Start(workerCtx, logger, soloController)
 	}
 	wg.Wait()
 	logger.WarnContext(workerCtx, "anklet (and all services) shut down")

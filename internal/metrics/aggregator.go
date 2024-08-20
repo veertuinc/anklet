@@ -15,7 +15,7 @@ import (
 )
 
 // Start runs the HTTP server
-func (s *Server) StartAggregatorServer(workerCtx context.Context, logger *slog.Logger) {
+func (s *Server) StartAggregatorServer(workerCtx context.Context, logger *slog.Logger, soloController bool) {
 	http.HandleFunc("/metrics/v1", func(w http.ResponseWriter, r *http.Request) {
 		databaseContainer, err := database.GetDatabaseFromContext(workerCtx)
 		if err != nil {
@@ -75,24 +75,63 @@ func (s *Server) handleAggregatorPrometheusMetrics(workerCtx context.Context, lo
 				logger.ErrorContext(workerCtx, "error unmarshalling metrics data", "error", err)
 				return
 			}
-			w.Write([]byte(fmt.Sprintf("total_running_vms{metricsUrl=%s} %d\n", metricsURL, metricsData.TotalRunningVMs)))
-			w.Write([]byte(fmt.Sprintf("total_successful_runs_since_start{metricsUrl=%s} %d\n", metricsURL, metricsData.TotalSuccessfulRunsSinceStart)))
-			w.Write([]byte(fmt.Sprintf("total_failed_runs_since_start{metricsUrl=%s} %d\n", metricsURL, metricsData.TotalFailedRunsSinceStart)))
+			soloController := false
 			for _, service := range metricsData.Services {
-				fullServiceBase, ok := service.(ServiceBase)
+				var pluginName string
+				var serviceName string
+				var ownerName string
+				var repoName string
+				var status string
+				var lastSuccessfulRunJobUrl string
+				var lastFailedRunJobUrl string
+				var lastSuccessfulRun time.Time
+				var lastFailedRun time.Time
+				var statusSince time.Time
+				serviceMap, ok := service.(map[string]interface{})
 				if !ok {
-					panic("service is not of type ServiceBase")
+					logger.ErrorContext(workerCtx, "error asserting service to map", "service", service)
+					return
 				}
-				w.Write([]byte(fmt.Sprintf("service_status{service_name=%s,plugin=%s,owner=%s,repo=%s,metricsUrl=%s} %s\n", fullServiceBase.Name, fullServiceBase.PluginName, fullServiceBase.OwnerName, fullServiceBase.RepoName, metricsURL, fullServiceBase.Status)))
-				if !strings.Contains(fullServiceBase.PluginName, "_controller") {
-					fullService, ok := service.(Service)
-					if !ok {
-						panic("service is not of type Service")
+				pluginName = serviceMap["plugin_name"].(string)
+				serviceName = serviceMap["name"].(string)
+				ownerName = serviceMap["owner_name"].(string)
+				repoName = serviceMap["repo_name"].(string)
+				status = serviceMap["status"].(string)
+				statusSince, err = time.Parse(time.RFC3339, serviceMap["status_since"].(string))
+				if err != nil {
+					logger.ErrorContext(workerCtx, "error parsing status since", "error", err)
+					return
+				}
+				if !strings.Contains(pluginName, "_controller") {
+					lastSuccessfulRunJobUrl = serviceMap["last_successful_run_job_url"].(string)
+					lastFailedRunJobUrl = serviceMap["last_failed_run_job_url"].(string)
+					lastSuccessfulRun, err = time.Parse(time.RFC3339, serviceMap["last_successful_run"].(string))
+					if err != nil {
+						logger.ErrorContext(workerCtx, "error parsing last successful run", "error", err)
+						return
 					}
-					w.Write([]byte(fmt.Sprintf("service_last_successful_run{service_name=%s,plugin=%s,owner=%s,repo=%s,job_url=%s,metricsUrl=%s} %s\n", fullService.Name, fullService.PluginName, fullService.OwnerName, fullService.RepoName, fullService.LastSuccessfulRunJobUrl, metricsURL, fullService.LastSuccessfulRun.Format(time.RFC3339))))
-					w.Write([]byte(fmt.Sprintf("service_last_failed_run{service_name=%s,plugin=%s,owner=%s,repo=%s,job_url=%s,metricsUrl=%s} %s\n", fullService.Name, fullService.PluginName, fullService.OwnerName, fullService.RepoName, fullService.LastFailedRunJobUrl, metricsURL, fullService.LastFailedRun.Format(time.RFC3339))))
-					w.Write([]byte(fmt.Sprintf("service_status_running_since{service_name=%s,plugin=%s,owner=%s,repo=%s,metricsUrl=%s} %s\n", fullService.Name, fullService.PluginName, fullService.OwnerName, fullService.RepoName, metricsURL, fullService.StatusRunningSince.Format(time.RFC3339))))
+					lastFailedRun, err = time.Parse(time.RFC3339, serviceMap["last_failed_run"].(string))
+					if err != nil {
+						logger.ErrorContext(workerCtx, "error parsing last failed run", "error", err)
+						return
+					}
 				}
+				w.Write([]byte(fmt.Sprintf("service_status{service_name=%s,plugin=%s,owner=%s,repo=%s,metricsUrl=%s} %s\n", serviceName, pluginName, ownerName, repoName, metricsURL, status)))
+				if !strings.Contains(pluginName, "_controller") {
+					w.Write([]byte(fmt.Sprintf("service_last_successful_run{service_name=%s,plugin=%s,owner=%s,repo=%s,job_url=%s,metricsUrl=%s} %s\n", serviceName, pluginName, ownerName, repoName, lastSuccessfulRunJobUrl, metricsURL, lastSuccessfulRun.Format(time.RFC3339))))
+					w.Write([]byte(fmt.Sprintf("service_last_failed_run{service_name=%s,plugin=%s,owner=%s,repo=%s,job_url=%s,metricsUrl=%s} %s\n", serviceName, pluginName, ownerName, repoName, lastFailedRunJobUrl, metricsURL, lastFailedRun.Format(time.RFC3339))))
+				}
+				w.Write([]byte(fmt.Sprintf("service_status_since{service_name=%s,plugin=%s,owner=%s,repo=%s,metricsUrl=%s} %s\n", serviceName, pluginName, ownerName, repoName, metricsURL, statusSince.Format(time.RFC3339))))
+				if strings.Contains(pluginName, "_controller") {
+					soloController = true
+				} else {
+					soloController = false
+				}
+			}
+			if !soloController {
+				w.Write([]byte(fmt.Sprintf("total_running_vms{metricsUrl=%s} %d\n", metricsURL, metricsData.TotalRunningVMs)))
+				w.Write([]byte(fmt.Sprintf("total_successful_runs_since_start{metricsUrl=%s} %d\n", metricsURL, metricsData.TotalSuccessfulRunsSinceStart)))
+				w.Write([]byte(fmt.Sprintf("total_failed_runs_since_start{metricsUrl=%s} %d\n", metricsURL, metricsData.TotalFailedRunsSinceStart)))
 			}
 			w.Write([]byte(fmt.Sprintf("host_cpu_count{metricsUrl=%s} %d\n", metricsURL, metricsData.HostCPUCount)))
 			w.Write([]byte(fmt.Sprintf("host_cpu_used_count{metricsUrl=%s} %d\n", metricsURL, metricsData.HostCPUUsedCount)))

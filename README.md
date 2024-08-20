@@ -171,7 +171,7 @@ While you can run it anywhere you want, its likely going to be less latency to h
 
 ### Metrics
 
-Metrics for monitoring are available at `http://127.0.0.1:8080/metrics?format=json` or `http://127.0.0.1:8080/metrics?format=prometheus`.
+Metrics for monitoring are available at `http://127.0.0.1:8080/metrics?format=json` or `http://127.0.0.1:8080/metrics?format=prometheus`. These instructions apply to services and controllers, but controllers can differ slightly in what metrics are available. Be sure to check the specific controller documentation for more information and examples.
 
 - You can change the port in the `config.yml` under `metrics`, like so:
 
@@ -182,75 +182,75 @@ Metrics for monitoring are available at `http://127.0.0.1:8080/metrics?format=js
 
 #### Key Names and Descriptions
 
-| JSON | Prometheus | Description | 
-| ------ | ----------- | ----------- |
-| TotalRunningVMs | total_running_vms | Total number of running VMs |
-| TotalSuccessfulRunsSinceStart | total_successful_runs_since_start | Total number of successful runs since start |
-| TotalFailedRunsSinceStart | total_failed_runs_since_start | Total number of failed runs since start |
-| Service::Name | service_name | Name of the service |
-| Service::PluginName | service_plugin_name | Name of the plugin |
-| Service::OwnerName | service_owner_name | Name of the owner |
-| Service::RepoName | service_repo_name | Name of the repo |
-| Service::Status | service_status | Status of the service (idle, running, limit_paused, stopped) |
-| Service::LastSuccessfulRunJobUrl | service_last_successful_run_job_url | Last successful run job url of the service |
-| Service::LastFailedRunJobUrl | service_last_failed_run_job_url | Last failed run job url of the service |
-| Service::LastSuccessfulRun | service_last_successful_run | Timestamp of last successful run of the service (RFC3339) |
-| Service::LastFailedRun | service_last_failed_run | Timestamp of last failed run of the service (RFC3339) |
-| Service::StatusRunningSince | service_status_running_since | Timestamp of when the service was last started (RFC3339) |
-| HostCPUCount | host_cpu_count | Total CPU count of the host |
-| HostCPUUsedCount | host_cpu_used_count | Total in use CPU count of the host |
-| HostCPUUsagePercentage | host_cpu_usage_percentage | CPU usage percentage of the host |
-| HostMemoryTotalBytes | host_memory_total_bytes | Total memory of the host (bytes) |
-| HostMemoryUsedBytes | host_memory_used_bytes | Used memory of the host (bytes) |
-| HostMemoryAvailableBytes | host_memory_available_bytes | Available memory of the host (bytes) |
-| HostMemoryUsagePercentage | host_memory_usage_percentage | Memory usage percentage of the host |
-| HostDiskTotalBytes | host_disk_total_bytes | Total disk space of the host (bytes) |
-| HostDiskUsedBytes | host_disk_used_bytes | Used disk space of the host (bytes) |
-| HostDiskAvailableBytes | host_disk_available_bytes | Available disk space of the host (bytes) |
-| HostDiskUsagePercentage | host_disk_usage_percentage | Disk usage percentage of the host |
+| Key | Description | 
+| ------ | ----------- |
+| total_running_vms | Total number of running VMs |
+| total_successful_runs_since_start | Total number of successful runs since start |
+| total_failed_runs_since_start | Total number of failed runs since start |
+| service_name | Name of the service |
+| service_plugin_name | Name of the plugin |
+| service_owner_name | Name of the owner |
+| service_repo_name | Name of the repo |
+| service_status | Status of the service (idle, running, limit_paused, stopped) |
+| service_last_successful_run_job_url | Last successful run job url of the service |
+| service_last_failed_run_job_url | Last failed run job url of the service |
+| service_last_successful_run | Timestamp of last successful run of the service (RFC3339) |
+| service_last_failed_run | Timestamp of last failed run of the service (RFC3339) |
+| service_status_since | Timestamp of when the service was last started (RFC3339) |
+| host_cpu_count | Total CPU count of the host |
+| host_cpu_used_count | Total in use CPU count of the host |
+| host_cpu_usage_percentage | CPU usage percentage of the host |
+| host_memory_total_bytes | Total memory of the host (bytes) |
+| host_memory_used_bytes | Used memory of the host (bytes) |
+| host_memory_available_bytes | Available memory of the host (bytes) |
+| host_memory_usage_percentage | Memory usage percentage of the host |
+| host_disk_total_bytes | Total disk space of the host (bytes) |
+| host_disk_used_bytes | Used disk space of the host (bytes) |
+| host_disk_available_bytes | Available disk space of the host (bytes) |
+| host_disk_usage_percentage | Disk usage percentage of the host |
 
 #### JSON
 
 ```json
 {
-  "TotalRunningVMs": 0,
-  "TotalSuccessfulRunsSinceStart": 2,
-  "TotalFailedRunsSinceStart": 2,
-  "HostCPUCount": 12,
-  "HostCPUUsedCount": 0,
-  "HostCPUUsagePercentage": 5.572289151578012,
-  "HostMemoryTotal": 38654705664,
-  "HostMemoryUsed": 23025205248,
-  "HostMemoryAvailable": 15629500416,
-  "HostMemoryUsagePercentage": 59.56637064615885,
-  "HostDiskTotal": 994662584320,
-  "HostDiskUsed": 459045515264,
-  "HostDiskAvailable": 535617069056,
-  "HostDiskUsagePercentage": 46.150877945994715,
-  "Services": [
+  "total_running_vms": 0,
+  "total_successful_runs_since_start": 2,
+  "total_failed_runs_since_start": 2,
+  "host_cpu_count": 12,
+  "host_cpu_used_count": 0,
+  "host_cpu_usage_percentage": 5.572289151578012,
+  "host_memory_total_bytes": 38654705664,
+  "host_memory_used_bytes": 23025205248,
+  "host_memory_available_bytes": 15629500416,
+  "host_memory_usage_percentage": 59.56637064615885,
+  "host_disk_total_bytes": 994662584320,
+  "host_disk_used_bytes": 459045515264,
+  "host_disk_available_bytes": 535617069056,
+  "host_disk_usage_percentage": 46.150877945994715,
+  "services": [
     {
-      "Name": "RUNNER2",
-      "PluginName": "github",
-      "RepoName": "anklet",
-      "OwnerName": "veertuinc",
-      "Status": "idle",
-      "LastSuccessfulRunJobUrl": "https://github.com/veertuinc/anklet/actions/runs/9180172013/job/25243983121",
-      "LastFailedRunJobUrl": "https://github.com/veertuinc/anklet/actions/runs/9180170811/job/25243979917",
-      "LastSuccessfulRun": "2024-05-21T14:16:06.300971-05:00",
-      "LastFailedRun": "2024-05-21T14:15:10.994464-05:00",
-      "StatusRunningSince": "2024-05-21T14:16:06.300971-05:00"
+      "name": "RUNNER2",
+      "plugin_name": "github",
+      "repo_name": "anklet",
+      "owner_name": "veertuinc",
+      "status": "idle",
+      "last_successful_run_job_url": "https://github.com/veertuinc/anklet/actions/runs/9180172013/job/25243983121",
+      "last_failed_run_job_url": "https://github.com/veertuinc/anklet/actions/runs/9180170811/job/25243979917",
+      "last_successful_run": "2024-05-21T14:16:06.300971-05:00",
+      "last_failed_run": "2024-05-21T14:15:10.994464-05:00",
+      "status_since": "2024-05-21T14:16:06.300971-05:00"
     },
     {
-      "Name": "RUNNER1",
-      "PluginName": "github",
-      "RepoName": "anklet",
-      "OwnerName": "veertuinc",
-      "Status": "idle",
-      "LastSuccessfulRunJobUrl": "https://github.com/veertuinc/anklet/actions/runs/9180172546/job/25243984537",
-      "LastFailedRunJobUrl": "https://github.com/veertuinc/anklet/actions/runs/9180171228/job/25243980930",
-      "LastSuccessfulRun": "2024-05-21T14:16:35.532016-05:00",
-      "LastFailedRun": "2024-05-21T14:15:45.930051-05:00",
-      "StatusRunningSince": "2024-05-21T14:16:35.532016-05:00"
+      "name": "RUNNER1",
+      "plugin_name": "github",
+      "repo_name": "anklet",
+      "owner_name": "veertuinc",
+      "status": "idle",
+      "last_successful_run_job_url": "https://github.com/veertuinc/anklet/actions/runs/9180172546/job/25243984537",
+      "last_failed_run_job_url": "https://github.com/veertuinc/anklet/actions/runs/9180171228/job/25243980930",
+      "last_successful_run": "2024-05-21T14:16:35.532016-05:00",
+      "last_failed_run": "2024-05-21T14:15:45.930051-05:00",
+      "status_since": "2024-05-21T14:16:35.532016-05:00"
     }
   ]
 }
@@ -265,11 +265,11 @@ total_failed_runs_since_start 2
 service_status{service_name=RUNNER2,plugin=github,owner=veertuinc,repo=anklet} idle
 service_last_successful_run{service_name=RUNNER2,plugin=github,owner=veertuinc,repo=anklet,job_url=https://github.com/veertuinc/anklet/actions/runs/9180172013/job/25243983121} 2024-05-21T14:16:06-05:00
 service_last_failed_run{service_name=RUNNER2,plugin=github,owner=veertuinc,repo=anklet,job_url=https://github.com/veertuinc/anklet/actions/runs/9180170811/job/25243979917} 2024-05-21T14:15:10-05:00
-service_status_running_since{service_name=RUNNER2,plugin=github,owner=veertuinc,repo=anklet} 2024-05-21T14:16:06-05:00
+service_status_since{service_name=RUNNER2,plugin=github,owner=veertuinc,repo=anklet} 2024-05-21T14:16:06-05:00
 service_status{service_name=RUNNER1,plugin=github,owner=veertuinc,repo=anklet} idle
 service_last_successful_run{service_name=RUNNER1,plugin=github,owner=veertuinc,repo=anklet,job_url=https://github.com/veertuinc/anklet/actions/runs/9180172546/job/25243984537} 2024-05-21T14:16:35-05:00
 service_last_failed_run{service_name=RUNNER1,plugin=github,owner=veertuinc,repo=anklet,job_url=https://github.com/veertuinc/anklet/actions/runs/9180171228/job/25243980930} 2024-05-21T14:15:45-05:00
-service_status_running_since{service_name=RUNNER1,plugin=github,owner=veertuinc,repo=anklet} 2024-05-21T14:16:35-05:00
+service_status_since{service_name=RUNNER1,plugin=github,owner=veertuinc,repo=anklet} 2024-05-21T14:16:35-05:00
 host_cpu_count 12
 host_cpu_used_count 1
 host_cpu_usage_percentage 10.674157
@@ -341,62 +341,62 @@ Finally, here are the example responses of each format:
 ```json
 {
   "http://127.0.0.1:8080/metrics": {
-    "TotalRunningVMs": 0,
-    "TotalSuccessfulRunsSinceStart": 0,
-    "TotalFailedRunsSinceStart": 0,
-    "HostCPUCount": 12,
-    "HostCPUUsedCount": 1,
-    "HostCPUUsagePercentage": 11.765251850227692,
-    "HostMemoryTotalBytes": 38654705664,
-    "HostMemoryUsedBytes": 27379499008,
-    "HostMemoryAvailableBytes": 11275206656,
-    "HostMemoryUsagePercentage": 70.83095974392361,
-    "HostDiskTotalBytes": 994662584320,
-    "HostDiskUsedBytes": 540768464896,
-    "HostDiskAvailableBytes": 453894119424,
-    "HostDiskUsagePercentage": 54.367025906146424,
-    "Services": [
+    "total_running_vms": 0,
+    "total_successful_runs_since_start": 0,
+    "total_failed_runs_since_start": 0,
+    "host_cpu_count": 12,
+    "host_cpu_used_count": 1,
+    "host_cpu_usage_percentage": 11.765251850227692,
+    "host_memory_total_bytes": 38654705664,
+    "host_memory_used_bytes": 27379499008,
+    "host_memory_available_bytes": 11275206656,
+    "host_memory_usage_percentage": 70.83095974392361,
+    "host_disk_total_bytes": 994662584320,
+    "host_disk_used_bytes": 540768464896,
+    "host_disk_available_bytes": 453894119424,
+    "host_disk_usage_percentage": 54.367025906146424,
+    "services": [
       {
-        "Name": "RUNNER1",
-        "PluginName": "github",
-        "RepoName": "anklet",
-        "OwnerName": "veertuinc",
-        "Status": "idle",
-        "LastSuccessfulRunJobUrl": "",
-        "LastFailedRunJobUrl": "",
-        "LastSuccessfulRun": "0001-01-01T00:00:00Z",
-        "LastFailedRun": "0001-01-01T00:00:00Z",
-        "StatusRunningSince": "2024-06-11T13:57:43.332009-05:00"
+        "name": "RUNNER1",
+        "plugin_name": "github",
+        "repo_name": "anklet",
+        "owner_name": "veertuinc",
+        "status": "idle",
+        "last_successful_run_job_url": "",
+        "last_failed_run_job_url": "",
+        "last_successful_run": "0001-01-01T00:00:00Z",
+        "last_failed_run": "0001-01-01T00:00:00Z",
+        "status_since": "2024-06-11T13:57:43.332009-05:00"
       }
     ]
   },
   "http://192.168.1.183:8080/metrics": {
-    "TotalRunningVMs": 0,
-    "TotalSuccessfulRunsSinceStart": 0,
-    "TotalFailedRunsSinceStart": 0,
-    "HostCPUCount": 8,
-    "HostCPUUsedCount": 1,
-    "HostCPUUsagePercentage": 20.964819937820444,
-    "HostMemoryTotalBytes": 25769803776,
-    "HostMemoryUsedBytes": 18017533952,
-    "HostMemoryAvailableBytes": 7752269824,
-    "HostMemoryUsagePercentage": 69.91723378499348,
-    "HostDiskTotalBytes": 994662584320,
-    "HostDiskUsedBytes": 629847568384,
-    "HostDiskAvailableBytes": 364815015936,
-    "HostDiskUsagePercentage": 63.32273660565956,
-    "Services": [
+    "total_running_vms": 0,
+    "total_successful_runs_since_start": 0,
+    "total_failed_runs_since_start": 0,
+    "host_cpu_count": 8,
+    "host_cpu_used_count": 1,
+    "host_cpu_usage_percentage": 20.964819937820444,
+    "host_memory_total_bytes": 25769803776,
+    "host_memory_used_bytes": 18017533952,
+    "host_memory_available_bytes": 7752269824,
+    "host_memory_usage_percentage": 69.91723378499348,
+    "host_disk_total_bytes": 994662584320,
+    "host_disk_used_bytes": 629847568384,
+    "host_disk_available_bytes": 364815015936,
+    "host_disk_usage_percentage": 63.32273660565956,
+    "services": [
       {
-        "Name": "RUNNER3",
-        "PluginName": "github",
-        "RepoName": "anklet",
-        "OwnerName": "veertuinc",
-        "Status": "idle",
-        "LastSuccessfulRunJobUrl": "",
-        "LastFailedRunJobUrl": "",
-        "LastSuccessfulRun": "0001-01-01T00:00:00Z",
-        "LastFailedRun": "0001-01-01T00:00:00Z",
-        "StatusRunningSince": "2024-06-11T14:16:42.324542-05:00"
+        "name": "RUNNER3",
+        "plugin_name": "github",
+        "repo_name": "anklet",
+        "owner_name": "veertuinc",
+        "status": "idle",
+        "last_successful_run_job_url": "",
+        "last_failed_run_job_url": "",
+        "last_successful_run": "0001-01-01T00:00:00Z",
+        "last_failed_run": "0001-01-01T00:00:00Z",
+        "status_since": "2024-06-11T14:16:42.324542-05:00"
       }
     ]
   }
@@ -414,7 +414,7 @@ total_failed_runs_since_start{metricsUrl=http://127.0.0.1:8080/metrics} 0
 service_status{service_name=RUNNER1,plugin=github,owner=veertuinc,repo=anklet,metricsUrl=http://127.0.0.1:8080/metrics} idle
 service_last_successful_run{service_name=RUNNER1,plugin=github,owner=veertuinc,repo=anklet,job_url=,metricsUrl=http://127.0.0.1:8080/metrics} 0001-01-01T00:00:00Z
 service_last_failed_run{service_name=RUNNER1,plugin=github,owner=veertuinc,repo=anklet,job_url=,metricsUrl=http://127.0.0.1:8080/metrics} 0001-01-01T00:00:00Z
-service_status_running_since{service_name=RUNNER1,plugin=github,owner=veertuinc,repo=anklet,metricsUrl=http://127.0.0.1:8080/metrics} 2024-06-11T13:57:43-05:00
+service_status_since{service_name=RUNNER1,plugin=github,owner=veertuinc,repo=anklet,metricsUrl=http://127.0.0.1:8080/metrics} 2024-06-11T13:57:43-05:00
 host_cpu_count{metricsUrl=http://127.0.0.1:8080/metrics} 12
 host_cpu_used_count{metricsUrl=http://127.0.0.1:8080/metrics} 0
 host_cpu_usage_percentage{metricsUrl=http://127.0.0.1:8080/metrics} 7.300310
@@ -432,7 +432,7 @@ total_failed_runs_since_start{metricsUrl=http://192.168.1.183:8080/metrics} 0
 service_status{service_name=RUNNER3,plugin=github,owner=veertuinc,repo=anklet,metricsUrl=http://192.168.1.183:8080/metrics} idle
 service_last_successful_run{service_name=RUNNER3,plugin=github,owner=veertuinc,repo=anklet,job_url=,metricsUrl=http://192.168.1.183:8080/metrics} 0001-01-01T00:00:00Z
 service_last_failed_run{service_name=RUNNER3,plugin=github,owner=veertuinc,repo=anklet,job_url=,metricsUrl=http://192.168.1.183:8080/metrics} 0001-01-01T00:00:00Z
-service_status_running_since{service_name=RUNNER3,plugin=github,owner=veertuinc,repo=anklet,metricsUrl=http://192.168.1.183:8080/metrics} 2024-06-11T14:16:42-05:00
+service_status_since{service_name=RUNNER3,plugin=github,owner=veertuinc,repo=anklet,metricsUrl=http://192.168.1.183:8080/metrics} 2024-06-11T14:16:42-05:00
 host_cpu_count{metricsUrl=http://192.168.1.183:8080/metrics} 8
 host_cpu_used_count{metricsUrl=http://192.168.1.183:8080/metrics} 1
 host_cpu_usage_percentage{metricsUrl=http://192.168.1.183:8080/metrics} 20.760717

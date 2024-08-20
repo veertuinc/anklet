@@ -11,7 +11,14 @@ import (
 	"github.com/veertuinc/anklet/plugins/services/github"
 )
 
-func Plugin(workerCtx context.Context, serviceCtx context.Context, serviceCancel context.CancelFunc, logger *slog.Logger, firstServiceStarted chan bool) {
+func Plugin(
+	workerCtx context.Context,
+	serviceCtx context.Context,
+	serviceCancel context.CancelFunc,
+	logger *slog.Logger,
+	firstServiceStarted chan bool,
+	metricsData *metrics.MetricsDataLock,
+) {
 	service := config.GetServiceFromContext(serviceCtx)
 	// fmt.Printf("%+v\n", service)
 	serviceCtx = logging.AppendCtx(serviceCtx, slog.String("plugin", service.Plugin))
@@ -31,19 +38,12 @@ func Plugin(workerCtx context.Context, serviceCtx context.Context, serviceCancel
 				default:
 					close(firstServiceStarted)
 				}
-				github.Run(workerCtx, serviceCtx, serviceCancel, logger)
-				metrics.UpdateService(workerCtx, serviceCtx, logger, metrics.Service{
-					ServiceBase: &metrics.ServiceBase{
-						Status: "idle",
-					},
-				})
+				github.Run(workerCtx, serviceCtx, serviceCancel, logger, metricsData)
+				metricsData.SetStatus(serviceCtx, logger, "idle")
 			}
 		}
 	} else if service.Plugin == "github_controller" {
-		metrics.UpdateService(workerCtx, serviceCtx, logger, metrics.ServiceBase{
-			Status: "initializing",
-		})
-		github_controller.Run(workerCtx, serviceCtx, serviceCancel, logger, firstServiceStarted)
+		github_controller.Run(workerCtx, serviceCtx, serviceCancel, logger, firstServiceStarted, metricsData)
 	} else {
 		panic("plugin not found: " + service.Plugin)
 	}
