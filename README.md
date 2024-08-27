@@ -21,7 +21,7 @@ Note: It does not run as root, and will use the current user's space/environment
 1. Services run in parallel, but have separate internal context to avoid collisions.
 1. It supports loading in a database (currently `redis`) to manage state across all of your hosts.
     - The `github` plugin, and likely others, rely on this to prevent race conditions with picking up jobs.
-    - It is `disabled: true` by default to make anklet more lightweight by default.
+    - It is `disabled: true` by default to make anklet more lightweight.
 1. Logs are in JSON format and are written to `./anklet.log` (unless otherwise specified). Here is an example of the log structure:
     ```JSON
     {
