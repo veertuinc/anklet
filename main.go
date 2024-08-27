@@ -75,7 +75,14 @@ func main() {
 	if *configFlag != "" {
 		configPath = *configFlag
 	} else {
-		configPath = filepath.Join(homeDir, ".config", "anklet", "config.yml")
+		var configFileName string
+		envConfigFileName := os.Getenv("ANKLET_CONFIG_FILE_NAME")
+		if envConfigFileName != "" {
+			configFileName = envConfigFileName
+		} else {
+			configFileName = "config.yml"
+		}
+		configPath = filepath.Join(homeDir, ".config", "anklet", configFileName)
 	}
 
 	// obtain config

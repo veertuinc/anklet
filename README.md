@@ -330,10 +330,6 @@ It's possible to use ENVs instead of the yml file. This is useful if you want to
 | ANKLET_METRICS_DATABASE_USER | User to use (ex: "") |
 | ANKLET_METRICS_DATABASE_PASSWORD | Password to use (ex: "") |
 
-#### Docker / Containers
-
-Docker images are available at [veertu/anklet](https://hub.docker.com/r/veertu/anklet). [You can find the example docker-compose file in the `docker` directory.](https://github.com/veertuinc/anklet/blob/main/docker/docker-compose.yml)
-
 Finally, here are the example responses of each format:
 
 #### JSON
@@ -446,6 +442,9 @@ host_disk_available_bytes{metricsUrl=http://192.168.1.183:8080/metrics} 36481320
 host_disk_usage_percentage{metricsUrl=http://192.168.1.183:8080/metrics} 63.322919
 ```
 
+## Docker / Containers
+
+Docker images are available at [veertu/anklet](https://hub.docker.com/r/veertu/anklet). [You can find the example docker-compose file in the `docker` directory.](https://github.com/veertuinc/anklet/blob/main/docker/docker-compose.yml)
 
 ---
 

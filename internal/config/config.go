@@ -86,11 +86,12 @@ func LoadConfig(configPath string) (Config, error) {
 }
 
 func LoadInEnvs(config Config) (Config, error) {
+	/////////////////////////////////
+	// AGGREGATOR ///////////////////
 	envAggregator := os.Getenv("ANKLET_METRICS_AGGREGATOR")
 	if envAggregator != "" {
 		config.Metrics.Aggregator = envAggregator == "true"
 	}
-
 	envPort := os.Getenv("ANKLET_METRICS_PORT")
 	if envPort != "" {
 		config.Metrics.Port = envPort
@@ -107,27 +108,22 @@ func LoadInEnvs(config Config) (Config, error) {
 		}
 		config.Metrics.SleepInterval = value
 	}
-
 	envDBEnabled := os.Getenv("ANKLET_METRICS_DATABASE_ENABLED")
 	if envDBEnabled != "" {
 		config.Metrics.Database.Enabled = envDBEnabled == "true"
 	}
-
 	envDBUser := os.Getenv("ANKLET_METRICS_DATABASE_USER")
 	if envDBUser != "" {
 		config.Metrics.Database.User = envDBUser
 	}
-
 	envDBPassword := os.Getenv("ANKLET_METRICS_DATABASE_PASSWORD")
 	if envDBPassword != "" {
 		config.Metrics.Database.Password = envDBPassword
 	}
-
 	envDBURL := os.Getenv("ANKLET_METRICS_DATABASE_URL")
 	if envDBURL != "" {
 		config.Metrics.Database.URL = envDBURL
 	}
-
 	envDBPort := os.Getenv("ANKLET_METRICS_DATABASE_PORT")
 	if envDBPort != "" {
 		port, err := strconv.Atoi(envDBPort)
@@ -136,7 +132,6 @@ func LoadInEnvs(config Config) (Config, error) {
 		}
 		config.Metrics.Database.Port = port
 	}
-
 	envDBDatabase := os.Getenv("ANKLET_METRICS_DATABASE_DATABASE")
 	if envDBDatabase != "" {
 		database, err := strconv.Atoi(envDBDatabase)
@@ -145,6 +140,8 @@ func LoadInEnvs(config Config) (Config, error) {
 		}
 		config.Metrics.Database.Database = database
 	}
+	///////////////////////////
+	// Other //////////////////
 	workDir := os.Getenv("ANKLET_WORK_DIR")
 	if workDir != "" {
 		config.WorkDir = workDir
