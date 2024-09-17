@@ -106,11 +106,11 @@ func main() {
 	parentCtx = context.WithValue(parentCtx, config.ContextKey("suffix"), suffix)
 
 	if loadedConfig.Log.FileDir != "" {
-		logger.InfoContext(parentCtx, "updating logger to file", slog.String("fileDir", loadedConfig.Log.FileDir))
-		logger, err = logging.UpdateLoggerToFile(logger, loadedConfig.Log.FileDir, suffix)
+		logger, fileLocation, err := logging.UpdateLoggerToFile(logger, loadedConfig.Log.FileDir, suffix)
 		if err != nil {
 			logger.ErrorContext(parentCtx, "error updating logger to file", "error", err)
 		}
+		logger.InfoContext(parentCtx, "writing logs to file", slog.String("fileLocation", fileLocation))
 		logger.InfoContext(parentCtx, "loaded config", slog.Any("config", loadedConfig))
 	}
 

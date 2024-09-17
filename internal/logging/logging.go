@@ -41,11 +41,11 @@ func New() *slog.Logger {
 	return slog.New(handler)
 }
 
-func UpdateLoggerToFile(logger *slog.Logger, filePath string, suffix string) (*slog.Logger, error) {
+func UpdateLoggerToFile(logger *slog.Logger, filePath string, suffix string) (*slog.Logger, string, error) {
 	fileLocation := filePath + "anklet" + suffix + ".log"
 	file, err := os.OpenFile(fileLocation, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 
 	options := &slog.HandlerOptions{Level: slog.LevelInfo}
@@ -57,7 +57,7 @@ func UpdateLoggerToFile(logger *slog.Logger, filePath string, suffix string) (*s
 	}
 
 	newLogger := slog.New(handler)
-	return newLogger, nil
+	return newLogger, fileLocation, nil
 }
 
 // Handle adds contextual attributes to the Record before calling the underlying
