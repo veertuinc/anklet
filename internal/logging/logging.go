@@ -9,6 +9,17 @@ import (
 	"github.com/veertuinc/anklet/internal/config"
 )
 
+type ctxKey string
+
+const (
+	slogFields ctxKey = "slog_fields"
+)
+
+type ContextHandler struct {
+	slog.Handler
+	attrs []slog.Attr
+}
+
 func New() *slog.Logger {
 	logLevel := os.Getenv("LOG_LEVEL")
 	var options *slog.HandlerOptions
@@ -30,26 +41,43 @@ func New() *slog.Logger {
 	return slog.New(handler)
 }
 
-type ctxKey string
+func UpdateLoggerToFile(logger *slog.Logger, filePath string, suffix string) (*slog.Logger, error) {
+	fileLocation := filePath + "anklet" + suffix + ".log"
+	file, err := os.OpenFile(fileLocation, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return nil, err
+	}
 
-const (
-	slogFields ctxKey = "slog_fields"
-)
+	options := &slog.HandlerOptions{Level: slog.LevelInfo}
+	handler := &ContextHandler{Handler: slog.NewJSONHandler(file, options)}
 
-type ContextHandler struct {
-	slog.Handler
+	// Copy existing logger attributes to the new logger
+	if contextHandler, ok := logger.Handler().(*ContextHandler); ok {
+		handler.attrs = append(handler.attrs, contextHandler.attrs...)
+	}
+
+	newLogger := slog.New(handler)
+	return newLogger, nil
 }
 
 // Handle adds contextual attributes to the Record before calling the underlying
 // handler
-func (h ContextHandler) Handle(ctx context.Context, r slog.Record) error {
-	if attrs, ok := ctx.Value(slogFields).([]slog.Attr); ok {
-		for _, v := range attrs {
+func (h *ContextHandler) Handle(ctx context.Context, r slog.Record) error {
+	if ctxAttrs, ok := ctx.Value(slogFields).([]slog.Attr); ok {
+		for _, v := range ctxAttrs {
 			r.AddAttrs(v)
 		}
 	}
-
+	for _, v := range h.attrs {
+		r.AddAttrs(v)
+	}
 	return h.Handler.Handle(ctx, r)
+}
+
+// With adds attributes to the handler
+func (h *ContextHandler) With(attrs ...slog.Attr) *ContextHandler {
+	h.attrs = append(h.attrs, attrs...)
+	return h
 }
 
 // AppendCtx adds an slog attribute to the provided context so that it will be
