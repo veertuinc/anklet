@@ -284,7 +284,6 @@ func CheckForCompletedJobs(
 							logger.ErrorContext(serviceCtx, "error unmarshalling job", "err", err)
 							return
 						}
-
 						if *completedJobWebhookEvent.WorkflowJob.ID == *existingJobEvent.WorkflowJob.ID {
 							// remove the completed job we found
 							_, err = databaseContainer.Client.LRem(serviceCtx, "anklet/jobs/github/completed", 1, completedJob).Result()

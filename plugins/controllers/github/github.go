@@ -69,7 +69,7 @@ func InQueue(serviceCtx context.Context, logger *slog.Logger, jobID int64, queue
 			continue
 		}
 		if *workflowJobEvent.WorkflowJob.ID == jobID {
-			return true, fmt.Errorf("job already in queue")
+			return true, fmt.Errorf("WorkflowJob.ID %d already in queue", jobID)
 		}
 	}
 	return false, nil
