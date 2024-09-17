@@ -111,6 +111,7 @@ func main() {
 		if err != nil {
 			logger.ErrorContext(parentCtx, "error updating logger to file", "error", err)
 		}
+		logger.InfoContext(parentCtx, "loaded config", slog.Any("config", loadedConfig))
 	}
 
 	// if loadedConfig.PidFileDir == "" {
