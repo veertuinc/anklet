@@ -149,7 +149,7 @@ For error handling, see the [github plugin README](./plugins/services/github/REA
 
 ### Database Setup
 
-At the moment we support `redis` 7.x for the database. It can be installed on macOS using homebrew:
+At the moment we support `redis` 7.x for the database. For testing, it can be installed on macOS using homebrew. We recommend choosing one of your Anklet hosts to run the database on and pointing all other hosts to it in their config.
 
 ```bash
 brew install redis
@@ -158,7 +158,7 @@ brew services start redis # use sudo on ec2
 tail -fF /opt/homebrew/var/log/redis.log
 ```
 
-While you can run it anywhere you want, its likely going to be less latency to host it on a host[s] that are in the same location at anklet. We recommend to choose one of the macs to run it on and point other hosts to it in their config. It's also possible to cluster redis, but we won't cover that in our guides.
+For production, we recommend running a [redis cluster](https://redis.io/docs/latest/operate/oss_and_stack/reference/cluster-spec/) on infrastructure that is separate from your Anklet hosts and has guaranteed uptime.
 
 ### Plugin Setup and Usage Guides
 
