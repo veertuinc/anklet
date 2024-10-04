@@ -1,3 +1,4 @@
+version: 2
 # This is an example goreleaser.yaml file with some defaults.
 # Make sure to check the documentation at http://goreleaser.com
 # env:
@@ -26,7 +27,8 @@ builds:
     binary: '{{ .ProjectName }}_v{{ .Version }}_{{ .Os }}_{{ .Arch }}'
     no_unique_dist_dir: true
 archives:
-  - format: zip
+  - id: archive
+    format: zip
     files:
       - none*
     name_template: '{{ .ProjectName }}_v{{ .Version }}_{{ .Os }}_{{ .Arch }}'

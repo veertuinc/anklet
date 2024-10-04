@@ -28,6 +28,7 @@ go.releaser:
 	git tag -a "$(VERSION)" -m "Version $(VERSION)"
 	echo "LATEST TAG: $$(git describe --tags --abbrev=0)"
 	goreleaser release --verbose --clean
+	file dist/* | grep executable | awk '{print $1}' | cut -d: -f1 | xargs rm -f
 
 #go.lint:		@ Run `golangci-lint run` against the current code
 go.lint:
