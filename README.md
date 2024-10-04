@@ -16,9 +16,9 @@ Note: It does not run as root, and will use the current user's space/environment
 
 ### How does it really work?
 
-1. Anklet loads the configuration from the `~/.config/anklet/config.yml` file on the same host. The configuration defines the services that will be started.
-    - Each service in the config specifies a plugin to load and use, the database (if there is one), and any other specific configuration for that plugin.
-1. Services run in parallel, but have separate internal context to avoid collisions.
+1. Anklet loads the configuration from the `~/.config/anklet/config.yml` file on the same host. The configuration defines the plugins that will be started.
+    - Each plugin in the config specifies a plugin to load and use, the database (if there is one), and any other specific configuration for that plugin.
+1. Plugins run in parallel, but have separate internal context to avoid collisions.
 1. It supports loading in a database (currently `redis`) to manage state across all of your hosts.
     - The `github` plugin, and likely others, rely on this to prevent race conditions with picking up jobs.
     - It is `disabled: true` by default to make anklet more lightweight.
@@ -29,7 +29,7 @@ Note: It does not run as root, and will use the current user's space/environment
       "level": "INFO",
       "msg": "handling anka workflow run job",
       "ankletVersion": "dev",
-      "serviceName": "RUNNER1",
+      "pluginName": "RUNNER1",
       "plugin": "github",
       "repo": "anklet",
       "owner": "veertuinc",
@@ -62,10 +62,10 @@ Anklet handles VM [Templates/Tags](https://docs.veertu.com/anka/anka-virtualizat
 
 We're going to use github as an example, but the process is similar for other plugins.
 
-With the github plugin, there is a Controller Plugin and a Service Plugin.
+With the github plugin, there is a Receiver Plugin and a Handler Plugin.
 
-- The github Controller Plugin is a web server that listens for webhooks github sends and then places the events in the database/queue.
-- The github Service Plugin is responsible for pulling a job from the database/queue, preparing a macOS VM, and registering it to the repo's action runners so it can execute the job inside.
+- The github Receiver Plugin is a web server that listens for webhooks github sends and then places the events in the database/queue. It can run on mac and linux.
+- The github Handler Plugin is responsible for pulling a job from the database/queue, preparing a macOS VM, and registering it to the repo's action runners so it can execute the job inside. It can run on mac as it needs access to the Anka CLI.
 
 ### Anklet Setup
 
@@ -79,10 +79,10 @@ With the github plugin, there is a Controller Plugin and a Service Plugin.
     log:
         # if file_dir is not set, it will be set to current directory you execute anklet in
         file_dir: /Users/myUser/Library/Logs/
-    services:
-      # GITHUB CONTROLLER
-      - name: GITHUB_WEBHOOK_CONTROLLER
-        plugin: github_controller
+    plugins:
+      # GITHUB RECEIVER
+      - name: GITHUB_WEBHOOK_RECEIVER
+        plugin: github_receiver
         hook_id: 489747753
         port: 54321 # port that's open to the internet so github can post to it
         secret: 00000000
@@ -98,7 +98,7 @@ With the github plugin, there is a Controller Plugin and a Service Plugin.
           user: ""
           password: ""
           database: 0
-      # GITHUB SERVICES
+      # GITHUB HANDLERS
       - name: RUNNER1
           plugin: github
           private_key: /Users/nathanpierce/veertuinc-anklet.2024-07-19.private-key.pem
@@ -132,10 +132,10 @@ With the github plugin, there is a Controller Plugin and a Service Plugin.
               database: 0
 
     ```
-    > Note: You can only ever run two VMs per host per the Apple macOS SLA. While you can specify more than two services, only two will ever be running a VM at one time. `sleep_interval` can be used to control the frequency/priority of a service and increase the odds that a job will be picked up.
-3. Run the binary on the host that has the [Anka CLI installed](https://docs.veertu.com/anka/anka-virtualization-cli/getting-started/installing-the-anka-virtualization-package/) (Anka is not needed if just running an Anklet Controller).
+    > Note: You can only ever run two VMs per host per the Apple macOS SLA. While you can specify more than two plugins, only two will ever be running a VM at one time. `sleep_interval` can be used to control the frequency/priority of a plugin and increase the odds that a job will be picked up.
+3. Run the binary on the host that has the [Anka CLI installed](https://docs.veertu.com/anka/anka-virtualization-cli/getting-started/installing-the-anka-virtualization-package/) (Anka is not needed if just running an Anklet Receiver).
     - `tail -fF /Users/myUser/Library/Logs/anklet.log` to see the logs. You can run `anklet` with `LOG_LEVEL=DEBUG` to see more verbose output.
-3. To stop, send an interrupt or ctrl+c. It will attempt a graceful shut down of services, sending unfinished jobs back to the queue or waiting until the job is done to prevent orphans.
+3. To stop, send an interrupt or ctrl+c. It will attempt a graceful shut down of plugins, sending unfinished jobs back to the queue or waiting until the job is done to prevent orphans.
 
 It is also possible to use ENVs for several of the items in the config. They override anything set in the yml. Here is a list of ENVs that you can use:
 
@@ -145,7 +145,7 @@ It is also possible to use ENVs for several of the items in the config. They ove
 | ANKLET_PID_FILE_DIR | Absolute path to pid file directory for anklet (ex: /tmp/) (defaults to `./`) |
 | ANKLET_LOG_FILE_DIR | Absolute path to log file directory for anklet (ex: /Users/myUser/Library/Logs/) (defaults to `./`) |
 
-For error handling, see the [github plugin README](./plugins/services/github/README.md).
+For error handling, see the [github plugin README](./plugins/handlers/github/README.md).
 
 ### Database Setup
 
@@ -164,14 +164,14 @@ For production, we recommend running a [redis cluster](https://redis.io/docs/lat
 
 #### Github Actions
 
-- [**`Service Plugin`**](./plugins/services/github/README.md)
-- [**`Controller Plugin`**](./plugins/controllers/github/README.md)
+- [**`Webhook Receiver Plugin`**](./plugins/receivers/github/README.md)
+- [**`Anka VM Handler Plugin`**](./plugins/handlers/github/README.md)
 
 ---
 
 ### Metrics
 
-Metrics for monitoring are available at `http://127.0.0.1:8080/metrics?format=json` or `http://127.0.0.1:8080/metrics?format=prometheus`. These instructions apply to services and controllers, but controllers can differ slightly in what metrics are available. Be sure to check the specific controller documentation for more information and examples.
+Metrics for monitoring are available at `http://127.0.0.1:8080/metrics?format=json` or `http://127.0.0.1:8080/metrics?format=prometheus`. These instructions apply to handler and receiver plugins, but receivers can differ slightly in what metrics are available. Be sure to check the specific plugin documentation for more information and examples.
 
 - You can change the port in the `config.yml` under `metrics`, like so:
 
@@ -187,16 +187,16 @@ Metrics for monitoring are available at `http://127.0.0.1:8080/metrics?format=js
 | total_running_vms | Total number of running VMs |
 | total_successful_runs_since_start | Total number of successful runs since start |
 | total_failed_runs_since_start | Total number of failed runs since start |
-| service_name | Name of the service |
-| service_plugin_name | Name of the plugin |
-| service_owner_name | Name of the owner |
-| service_repo_name | Name of the repo |
-| service_status | Status of the service (idle, running, limit_paused, stopped) |
-| service_last_successful_run_job_url | Last successful run job url of the service |
-| service_last_failed_run_job_url | Last failed run job url of the service |
-| service_last_successful_run | Timestamp of last successful run of the service (RFC3339) |
-| service_last_failed_run | Timestamp of last failed run of the service (RFC3339) |
-| service_status_since | Timestamp of when the service was last started (RFC3339) |
+| plugin_name | Name of the plugin |
+| plugin_plugin_name | Name of the plugin |
+| plugin_owner_name | Name of the owner |
+| plugin_repo_name | Name of the repo |
+| plugin_status | Status of the plugin (idle, running, limit_paused, stopped) |
+| plugin_last_successful_run_job_url | Last successful run job url of the plugin |
+| plugin_last_failed_run_job_url | Last failed run job url of the plugin |
+| plugin_last_successful_run | Timestamp of last successful run of the plugin (RFC3339) |
+| plugin_last_failed_run | Timestamp of last failed run of the plugin (RFC3339) |
+| plugin_status_since | Timestamp of when the plugin was last started (RFC3339) |
 | host_cpu_count | Total CPU count of the host |
 | host_cpu_used_count | Total in use CPU count of the host |
 | host_cpu_usage_percentage | CPU usage percentage of the host |
@@ -227,7 +227,7 @@ Metrics for monitoring are available at `http://127.0.0.1:8080/metrics?format=js
   "host_disk_used_bytes": 459045515264,
   "host_disk_available_bytes": 535617069056,
   "host_disk_usage_percentage": 46.150877945994715,
-  "services": [
+  "plugins": [
     {
       "name": "RUNNER2",
       "plugin_name": "github",
@@ -262,14 +262,14 @@ Metrics for monitoring are available at `http://127.0.0.1:8080/metrics?format=js
 total_running_vms 0
 total_successful_runs_since_start 2
 total_failed_runs_since_start 2
-service_status{service_name=RUNNER2,plugin=github,owner=veertuinc,repo=anklet} idle
-service_last_successful_run{service_name=RUNNER2,plugin=github,owner=veertuinc,repo=anklet,job_url=https://github.com/veertuinc/anklet/actions/runs/9180172013/job/25243983121} 2024-05-21T14:16:06-05:00
-service_last_failed_run{service_name=RUNNER2,plugin=github,owner=veertuinc,repo=anklet,job_url=https://github.com/veertuinc/anklet/actions/runs/9180170811/job/25243979917} 2024-05-21T14:15:10-05:00
-service_status_since{service_name=RUNNER2,plugin=github,owner=veertuinc,repo=anklet} 2024-05-21T14:16:06-05:00
-service_status{service_name=RUNNER1,plugin=github,owner=veertuinc,repo=anklet} idle
-service_last_successful_run{service_name=RUNNER1,plugin=github,owner=veertuinc,repo=anklet,job_url=https://github.com/veertuinc/anklet/actions/runs/9180172546/job/25243984537} 2024-05-21T14:16:35-05:00
-service_last_failed_run{service_name=RUNNER1,plugin=github,owner=veertuinc,repo=anklet,job_url=https://github.com/veertuinc/anklet/actions/runs/9180171228/job/25243980930} 2024-05-21T14:15:45-05:00
-service_status_since{service_name=RUNNER1,plugin=github,owner=veertuinc,repo=anklet} 2024-05-21T14:16:35-05:00
+plugin_status{plugin_name=RUNNER2,plugin=github,owner=veertuinc,repo=anklet} idle
+plugin_last_successful_run{plugin_name=RUNNER2,plugin=github,owner=veertuinc,repo=anklet,job_url=https://github.com/veertuinc/anklet/actions/runs/9180172013/job/25243983121} 2024-05-21T14:16:06-05:00
+plugin_last_failed_run{plugin_name=RUNNER2,plugin=github,owner=veertuinc,repo=anklet,job_url=https://github.com/veertuinc/anklet/actions/runs/9180170811/job/25243979917} 2024-05-21T14:15:10-05:00
+plugin_status_since{plugin_name=RUNNER2,plugin=github,owner=veertuinc,repo=anklet} 2024-05-21T14:16:06-05:00
+plugin_status{plugin_name=RUNNER1,plugin=github,owner=veertuinc,repo=anklet} idle
+plugin_last_successful_run{plugin_name=RUNNER1,plugin=github,owner=veertuinc,repo=anklet,job_url=https://github.com/veertuinc/anklet/actions/runs/9180172546/job/25243984537} 2024-05-21T14:16:35-05:00
+plugin_last_failed_run{plugin_name=RUNNER1,plugin=github,owner=veertuinc,repo=anklet,job_url=https://github.com/veertuinc/anklet/actions/runs/9180171228/job/25243980930} 2024-05-21T14:15:45-05:00
+plugin_status_since{plugin_name=RUNNER1,plugin=github,owner=veertuinc,repo=anklet} 2024-05-21T14:16:35-05:00
 host_cpu_count 12
 host_cpu_used_count 1
 host_cpu_usage_percentage 10.674157
@@ -287,7 +287,7 @@ host_disk_usage_percentage 46.150550
 
 In most cases each individual Anklet serving up their own metrics is good enough for your monitoring needs. However, there are situations where you may need to consume them from a single source instead. The Anklet Aggregator service is designed to do just that.
 
-In order to enable the aggregator, you will want to run an Anklet with the `aggregator` flag set to `true`. **You want to run this separate from any services/plugins.** This will start an Anklet Aggregator service that will collect metrics from all Anklets defined in `metrics_urls` and make them available at `http://{aggregator_url}:{port}/metrics?format=json` or `http://{aggregator_url}:{port}/metrics?format=prometheus`. Here is an example config:
+In order to enable the aggregator, you will want to run an Anklet with the `aggregator` flag set to `true`. **You want to run this separate from any plugins.** This will start an Anklet Aggregator service that will collect metrics from all Anklets defined in `metrics_urls` and make them available at `http://{aggregator_url}:{port}/metrics?format=json` or `http://{aggregator_url}:{port}/metrics?format=prometheus`. Here is an example config:
 
 ```yaml
 ---
@@ -351,7 +351,7 @@ Finally, here are the example responses of each format:
     "host_disk_used_bytes": 540768464896,
     "host_disk_available_bytes": 453894119424,
     "host_disk_usage_percentage": 54.367025906146424,
-    "services": [
+    "plugins": [
       {
         "name": "RUNNER1",
         "plugin_name": "github",
@@ -381,7 +381,7 @@ Finally, here are the example responses of each format:
     "host_disk_used_bytes": 629847568384,
     "host_disk_available_bytes": 364815015936,
     "host_disk_usage_percentage": 63.32273660565956,
-    "services": [
+    "plugins": [
       {
         "name": "RUNNER3",
         "plugin_name": "github",
@@ -407,10 +407,10 @@ This will be a text list, differentiating metrics by `metricsUrl`.
 total_running_vms{metricsUrl=http://127.0.0.1:8080/metrics} 0
 total_successful_runs_since_start{metricsUrl=http://127.0.0.1:8080/metrics} 0
 total_failed_runs_since_start{metricsUrl=http://127.0.0.1:8080/metrics} 0
-service_status{service_name=RUNNER1,plugin=github,owner=veertuinc,repo=anklet,metricsUrl=http://127.0.0.1:8080/metrics} idle
-service_last_successful_run{service_name=RUNNER1,plugin=github,owner=veertuinc,repo=anklet,job_url=,metricsUrl=http://127.0.0.1:8080/metrics} 0001-01-01T00:00:00Z
-service_last_failed_run{service_name=RUNNER1,plugin=github,owner=veertuinc,repo=anklet,job_url=,metricsUrl=http://127.0.0.1:8080/metrics} 0001-01-01T00:00:00Z
-service_status_since{service_name=RUNNER1,plugin=github,owner=veertuinc,repo=anklet,metricsUrl=http://127.0.0.1:8080/metrics} 2024-06-11T13:57:43-05:00
+plugin_status{plugin_name=RUNNER1,plugin=github,owner=veertuinc,repo=anklet,metricsUrl=http://127.0.0.1:8080/metrics} idle
+plugin_last_successful_run{plugin_name=RUNNER1,plugin=github,owner=veertuinc,repo=anklet,job_url=,metricsUrl=http://127.0.0.1:8080/metrics} 0001-01-01T00:00:00Z
+plugin_last_failed_run{plugin_name=RUNNER1,plugin=github,owner=veertuinc,repo=anklet,job_url=,metricsUrl=http://127.0.0.1:8080/metrics} 0001-01-01T00:00:00Z
+plugin_status_since{plugin_name=RUNNER1,plugin=github,owner=veertuinc,repo=anklet,metricsUrl=http://127.0.0.1:8080/metrics} 2024-06-11T13:57:43-05:00
 host_cpu_count{metricsUrl=http://127.0.0.1:8080/metrics} 12
 host_cpu_used_count{metricsUrl=http://127.0.0.1:8080/metrics} 0
 host_cpu_usage_percentage{metricsUrl=http://127.0.0.1:8080/metrics} 7.300310
@@ -425,10 +425,10 @@ host_disk_usage_percentage{metricsUrl=http://127.0.0.1:8080/metrics} 54.367100
 total_running_vms{metricsUrl=http://192.168.1.183:8080/metrics} 0
 total_successful_runs_since_start{metricsUrl=http://192.168.1.183:8080/metrics} 0
 total_failed_runs_since_start{metricsUrl=http://192.168.1.183:8080/metrics} 0
-service_status{service_name=RUNNER3,plugin=github,owner=veertuinc,repo=anklet,metricsUrl=http://192.168.1.183:8080/metrics} idle
-service_last_successful_run{service_name=RUNNER3,plugin=github,owner=veertuinc,repo=anklet,job_url=,metricsUrl=http://192.168.1.183:8080/metrics} 0001-01-01T00:00:00Z
-service_last_failed_run{service_name=RUNNER3,plugin=github,owner=veertuinc,repo=anklet,job_url=,metricsUrl=http://192.168.1.183:8080/metrics} 0001-01-01T00:00:00Z
-service_status_since{service_name=RUNNER3,plugin=github,owner=veertuinc,repo=anklet,metricsUrl=http://192.168.1.183:8080/metrics} 2024-06-11T14:16:42-05:00
+plugin_status{plugin_name=RUNNER3,plugin=github,owner=veertuinc,repo=anklet,metricsUrl=http://192.168.1.183:8080/metrics} idle
+plugin_last_successful_run{plugin_name=RUNNER3,plugin=github,owner=veertuinc,repo=anklet,job_url=,metricsUrl=http://192.168.1.183:8080/metrics} 0001-01-01T00:00:00Z
+plugin_last_failed_run{plugin_name=RUNNER3,plugin=github,owner=veertuinc,repo=anklet,job_url=,metricsUrl=http://192.168.1.183:8080/metrics} 0001-01-01T00:00:00Z
+plugin_status_since{plugin_name=RUNNER3,plugin=github,owner=veertuinc,repo=anklet,metricsUrl=http://192.168.1.183:8080/metrics} 2024-06-11T14:16:42-05:00
 host_cpu_count{metricsUrl=http://192.168.1.183:8080/metrics} 8
 host_cpu_used_count{metricsUrl=http://192.168.1.183:8080/metrics} 1
 host_cpu_usage_percentage{metricsUrl=http://192.168.1.183:8080/metrics} 20.760717
@@ -473,8 +473,8 @@ The `dev` LOG_LEVEL has colored output with text + pretty printed JSON for easie
   "repo": "anklet",
   "serviceName": "RUNNER1",
   "source": {
-    "file": "/Users/nathanpierce/anklet/plugins/services/github/github.go",
-    "function": "github.com/veertuinc/anklet/plugins/services/github.Run",
+    "file": "/Users/nathanpierce/anklet/plugins/handlers/github/github.go",
+    "function": "github.com/veertuinc/anklet/plugins/handlers/github.Run",
     "line": 408
   },
   "uniqueId": "1",
@@ -502,7 +502,7 @@ Plugins are, currently, stored in the `plugins/` directory. They will be moved i
 If your plugin has any required files stored on disk, you should keep them in `~/.config/anklet/plugins/{plugin-name}/`. For example, `github` requires three bash files to prepare the github actions runner in the VMs. They are stored on each host: 
 
 ```bash
-❯ ll ~/.config/anklet/plugins/services/github
+❯ ll ~/.config/anklet/plugins/handlers/github
 total 0
 lrwxr-xr-x  1 nathanpierce  staff    61B Apr  4 16:02 install-runner.bash
 lrwxr-xr-x  1 nathanpierce  staff    62B Apr  4 16:02 register-runner.bash
@@ -518,9 +518,9 @@ The `Run` function should be designed to run multiple times in parallel. It shou
 
 ### Handling Metrics
 
-Any of the services you run are done from within worker context. Each service also has a separate service context storing its Name, etc. The metrics for the anklet instance is stored in the worker context so they can be accessed by any of the services. Plugins should update the metrics for the service they are running in at the various phases.
+Any of the plugins you run are done from within worker context. Each plugin also has a separate plugin context storing its Name, etc. The metrics for the anklet instance is stored in the worker context so they can be accessed by any of the plugins. Plugins should update the metrics for the plugin they are running in at the various phases.
 
-For example, the `github` plugin will update the metrics for the service it is running in to be `running`, `pulling`, and `idle` when it is done or has yet to pick up a new job. To do this, it uses `metrics.UpdateService` with the worker and service context. See `github` plugin for an example.
+For example, the `github` plugin will update the metrics for the plugin it is running in to be `running`, `pulling`, and `idle` when it is done or has yet to pick up a new job. To do this, it uses `metrics.UpdatePlugin` with the worker and plugin context. See `github` plugin for an example.
 
 But metrics.UpdateService can also update things like `LastSuccess`, and `LastFailure`. See `metrics.UpdateService` for more information.
 

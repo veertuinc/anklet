@@ -49,8 +49,8 @@ pid_file_dir: /tmp/
   #file_dir: /Users/nathanpierce/Library/Logs/
 #metrics:
   #port: 8081
-services:
-  # . . . populate this with your services
+plugins:
+  # . . . populate this with your plugins
 EOF
 fi
 # load the plist

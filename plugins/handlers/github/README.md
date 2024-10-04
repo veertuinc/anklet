@@ -2,14 +2,14 @@
 
 The Github Service Plugin is responsible for pulling a job from the database/queue, preparing a macOS VM, and registering it to the github repo as an action runner so it can execute the job inside.
 
-Workflow Run Jobs are processed in order of creation. The Github Controller Plugin will place the jobs in the database/queue in the order they're created. Be sure to run the [Controller](../services/github/controller) first!
+Workflow Run Jobs are processed in order of creation. The Github Webhook Receiver Plugin will place the jobs in the database/queue in the order they're created. Be sure to run the [Receiver](../receivers/github) first!
 
 For help setting up the database, see [Database Setup](https://github.com/veertuinc/anklet/blob/main/docs/database.md#database-setup).
 
 In the `config.yml`, you can define the `github` plugin as follows:
 
 ```
-services:
+plugins:
   - name: RUNNER1
     plugin: github
     token: github_pat_XXX
@@ -70,7 +70,7 @@ jobs:
           echo "123"
 ```
 
-Finally, the `github` plugin requires three different bash scripts available on the host, which it will copy into the VM and run. You can find them under https://github.com/veertuinc/anklet/tree/main/plugins/services/github. They can be customized to fit your needs. You'll need to place all three in `~/.config/anklet/plugins/services/github/`.
+Finally, the `github` plugin requires three different bash scripts available on the host, which it will copy into the VM and run. You can find them under https://github.com/veertuinc/anklet/tree/main/plugins/handlers/github. They can be customized to fit your needs. You'll need to place all three in `~/.config/anklet/plugins/handlers/github/`.
 
 ---
 

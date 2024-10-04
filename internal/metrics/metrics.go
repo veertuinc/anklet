@@ -21,7 +21,7 @@ type Server struct {
 	Port string
 }
 
-type ServiceBase struct {
+type PluginBase struct {
 	Name        string
 	PluginName  string
 	RepoName    string
@@ -30,8 +30,8 @@ type ServiceBase struct {
 	StatusSince time.Time
 }
 
-type Service struct {
-	*ServiceBase
+type Plugin struct {
+	*PluginBase
 	LastSuccessfulRunJobUrl string
 	LastFailedRunJobUrl     string
 	LastSuccessfulRun       time.Time
@@ -53,7 +53,7 @@ type MetricsData struct {
 	HostDiskUsedBytes             uint64        `json:"host_disk_used_bytes"`
 	HostDiskAvailableBytes        uint64        `json:"host_disk_available_bytes"`
 	HostDiskUsagePercentage       float64       `json:"host_disk_usage_percentage"`
-	Services                      []interface{} `json:"services"`
+	Plugins                       []interface{} `json:"plugins"`
 }
 
 type MetricsDataLock struct {
@@ -61,33 +61,33 @@ type MetricsDataLock struct {
 	MetricsData
 }
 
-func (m *MetricsDataLock) AddService(service interface{}) {
+func (m *MetricsDataLock) AddPlugin(plugin interface{}) {
 	m.Lock()
 	defer m.Unlock()
-	var serviceName string
-	switch serviceTyped := service.(type) {
-	case ServiceBase:
-		serviceName = serviceTyped.Name
-	case Service:
-		serviceName = serviceTyped.ServiceBase.Name
+	var pluginName string
+	switch pluginTyped := plugin.(type) {
+	case PluginBase:
+		pluginName = pluginTyped.Name
+	case Plugin:
+		pluginName = pluginTyped.PluginBase.Name
 	default:
-		panic("unable to get service name")
+		panic("unable to get plugin name")
 	}
-	for _, svc := range m.Services {
+	for _, plugin := range m.Plugins {
 		var name string
-		switch svcTyped := svc.(type) {
-		case ServiceBase:
-			name = svcTyped.Name
-		case Service:
-			name = svcTyped.ServiceBase.Name
+		switch pluginTyped := plugin.(type) {
+		case PluginBase:
+			name = pluginTyped.Name
+		case Plugin:
+			name = pluginTyped.PluginBase.Name
 		default:
-			panic("unable to get service name")
+			panic("unable to get plugin name")
 		}
-		if name == serviceName { // already exists, don't do anything
+		if name == pluginName { // already exists, don't do anything
 			return
 		}
 	}
-	m.Services = append(m.Services, service)
+	m.Plugins = append(m.Plugins, plugin)
 }
 
 func (m *MetricsDataLock) IncrementTotalRunningVMs() {
@@ -116,12 +116,12 @@ func (m *MetricsDataLock) IncrementTotalFailedRunsSinceStart() {
 	m.TotalFailedRunsSinceStart++
 }
 
-func CompareAndUpdateMetrics(currentService interface{}, updatedService interface{}) interface{} {
+func CompareAndUpdateMetrics(currentService interface{}, updatedPlugin interface{}) interface{} {
 	switch currentServiceTyped := currentService.(type) {
-	case Service:
-		updated, ok := updatedService.(Service)
+	case Plugin:
+		updated, ok := updatedPlugin.(Plugin)
 		if !ok {
-			panic("unable to convert updatedService to Service")
+			panic("unable to convert updatedPlugin to Plugin")
 		}
 		if updated.PluginName != "" {
 			currentServiceTyped.PluginName = updated.PluginName
@@ -145,10 +145,10 @@ func CompareAndUpdateMetrics(currentService interface{}, updatedService interfac
 			currentServiceTyped.LastFailedRunJobUrl = updated.LastFailedRunJobUrl
 		}
 		return currentServiceTyped
-	case ServiceBase:
-		updated, ok := updatedService.(ServiceBase)
+	case PluginBase:
+		updated, ok := updatedPlugin.(PluginBase)
 		if !ok {
-			panic("unable to convert updatedService to ServiceBase")
+			panic("unable to convert updatedPlugin to PluginBase")
 		}
 		if updated.PluginName != "" {
 			currentServiceTyped.PluginName = updated.PluginName
@@ -161,20 +161,20 @@ func CompareAndUpdateMetrics(currentService interface{}, updatedService interfac
 		}
 		return currentServiceTyped
 	default:
-		panic("unable to convert currentService to Service or ServiceBase")
+		panic("unable to convert currentService to Plugin or PluginBase")
 	}
 }
 
-func UpdateSystemMetrics(serviceCtx context.Context, logger *slog.Logger, metricsData *MetricsDataLock) {
+func UpdateSystemMetrics(pluginCtx context.Context, logger *slog.Logger, metricsData *MetricsDataLock) {
 	cpuCount, err := cpu.Counts(false)
 	if err != nil {
-		logger.ErrorContext(serviceCtx, "Error getting CPU count", "error", err)
+		logger.ErrorContext(pluginCtx, "Error getting CPU count", "error", err)
 		metricsData.HostCPUCount = 0
 	}
 	metricsData.HostCPUCount = cpuCount
 	cpuUsedPercent, err := cpu.Percent(0, false)
 	if err != nil {
-		logger.ErrorContext(serviceCtx, "Error getting CPU usage", "error", err)
+		logger.ErrorContext(pluginCtx, "Error getting CPU usage", "error", err)
 		metricsData.HostCPUUsagePercentage = 0
 	}
 	metricsData.HostCPUUsagePercentage = cpuUsedPercent[0]
@@ -182,7 +182,7 @@ func UpdateSystemMetrics(serviceCtx context.Context, logger *slog.Logger, metric
 	// MEMORY
 	memStat, err := mem.VirtualMemory()
 	if err != nil {
-		logger.ErrorContext(serviceCtx, "Error getting memory usage", "error", err)
+		logger.ErrorContext(pluginCtx, "Error getting memory usage", "error", err)
 		metricsData.HostMemoryTotalBytes = 0
 	}
 	metricsData.HostMemoryTotalBytes = uint64(memStat.Total)
@@ -192,7 +192,7 @@ func UpdateSystemMetrics(serviceCtx context.Context, logger *slog.Logger, metric
 	// DISK
 	diskStat, err := disk.Usage("/")
 	if err != nil {
-		logger.ErrorContext(serviceCtx, "Error getting disk usage", "error", err)
+		logger.ErrorContext(pluginCtx, "Error getting disk usage", "error", err)
 		metricsData.HostDiskUsagePercentage = 0
 	}
 	metricsData.HostDiskUsagePercentage = diskStat.UsedPercent
@@ -201,78 +201,78 @@ func UpdateSystemMetrics(serviceCtx context.Context, logger *slog.Logger, metric
 	metricsData.HostDiskUsedBytes = uint64(diskStat.Used)
 }
 
-func UpdateService(workerCtx context.Context, serviceCtx context.Context, logger *slog.Logger, updatedService interface{}) {
-	service := config.GetServiceFromContext(serviceCtx)
+func UpdatePlugin(workerCtx context.Context, pluginCtx context.Context, logger *slog.Logger, updatedPlugin interface{}) {
+	ctxPlugin := config.GetPluginFromContext(pluginCtx)
 	metricsData := GetMetricsDataFromContext(workerCtx)
-	switch updatedService.(type) {
-	case Service:
-		for i, currentServiceMetrics := range metricsData.Services {
-			switch fullCurrentServiceMetrics := currentServiceMetrics.(type) {
-			case Service:
-				if fullCurrentServiceMetrics.ServiceBase.Name == service.Name {
-					newService := CompareAndUpdateMetrics(currentServiceMetrics, updatedService)
-					metricsData.Services[i] = newService
+	switch updatedPlugin.(type) {
+	case Plugin:
+		for i, currentPluginMetrics := range metricsData.Plugins {
+			switch fullCurrentPluginMetrics := currentPluginMetrics.(type) {
+			case Plugin:
+				if fullCurrentPluginMetrics.PluginBase.Name == ctxPlugin.Name {
+					newPlugin := CompareAndUpdateMetrics(currentPluginMetrics, updatedPlugin)
+					metricsData.Plugins[i] = newPlugin
 				}
 			}
 		}
-	case ServiceBase:
-		for i, currentServiceMetrics := range metricsData.Services {
-			switch fullCurrentServiceMetrics := currentServiceMetrics.(type) {
-			case ServiceBase:
-				if fullCurrentServiceMetrics.Name == service.Name {
-					newService := CompareAndUpdateMetrics(currentServiceMetrics, updatedService)
-					metricsData.Services[i] = newService
+	case PluginBase:
+		for i, currentPluginMetrics := range metricsData.Plugins {
+			switch fullCurrentPluginMetrics := currentPluginMetrics.(type) {
+			case PluginBase:
+				if fullCurrentPluginMetrics.Name == ctxPlugin.Name {
+					newPlugin := CompareAndUpdateMetrics(currentPluginMetrics, updatedPlugin)
+					metricsData.Plugins[i] = newPlugin
 				}
 			}
 		}
 	}
 }
 
-func (m *MetricsDataLock) UpdateService(serviceCtx context.Context, logger *slog.Logger, updatedService interface{}) {
+func (m *MetricsDataLock) UpdatePlugin(pluginCtx context.Context, logger *slog.Logger, updatedPlugin interface{}) {
 	m.Lock()
 	defer m.Unlock()
 	var name string
-	switch fullUpdatedService := updatedService.(type) {
-	case Service:
-		if fullUpdatedService.Name == "" {
-			panic("updateService.Name is required")
+	switch fullUpdatedPlugin := updatedPlugin.(type) {
+	case Plugin:
+		if fullUpdatedPlugin.Name == "" {
+			panic("updatePlugin.Name is required")
 		}
-		for i, svc := range m.Services {
-			switch typedSvc := svc.(type) {
-			case Service:
-				if fullUpdatedService.Name == typedSvc.Name {
-					m.Services[i] = CompareAndUpdateMetrics(typedSvc, updatedService)
+		for i, plugin := range m.Plugins {
+			switch typedPlugin := plugin.(type) {
+			case Plugin:
+				if fullUpdatedPlugin.Name == typedPlugin.Name {
+					m.Plugins[i] = CompareAndUpdateMetrics(typedPlugin, updatedPlugin)
 				}
 			}
 		}
-	case ServiceBase:
-		name = fullUpdatedService.Name
-		for i, svc := range m.Services {
-			switch typedSvc := svc.(type) {
-			case ServiceBase:
-				if name == typedSvc.Name {
-					m.Services[i] = CompareAndUpdateMetrics(typedSvc, updatedService)
+	case PluginBase:
+		name = fullUpdatedPlugin.Name
+		for i, plugin := range m.Plugins {
+			switch typedPlugin := plugin.(type) {
+			case PluginBase:
+				if name == typedPlugin.Name {
+					m.Plugins[i] = CompareAndUpdateMetrics(typedPlugin, updatedPlugin)
 				}
 			}
 		}
 	}
 }
 
-func (m *MetricsDataLock) SetStatus(serviceCtx context.Context, logger *slog.Logger, status string) {
+func (m *MetricsDataLock) SetStatus(pluginCtx context.Context, logger *slog.Logger, status string) {
 	m.Lock()
 	defer m.Unlock()
-	service := config.GetServiceFromContext(serviceCtx)
-	for i, svc := range m.Services {
-		switch typedSvc := svc.(type) {
-		case Service:
-			if typedSvc.ServiceBase.Name == service.Name {
-				typedSvc.Status = status
-				m.Services[i] = typedSvc
+	ctxPlugin := config.GetPluginFromContext(pluginCtx)
+	for i, plugin := range m.Plugins {
+		switch typedPlugin := plugin.(type) {
+		case Plugin:
+			if typedPlugin.PluginBase.Name == ctxPlugin.Name {
+				typedPlugin.Status = status
+				m.Plugins[i] = typedPlugin
 			}
-		case ServiceBase:
-			if typedSvc.Name == service.Name {
-				typedSvc.Status = status
-				m.Services[i] = typedSvc
+		case PluginBase:
+			if typedPlugin.Name == ctxPlugin.Name {
+				typedPlugin.Status = status
+				m.Plugins[i] = typedPlugin
 			}
 		}
 	}
@@ -286,16 +286,16 @@ func NewServer(port string) *Server {
 }
 
 // Start runs the HTTP server
-func (s *Server) Start(parentCtx context.Context, logger *slog.Logger, soloController bool) {
+func (s *Server) Start(parentCtx context.Context, logger *slog.Logger, soloReceiver bool) {
 	http.HandleFunc("/metrics/v1", func(w http.ResponseWriter, r *http.Request) {
 		// update system metrics each call
 		metricsData := GetMetricsDataFromContext(parentCtx)
 		UpdateSystemMetrics(parentCtx, logger, metricsData)
 		//
 		if r.URL.Query().Get("format") == "json" {
-			s.handleJsonMetrics(parentCtx, soloController)(w, r)
+			s.handleJsonMetrics(parentCtx, soloReceiver)(w, r)
 		} else if r.URL.Query().Get("format") == "prometheus" {
-			s.handlePrometheusMetrics(parentCtx, soloController)(w, r)
+			s.handlePrometheusMetrics(parentCtx, soloReceiver)(w, r)
 		} else {
 			http.Error(w, "unsupported format, please use '?format=json' or '?format=prometheus'", http.StatusBadRequest)
 		}
@@ -308,14 +308,14 @@ func (s *Server) Start(parentCtx context.Context, logger *slog.Logger, soloContr
 }
 
 // handleMetrics processes the /metrics endpoint
-func (s *Server) handleJsonMetrics(ctx context.Context, soloController bool) http.HandlerFunc {
+func (s *Server) handleJsonMetrics(ctx context.Context, soloReceiver bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		metricsData := ctx.Value(config.ContextKey("metrics")).(*MetricsDataLock)
 		w.Header().Set("Content-Type", "application/json")
 		// json.NewEncoder(w).Encode(metricsData)
 		customEncoder := json.NewEncoder(w)
 		customEncoder.SetEscapeHTML(false)
-		if soloController {
+		if soloReceiver {
 			customEncoder.Encode(struct {
 				HostCPUCount              int                      `json:"host_cpu_count"`
 				HostCPUUsedCount          int                      `json:"host_cpu_used_count"`
@@ -328,7 +328,7 @@ func (s *Server) handleJsonMetrics(ctx context.Context, soloController bool) htt
 				HostDiskUsedBytes         uint64                   `json:"host_disk_used_bytes"`
 				HostDiskAvailableBytes    uint64                   `json:"host_disk_available_bytes"`
 				HostDiskUsagePercentage   float64                  `json:"host_disk_usage_percentage"`
-				Services                  []map[string]interface{} `json:"services"`
+				Plugins                   []map[string]interface{} `json:"plugins"`
 			}{
 				HostCPUCount:              metricsData.HostCPUCount,
 				HostCPUUsedCount:          metricsData.HostCPUUsedCount,
@@ -341,33 +341,33 @@ func (s *Server) handleJsonMetrics(ctx context.Context, soloController bool) htt
 				HostDiskUsedBytes:         metricsData.HostDiskUsedBytes,
 				HostDiskAvailableBytes:    metricsData.HostDiskAvailableBytes,
 				HostDiskUsagePercentage:   metricsData.HostDiskUsagePercentage,
-				Services: func() []map[string]interface{} {
-					services := make([]map[string]interface{}, len(metricsData.Services))
-					for i, svc := range metricsData.Services {
-						serviceMap := make(map[string]interface{})
-						switch s := svc.(type) {
-						case Service:
-							serviceMap["name"] = s.Name
-							serviceMap["plugin_name"] = s.PluginName
-							serviceMap["repo_name"] = s.RepoName
-							serviceMap["owner_name"] = s.OwnerName
-							serviceMap["status"] = s.Status
-							serviceMap["status_since"] = s.StatusSince
-							serviceMap["last_successful_run_job_url"] = s.LastSuccessfulRunJobUrl
-							serviceMap["last_failed_run_job_url"] = s.LastFailedRunJobUrl
-							serviceMap["last_successful_run"] = s.LastSuccessfulRun
-							serviceMap["last_failed_run"] = s.LastFailedRun
-						case ServiceBase:
-							serviceMap["name"] = s.Name
-							serviceMap["plugin_name"] = s.PluginName
-							serviceMap["repo_name"] = s.RepoName
-							serviceMap["owner_name"] = s.OwnerName
-							serviceMap["status"] = s.Status
-							serviceMap["status_since"] = s.StatusSince
+				Plugins: func() []map[string]interface{} {
+					plugins := make([]map[string]interface{}, len(metricsData.Plugins))
+					for i, plugin := range metricsData.Plugins {
+						pluginMap := make(map[string]interface{})
+						switch s := plugin.(type) {
+						case Plugin:
+							pluginMap["name"] = s.Name
+							pluginMap["plugin_name"] = s.PluginName
+							pluginMap["repo_name"] = s.RepoName
+							pluginMap["owner_name"] = s.OwnerName
+							pluginMap["status"] = s.Status
+							pluginMap["status_since"] = s.StatusSince
+							pluginMap["last_successful_run_job_url"] = s.LastSuccessfulRunJobUrl
+							pluginMap["last_failed_run_job_url"] = s.LastFailedRunJobUrl
+							pluginMap["last_successful_run"] = s.LastSuccessfulRun
+							pluginMap["last_failed_run"] = s.LastFailedRun
+						case PluginBase:
+							pluginMap["name"] = s.Name
+							pluginMap["plugin_name"] = s.PluginName
+							pluginMap["repo_name"] = s.RepoName
+							pluginMap["owner_name"] = s.OwnerName
+							pluginMap["status"] = s.Status
+							pluginMap["status_since"] = s.StatusSince
 						}
-						services[i] = serviceMap
+						plugins[i] = pluginMap
 					}
-					return services
+					return plugins
 				}(),
 			})
 		} else {
@@ -386,7 +386,7 @@ func (s *Server) handleJsonMetrics(ctx context.Context, soloController bool) htt
 				HostDiskUsedBytes             uint64                   `json:"host_disk_used_bytes"`
 				HostDiskAvailableBytes        uint64                   `json:"host_disk_available_bytes"`
 				HostDiskUsagePercentage       float64                  `json:"host_disk_usage_percentage"`
-				Services                      []map[string]interface{} `json:"services"`
+				Plugins                       []map[string]interface{} `json:"plugins"`
 			}{
 				TotalRunningVMs:               metricsData.TotalRunningVMs,
 				TotalSuccessfulRunsSinceStart: metricsData.TotalSuccessfulRunsSinceStart,
@@ -402,49 +402,49 @@ func (s *Server) handleJsonMetrics(ctx context.Context, soloController bool) htt
 				HostDiskUsedBytes:             metricsData.HostDiskUsedBytes,
 				HostDiskAvailableBytes:        metricsData.HostDiskAvailableBytes,
 				HostDiskUsagePercentage:       metricsData.HostDiskUsagePercentage,
-				Services: func() []map[string]interface{} {
-					services := make([]map[string]interface{}, len(metricsData.Services))
-					for i, svc := range metricsData.Services {
-						serviceMap := make(map[string]interface{})
-						switch s := svc.(type) {
-						case Service:
-							serviceMap["name"] = s.Name
-							serviceMap["plugin_name"] = s.PluginName
-							serviceMap["repo_name"] = s.RepoName
-							serviceMap["owner_name"] = s.OwnerName
-							serviceMap["status"] = s.Status
-							serviceMap["status_since"] = s.StatusSince
-							serviceMap["last_successful_run_job_url"] = s.LastSuccessfulRunJobUrl
-							serviceMap["last_failed_run_job_url"] = s.LastFailedRunJobUrl
-							serviceMap["last_successful_run"] = s.LastSuccessfulRun
-							serviceMap["last_failed_run"] = s.LastFailedRun
-						case ServiceBase:
-							serviceMap["name"] = s.Name
-							serviceMap["plugin_name"] = s.PluginName
-							serviceMap["repo_name"] = s.RepoName
-							serviceMap["owner_name"] = s.OwnerName
-							serviceMap["status"] = s.Status
-							serviceMap["status_since"] = s.StatusSince
+				Plugins: func() []map[string]interface{} {
+					plugins := make([]map[string]interface{}, len(metricsData.Plugins))
+					for i, plugin := range metricsData.Plugins {
+						pluginMap := make(map[string]interface{})
+						switch s := plugin.(type) {
+						case Plugin:
+							pluginMap["name"] = s.Name
+							pluginMap["plugin_name"] = s.PluginName
+							pluginMap["repo_name"] = s.RepoName
+							pluginMap["owner_name"] = s.OwnerName
+							pluginMap["status"] = s.Status
+							pluginMap["status_since"] = s.StatusSince
+							pluginMap["last_successful_run_job_url"] = s.LastSuccessfulRunJobUrl
+							pluginMap["last_failed_run_job_url"] = s.LastFailedRunJobUrl
+							pluginMap["last_successful_run"] = s.LastSuccessfulRun
+							pluginMap["last_failed_run"] = s.LastFailedRun
+						case PluginBase:
+							pluginMap["name"] = s.Name
+							pluginMap["plugin_name"] = s.PluginName
+							pluginMap["repo_name"] = s.RepoName
+							pluginMap["owner_name"] = s.OwnerName
+							pluginMap["status"] = s.Status
+							pluginMap["status_since"] = s.StatusSince
 						}
-						services[i] = serviceMap
+						plugins[i] = pluginMap
 					}
-					return services
+					return plugins
 				}(),
 			})
 		}
 	}
 }
 
-func (s *Server) handlePrometheusMetrics(ctx context.Context, soloController bool) http.HandlerFunc {
+func (s *Server) handlePrometheusMetrics(ctx context.Context, soloReceiver bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		metricsData := ctx.Value(config.ContextKey("metrics")).(*MetricsDataLock)
 		w.Header().Set("Content-Type", "text/plain")
-		if !soloController {
+		if !soloReceiver {
 			w.Write([]byte(fmt.Sprintf("total_running_vms %d\n", metricsData.TotalRunningVMs)))
 			w.Write([]byte(fmt.Sprintf("total_successful_runs_since_start %d\n", metricsData.TotalSuccessfulRunsSinceStart)))
 			w.Write([]byte(fmt.Sprintf("total_failed_runs_since_start %d\n", metricsData.TotalFailedRunsSinceStart)))
 		}
-		for _, service := range metricsData.Services {
+		for _, service := range metricsData.Plugins {
 			var name string
 			var pluginName string
 			var repoName string
@@ -455,34 +455,34 @@ func (s *Server) handlePrometheusMetrics(ctx context.Context, soloController boo
 			var lastFailedRun time.Time
 			var lastSuccessfulRunJobUrl string
 			var lastFailedRunJobUrl string
-			switch svc := service.(type) {
-			case Service:
-				name = svc.Name
-				pluginName = svc.PluginName
-				repoName = svc.RepoName
-				ownerName = svc.OwnerName
-				status = svc.Status
-				StatusSince = svc.StatusSince
-				lastSuccessfulRun = svc.LastSuccessfulRun
-				lastFailedRun = svc.LastFailedRun
-				lastSuccessfulRunJobUrl = svc.LastSuccessfulRunJobUrl
-				lastFailedRunJobUrl = svc.LastFailedRunJobUrl
-			case ServiceBase:
-				name = svc.Name
-				pluginName = svc.PluginName
-				repoName = svc.RepoName
-				ownerName = svc.OwnerName
-				status = svc.Status
-				StatusSince = svc.StatusSince
+			switch plugin := service.(type) {
+			case Plugin:
+				name = plugin.Name
+				pluginName = plugin.PluginName
+				repoName = plugin.RepoName
+				ownerName = plugin.OwnerName
+				status = plugin.Status
+				StatusSince = plugin.StatusSince
+				lastSuccessfulRun = plugin.LastSuccessfulRun
+				lastFailedRun = plugin.LastFailedRun
+				lastSuccessfulRunJobUrl = plugin.LastSuccessfulRunJobUrl
+				lastFailedRunJobUrl = plugin.LastFailedRunJobUrl
+			case PluginBase:
+				name = plugin.Name
+				pluginName = plugin.PluginName
+				repoName = plugin.RepoName
+				ownerName = plugin.OwnerName
+				status = plugin.Status
+				StatusSince = plugin.StatusSince
 			default:
-				panic("unable to convert svc to Service or ServiceBase")
+				panic("unable to convert plugin to Plugin or PluginBase")
 			}
-			w.Write([]byte(fmt.Sprintf("service_status{service_name=%s,plugin=%s,owner=%s,repo=%s} %s\n", name, pluginName, ownerName, repoName, status)))
-			if !strings.Contains(pluginName, "_controller") {
-				w.Write([]byte(fmt.Sprintf("service_last_successful_run{service_name=%s,plugin=%s,owner=%s,repo=%s,job_url=%s} %s\n", name, pluginName, ownerName, repoName, lastSuccessfulRunJobUrl, lastSuccessfulRun.Format(time.RFC3339))))
-				w.Write([]byte(fmt.Sprintf("service_last_failed_run{service_name=%s,plugin=%s,owner=%s,repo=%s,job_url=%s} %s\n", name, pluginName, ownerName, repoName, lastFailedRunJobUrl, lastFailedRun.Format(time.RFC3339))))
+			w.Write([]byte(fmt.Sprintf("plugin_status{name=%s,plugin=%s,owner=%s,repo=%s} %s\n", name, pluginName, ownerName, repoName, status)))
+			if !strings.Contains(pluginName, "_receiver") {
+				w.Write([]byte(fmt.Sprintf("plugin_last_successful_run{name=%s,plugin=%s,owner=%s,repo=%s,job_url=%s} %s\n", name, pluginName, ownerName, repoName, lastSuccessfulRunJobUrl, lastSuccessfulRun.Format(time.RFC3339))))
+				w.Write([]byte(fmt.Sprintf("plugin_last_failed_run{name=%s,plugin=%s,owner=%s,repo=%s,job_url=%s} %s\n", name, pluginName, ownerName, repoName, lastFailedRunJobUrl, lastFailedRun.Format(time.RFC3339))))
 			}
-			w.Write([]byte(fmt.Sprintf("service_status_since{service_name=%s,plugin=%s,owner=%s,repo=%s} %s\n", name, pluginName, ownerName, repoName, StatusSince.Format(time.RFC3339))))
+			w.Write([]byte(fmt.Sprintf("plugin_status_since{name=%s,plugin=%s,owner=%s,repo=%s} %s\n", name, pluginName, ownerName, repoName, StatusSince.Format(time.RFC3339))))
 		}
 		w.Write([]byte(fmt.Sprintf("host_cpu_count %d\n", metricsData.HostCPUCount)))
 		w.Write([]byte(fmt.Sprintf("host_cpu_used_count %d\n", metricsData.HostCPUUsedCount)))

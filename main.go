@@ -36,7 +36,7 @@ var (
 	// attachFlag      = flag.Bool("attach", false, "Attach to the anklet and don't background it (useful for containers)")
 	// stop            = make(chan struct{})
 	// done            = make(chan struct{})
-	shutDownMessage = "anklet service shut down"
+	shutDownMessage = "anklet plugin shut down"
 )
 
 // func termHandler(ctx context.Context, logger *slog.Logger) daemon.SignalHandlerFunc {
@@ -156,13 +156,13 @@ func main() {
 	httpTransport := http.DefaultTransport
 	parentCtx = context.WithValue(parentCtx, config.ContextKey("httpTransport"), httpTransport)
 
-	githubServiceExists := false
-	for _, service := range loadedConfig.Services {
-		if service.Plugin == "github" || service.Plugin == "github_controller" {
-			githubServiceExists = true
+	githubPluginExists := false
+	for _, plugin := range loadedConfig.Plugins {
+		if plugin.Plugin == "github" || plugin.Plugin == "github_receiver" {
+			githubPluginExists = true
 		}
 	}
-	if githubServiceExists {
+	if githubPluginExists {
 		rateLimiter, err := github_ratelimit.NewRateLimitWaiterClient(httpTransport)
 		if err != nil {
 			logger.ErrorContext(parentCtx, "error creating github_ratelimit.NewRateLimitWaiterClient", "err", err)
@@ -212,7 +212,7 @@ func worker(parentCtx context.Context, logger *slog.Logger, loadedConfig config.
 			// case syscall.SIGTERM:
 			// 	logger.WarnContext(workerCtx, "best effort graceful shutdown, interrupting the job as soon as possible...")
 			// 	workerCancel()
-			case syscall.SIGQUIT: // doesn't work for controllers since they don't loop
+			case syscall.SIGQUIT: // doesn't work for receivers since they don't loop
 				logger.WarnContext(workerCtx, "graceful shutdown, waiting for jobs to finish...")
 				toRunOnce = "true"
 			default:
@@ -247,31 +247,31 @@ func worker(parentCtx context.Context, logger *slog.Logger, loadedConfig config.
 			wg.Add(1)
 			go func(metricsURL string) {
 				defer wg.Done()
-				serviceCtx, serviceCancel := context.WithCancel(workerCtx) // Inherit from parent context
-				serviceCtx = logging.AppendCtx(serviceCtx, slog.String("metrics_url", metricsURL))
+				pluginCtx, pluginCancel := context.WithCancel(workerCtx) // Inherit from parent context
+				pluginCtx = logging.AppendCtx(pluginCtx, slog.String("metrics_url", metricsURL))
 				// check if valid URL
 				_, err := url.Parse(metricsURL)
 				if err != nil {
-					logger.ErrorContext(serviceCtx, "invalid URL", "error", err)
-					serviceCancel()
+					logger.ErrorContext(pluginCtx, "invalid URL", "error", err)
+					pluginCancel()
 					return
 				}
 				for {
 					select {
 					case <-workerCtx.Done():
-						serviceCancel()
-						logger.WarnContext(serviceCtx, shutDownMessage)
+						pluginCancel()
+						logger.WarnContext(pluginCtx, shutDownMessage)
 						return
 					default:
 						// get metrics from endpoint and update the main list
-						metrics.UpdatemetricsURLDBEntry(serviceCtx, logger, metricsURL)
+						metrics.UpdatemetricsURLDBEntry(pluginCtx, logger, metricsURL)
 						if workerCtx.Err() != nil || toRunOnce == "true" {
-							serviceCancel()
+							pluginCancel()
 							break
 						}
 						select {
 						case <-time.After(time.Duration(loadedConfig.Metrics.SleepInterval) * time.Second):
-						case <-serviceCtx.Done():
+						case <-pluginCtx.Done():
 							break
 						}
 					}
@@ -279,24 +279,24 @@ func worker(parentCtx context.Context, logger *slog.Logger, loadedConfig config.
 			}(metricsURL)
 		}
 	} else {
-		// firstServiceStarted: always make sure the first service in the config starts first before any others.
-		// this allows users to mix a controller with multiple other plugins,
-		// and let the controller do its thing to prepare the db first.
-		firstServiceStarted := make(chan bool, 1)
+		// firstPluginStarted: always make sure the first plugin in the config starts first before any others.
+		// this allows users to mix a receiver with multiple other plugins,
+		// and let the receiver do its thing to prepare the db first.
+		firstPluginStarted := make(chan bool, 1)
 		metricsData := &metrics.MetricsDataLock{}
 		workerCtx = context.WithValue(workerCtx, config.ContextKey("metrics"), metricsData)
 		logger.InfoContext(workerCtx, "metrics server started on port "+metricsPort)
 		metrics.UpdateSystemMetrics(workerCtx, logger, metricsData)
 		/////////////
-		// Services
-		soloController := false
-		for index, service := range loadedConfig.Services {
+		// Plugins
+		soloReceiver := false
+		for index, plugin := range loadedConfig.Plugins {
 			wg.Add(1)
 			if index != 0 {
 			waitLoop:
 				for {
 					select {
-					case <-firstServiceStarted:
+					case <-firstPluginStarted:
 						break waitLoop
 					case <-workerCtx.Done():
 						return
@@ -305,71 +305,71 @@ func worker(parentCtx context.Context, logger *slog.Logger, loadedConfig config.
 					}
 				}
 			}
-			go func(service config.Service) {
+			go func(plugin config.Plugin) {
 				defer wg.Done()
-				serviceCtx, serviceCancel := context.WithCancel(workerCtx) // Inherit from parent context
+				pluginCtx, pluginCancel := context.WithCancel(workerCtx) // Inherit from parent context
 
-				if service.Name == "" {
-					panic("name is required for services")
+				if plugin.Name == "" {
+					panic("name is required for plugins")
 				}
 
-				serviceCtx = context.WithValue(serviceCtx, config.ContextKey("service"), service)
-				serviceCtx = logging.AppendCtx(serviceCtx, slog.String("serviceName", service.Name))
-				serviceCtx = context.WithValue(serviceCtx, config.ContextKey("logger"), logger)
+				pluginCtx = context.WithValue(pluginCtx, config.ContextKey("plugin"), plugin)
+				pluginCtx = logging.AppendCtx(pluginCtx, slog.String("pluginName", plugin.Name))
+				pluginCtx = context.WithValue(pluginCtx, config.ContextKey("logger"), logger)
 
-				ankaCLI, err := anka.NewCLI(serviceCtx)
+				ankaCLI, err := anka.NewCLI(pluginCtx)
 				if err != nil {
-					serviceCancel()
-					logger.ErrorContext(serviceCtx, "unable to create anka cli", "error", err)
+					pluginCancel()
+					logger.ErrorContext(pluginCtx, "unable to create anka cli", "error", err)
 					return
 				}
 
-				serviceCtx = context.WithValue(serviceCtx, config.ContextKey("ankacli"), ankaCLI)
+				pluginCtx = context.WithValue(pluginCtx, config.ContextKey("ankacli"), ankaCLI)
 
-				if service.Database.Enabled {
-					databaseClient, err := database.NewClient(serviceCtx, service.Database)
+				if plugin.Database.Enabled {
+					databaseClient, err := database.NewClient(pluginCtx, plugin.Database)
 					if err != nil {
 						panic(fmt.Sprintf("unable to access database: %v", err))
 					}
-					serviceCtx = context.WithValue(serviceCtx, config.ContextKey("database"), databaseClient)
+					pluginCtx = context.WithValue(pluginCtx, config.ContextKey("database"), databaseClient)
 				}
 
-				logger.InfoContext(serviceCtx, "starting service")
+				logger.InfoContext(pluginCtx, "starting service")
 
 				for {
 					select {
-					case <-serviceCtx.Done():
-						metricsData.SetStatus(serviceCtx, logger, "stopped")
-						logger.WarnContext(serviceCtx, shutDownMessage)
-						serviceCancel()
+					case <-pluginCtx.Done():
+						metricsData.SetStatus(pluginCtx, logger, "stopped")
+						logger.WarnContext(pluginCtx, shutDownMessage)
+						pluginCancel()
 						return
 					default:
-						run.Plugin(workerCtx, serviceCtx, serviceCancel, logger, firstServiceStarted, metricsData)
+						run.Plugin(workerCtx, pluginCtx, pluginCancel, logger, firstPluginStarted, metricsData)
 						if workerCtx.Err() != nil || toRunOnce == "true" {
-							serviceCancel()
-							logger.WarnContext(serviceCtx, shutDownMessage)
+							pluginCancel()
+							logger.WarnContext(pluginCtx, shutDownMessage)
 							return
 						}
-						metricsData.SetStatus(serviceCtx, logger, "idle")
+						metricsData.SetStatus(pluginCtx, logger, "idle")
 						select {
-						case <-time.After(time.Duration(service.SleepInterval) * time.Second):
-						case <-serviceCtx.Done():
-							fmt.Println("serviceCtx.Done()")
+						case <-time.After(time.Duration(plugin.SleepInterval) * time.Second):
+						case <-pluginCtx.Done():
+							fmt.Println("pluginCtx.Done()")
 							break
 						}
 					}
 				}
-			}(service)
-			// if the only service is a controller, set the soloController flag to true
-			if strings.Contains(service.Plugin, "_controller") {
-				soloController = true
-			} else { // otherwise disable it if other services exist
-				soloController = false
+			}(plugin)
+			// if the only service is a receiver, set the soloReceiver flag to true
+			if strings.Contains(plugin.Plugin, "_receiver") {
+				soloReceiver = true
+			} else { // otherwise disable it if other plugins exist
+				soloReceiver = false
 			}
 		}
-		go metricsService.Start(workerCtx, logger, soloController)
+		go metricsService.Start(workerCtx, logger, soloReceiver)
 	}
 	wg.Wait()
-	logger.WarnContext(workerCtx, "anklet (and all services) shut down")
+	logger.WarnContext(workerCtx, "anklet (and all plugins) shut down")
 	os.Exit(0)
 }

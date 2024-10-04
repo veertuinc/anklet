@@ -15,12 +15,12 @@ import (
 type ContextKey string
 
 type Config struct {
-	Services   []Service `yaml:"services"`
-	Log        Log       `yaml:"log"`
-	PidFileDir string    `yaml:"pid_file_dir"`
-	LogFileDir string    `yaml:"log_file_dir"`
-	WorkDir    string    `yaml:"work_dir"`
-	Metrics    Metrics   `yaml:"metrics"`
+	Plugins    []Plugin `yaml:"plugins"`
+	Log        Log      `yaml:"log"`
+	PidFileDir string   `yaml:"pid_file_dir"`
+	LogFileDir string   `yaml:"log_file_dir"`
+	WorkDir    string   `yaml:"work_dir"`
+	Metrics    Metrics  `yaml:"metrics"`
 }
 
 type Log struct {
@@ -49,7 +49,7 @@ type Workflow struct {
 	Exclude []string `yaml:"exclude"`
 }
 
-type Service struct {
+type Plugin struct {
 	SleepInterval  int      `yaml:"sleep_interval"`
 	Name           string   `yaml:"name"`
 	Plugin         string   `yaml:"plugin"`
@@ -157,12 +157,12 @@ func LoadInEnvs(config Config) (Config, error) {
 	return config, nil
 }
 
-func GetServiceFromContext(ctx context.Context) Service {
-	service, ok := ctx.Value(ContextKey("service")).(Service)
+func GetPluginFromContext(ctx context.Context) Plugin {
+	plugin, ok := ctx.Value(ContextKey("plugin")).(Plugin)
 	if !ok {
-		panic("GetServiceFromContext failed")
+		panic("GetPluginFromContext failed")
 	}
-	return service
+	return plugin
 }
 
 type Globals struct {

@@ -28,6 +28,6 @@ require (
 	golang.org/x/sys v0.19.0 // indirect
 )
 
-replace github.com/veertuinc/anklet/plugins/services/github => ./plugins/services/github
+replace github.com/veertuinc/anklet/plugins/handlers/github => ./plugins/handlers/github
 
-replace github.com/veertuinc/anklet/plugins/controllers/github => ./plugins/controllers/github
+replace github.com/veertuinc/anklet/plugins/receivers/github => ./plugins/receivers/github

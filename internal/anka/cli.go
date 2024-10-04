@@ -35,15 +35,15 @@ type Cli struct {
 	RegistryPullMutex sync.Mutex
 }
 
-func GetAnkaCLIFromContext(serviceCtx context.Context) *Cli {
-	ankaCLI, ok := serviceCtx.Value(config.ContextKey("ankacli")).(*Cli)
+func GetAnkaCLIFromContext(pluginCtx context.Context) *Cli {
+	ankaCLI, ok := pluginCtx.Value(config.ContextKey("ankacli")).(*Cli)
 	if !ok {
 		panic("function GetAnkaCLIFromContext failed")
 	}
 	return ankaCLI
 }
 
-func NewCLI(serviceCtx context.Context) (*Cli, error) {
+func NewCLI(pluginCtx context.Context) (*Cli, error) {
 	cli := &Cli{}
 
 	cmd := exec.Command("anka")
@@ -51,7 +51,7 @@ func NewCLI(serviceCtx context.Context) (*Cli, error) {
 		return nil, fmt.Errorf("anka command not found or not working properly: %v", err)
 	}
 
-	version, err := cli.ExecuteParseJson(serviceCtx, "anka", "-j", "version")
+	version, err := cli.ExecuteParseJson(pluginCtx, "anka", "-j", "version")
 	if err != nil || version.Status != "OK" {
 		return nil, err
 	}
@@ -59,7 +59,7 @@ func NewCLI(serviceCtx context.Context) (*Cli, error) {
 		cli.Version = body["version"].(string)
 	}
 
-	license, err := cli.ExecuteParseJson(serviceCtx, "anka", "-j", "license", "show")
+	license, err := cli.ExecuteParseJson(pluginCtx, "anka", "-j", "license", "show")
 	if err != nil || license.Status != "OK" {
 		return nil, err
 	}
@@ -81,10 +81,10 @@ func NewCLI(serviceCtx context.Context) (*Cli, error) {
 	return cli, nil
 }
 
-func (cli *Cli) Execute(serviceCtx context.Context, args ...string) ([]byte, int, error) {
-	logger := logging.GetLoggerFromContext(serviceCtx)
+func (cli *Cli) Execute(pluginCtx context.Context, args ...string) ([]byte, int, error) {
+	logger := logging.GetLoggerFromContext(pluginCtx)
 	if args[2] != "list" { // hide spammy list command
-		logger.DebugContext(serviceCtx, "executing", "command", strings.Join(args, " "))
+		logger.DebugContext(pluginCtx, "executing", "command", strings.Join(args, " "))
 	}
 	done := make(chan error, 1)
 	var cmd *exec.Cmd
@@ -104,7 +104,7 @@ func (cli *Cli) Execute(serviceCtx context.Context, args ...string) ([]byte, int
 	for {
 		select {
 		case <-ticker.C:
-			logger.InfoContext(serviceCtx, fmt.Sprintf("execution of command %v is still in progress...", args))
+			logger.InfoContext(pluginCtx, fmt.Sprintf("execution of command %v is still in progress...", args))
 		case err := <-done:
 			exitCode := 0
 			if exitErr, ok := err.(*exec.ExitError); ok {
@@ -115,7 +115,7 @@ func (cli *Cli) Execute(serviceCtx context.Context, args ...string) ([]byte, int
 	}
 }
 
-func (cli *Cli) ParseAnkaJson(serviceCtx context.Context, jsonData []byte) (*AnkaJson, error) {
+func (cli *Cli) ParseAnkaJson(pluginCtx context.Context, jsonData []byte) (*AnkaJson, error) {
 	ankaJson := &AnkaJson{}
 	err := json.Unmarshal(jsonData, &ankaJson)
 	if err != nil {
@@ -124,12 +124,12 @@ func (cli *Cli) ParseAnkaJson(serviceCtx context.Context, jsonData []byte) (*Ank
 	return ankaJson, nil
 }
 
-func (cli *Cli) ExecuteParseJson(serviceCtx context.Context, args ...string) (*AnkaJson, error) {
-	out, exitCode, _ := cli.Execute(serviceCtx, args...)
+func (cli *Cli) ExecuteParseJson(pluginCtx context.Context, args ...string) (*AnkaJson, error) {
+	out, exitCode, _ := cli.Execute(pluginCtx, args...)
 	// registry pull can output muliple json objects, per line, so we need to only get the last line
 	lines := bytes.Split(out, []byte("\n"))
 	lastLine := lines[len(lines)-1]
-	ankaJson, err := cli.ParseAnkaJson(serviceCtx, lastLine)
+	ankaJson, err := cli.ParseAnkaJson(pluginCtx, lastLine)
 	if err != nil {
 		return nil, err
 	}
@@ -139,12 +139,12 @@ func (cli *Cli) ExecuteParseJson(serviceCtx context.Context, args ...string) (*A
 	return ankaJson, nil
 }
 
-func (cli *Cli) ExecuteAndParseJsonOnError(serviceCtx context.Context, args ...string) ([]byte, error) {
-	if serviceCtx.Err() != nil {
+func (cli *Cli) ExecuteAndParseJsonOnError(pluginCtx context.Context, args ...string) ([]byte, error) {
+	if pluginCtx.Err() != nil {
 		return nil, fmt.Errorf("context canceled before ExecuteAndParseJsonOnError")
 	}
 	ankaJson := &AnkaJson{}
-	out, exitCode, _ := cli.Execute(serviceCtx, args...)
+	out, exitCode, _ := cli.Execute(pluginCtx, args...)
 	if exitCode != 0 {
 		return out, fmt.Errorf("%s", string(out))
 	}
@@ -155,26 +155,26 @@ func (cli *Cli) ExecuteAndParseJsonOnError(serviceCtx context.Context, args ...s
 	return out, nil
 }
 
-func (cli *Cli) AnkaRun(serviceCtx context.Context, args ...string) error {
-	vm := GetAnkaVmFromContext(serviceCtx)
-	runOutput, exitCode, err := cli.Execute(serviceCtx, "anka", "-j", "run", vm.Name, "bash", "-c", strings.Join(args, " "))
+func (cli *Cli) AnkaRun(pluginCtx context.Context, args ...string) error {
+	vm := GetAnkaVmFromContext(pluginCtx)
+	runOutput, exitCode, err := cli.Execute(pluginCtx, "anka", "-j", "run", vm.Name, "bash", "-c", strings.Join(args, " "))
 	if exitCode != 0 || err != nil {
 		return fmt.Errorf("command execution failed with code %d: %s %s", exitCode, string(runOutput), err)
 	}
-	logger := logging.GetLoggerFromContext(serviceCtx)
-	logger.DebugContext(serviceCtx, "command executed successfully", "stdout", string(runOutput))
+	logger := logging.GetLoggerFromContext(pluginCtx)
+	logger.DebugContext(pluginCtx, "command executed successfully", "stdout", string(runOutput))
 	return nil
 }
 
-func (cli *Cli) AnkaRegistryPull(workerCtx context.Context, serviceCtx context.Context, template string, tag string) (*AnkaJson, error) {
-	if serviceCtx.Err() != nil {
+func (cli *Cli) AnkaRegistryPull(workerCtx context.Context, pluginCtx context.Context, template string, tag string) (*AnkaJson, error) {
+	if pluginCtx.Err() != nil {
 		return nil, fmt.Errorf("context canceled before AnkaRegistryPull")
 	}
-	logger := logging.GetLoggerFromContext(serviceCtx)
-	service := config.GetServiceFromContext(serviceCtx)
+	logger := logging.GetLoggerFromContext(pluginCtx)
+	ctxPlugin := config.GetPluginFromContext(pluginCtx)
 	var registryExtra []string
-	if service.RegistryURL != "" {
-		registryExtra = []string{"--remote", service.RegistryURL}
+	if ctxPlugin.RegistryURL != "" {
+		registryExtra = []string{"--remote", ctxPlugin.RegistryURL}
 	}
 	var args []string
 	if tag != "(using latest)" {
@@ -184,110 +184,110 @@ func (cli *Cli) AnkaRegistryPull(workerCtx context.Context, serviceCtx context.C
 		args = append([]string{"anka", "-j", "registry"}, registryExtra...)
 		args = append(args, "pull", "--shrink", template)
 	}
-	logger.DebugContext(serviceCtx, "pulling template to host")
+	logger.DebugContext(pluginCtx, "pulling template to host")
 
 	metricsData := metrics.GetMetricsDataFromContext(workerCtx)
 
-	defer metricsData.SetStatus(serviceCtx, logger, "running")
+	defer metricsData.SetStatus(pluginCtx, logger, "running")
 
-	metricsData.SetStatus(serviceCtx, logger, "pulling")
+	metricsData.SetStatus(pluginCtx, logger, "pulling")
 
-	pullJson, err := cli.ExecuteParseJson(serviceCtx, args...)
+	pullJson, err := cli.ExecuteParseJson(pluginCtx, args...)
 	if err != nil {
 		return pullJson, err
 	}
 	if pullJson.Status != "OK" {
 		return pullJson, fmt.Errorf("error pulling template from registry: %s", pullJson.Message)
 	}
-	logger.DebugContext(serviceCtx, "successfully pulled template from registry")
+	logger.DebugContext(pluginCtx, "successfully pulled template from registry")
 	return pullJson, nil
 }
 
-func (cli *Cli) AnkaDelete(workerCtx context.Context, serviceCtx context.Context, vm *VM) error {
-	logger := logging.GetLoggerFromContext(serviceCtx)
-	deleteOutput, err := cli.ExecuteParseJson(serviceCtx, "anka", "-j", "delete", "--yes", vm.Name)
+func (cli *Cli) AnkaDelete(workerCtx context.Context, pluginCtx context.Context, vm *VM) error {
+	logger := logging.GetLoggerFromContext(pluginCtx)
+	deleteOutput, err := cli.ExecuteParseJson(pluginCtx, "anka", "-j", "delete", "--yes", vm.Name)
 	if err != nil {
-		logger.ErrorContext(serviceCtx, "error executing anka delete", "err", err)
+		logger.ErrorContext(pluginCtx, "error executing anka delete", "err", err)
 		return err
 	}
-	logger.DebugContext(serviceCtx, "successfully deleted vm", "std", deleteOutput.Message)
+	logger.DebugContext(pluginCtx, "successfully deleted vm", "std", deleteOutput.Message)
 	// decrement total running VMs
 	metricsData := metrics.GetMetricsDataFromContext(workerCtx)
 	metricsData.DecrementTotalRunningVMs()
 	return nil
 }
 
-func (cli *Cli) ObtainAnkaVM(workerCtx context.Context, serviceCtx context.Context, ankaTemplate string) (context.Context, *VM, error) {
-	if serviceCtx.Err() != nil {
-		return serviceCtx, nil, fmt.Errorf("context canceled before ObtainAnkaVMAndName")
+func (cli *Cli) ObtainAnkaVM(workerCtx context.Context, pluginCtx context.Context, ankaTemplate string) (context.Context, *VM, error) {
+	if pluginCtx.Err() != nil {
+		return pluginCtx, nil, fmt.Errorf("context canceled before ObtainAnkaVMAndName")
 	}
-	logger := logging.GetLoggerFromContext(serviceCtx)
+	logger := logging.GetLoggerFromContext(pluginCtx)
 	vmID, err := uuid.NewRandom()
 	if err != nil {
-		logger.ErrorContext(serviceCtx, "error creating uuid for vm name", "err", err)
-		return serviceCtx, nil, err
+		logger.ErrorContext(pluginCtx, "error creating uuid for vm name", "err", err)
+		return pluginCtx, nil, err
 	}
 	vmName := fmt.Sprintf("anklet-vm-%s", vmID.String())
-	serviceCtx = logging.AppendCtx(serviceCtx, slog.String("vmName", vmName))
+	pluginCtx = logging.AppendCtx(pluginCtx, slog.String("vmName", vmName))
 	vm := &VM{Name: vmName}
-	serviceCtx = context.WithValue(serviceCtx, config.ContextKey("ankavm"), vm)
-	err = cli.AnkaClone(serviceCtx, ankaTemplate)
+	pluginCtx = context.WithValue(pluginCtx, config.ContextKey("ankavm"), vm)
+	err = cli.AnkaClone(pluginCtx, ankaTemplate)
 	if err != nil {
-		logger.ErrorContext(serviceCtx, "error executing anka clone", "err", err)
-		return serviceCtx, vm, err
+		logger.ErrorContext(pluginCtx, "error executing anka clone", "err", err)
+		return pluginCtx, vm, err
 	}
 	// Start
-	err = cli.AnkaStart(serviceCtx)
+	err = cli.AnkaStart(pluginCtx)
 	if err != nil {
-		logger.ErrorContext(serviceCtx, "error executing anka start", "err", err)
-		return serviceCtx, vm, err
+		logger.ErrorContext(pluginCtx, "error executing anka start", "err", err)
+		return pluginCtx, vm, err
 	}
 	// increment total running VMs
 	metricsData := metrics.GetMetricsDataFromContext(workerCtx)
 	metricsData.IncrementTotalRunningVMs()
-	return serviceCtx, vm, nil
+	return pluginCtx, vm, nil
 }
 
-func (cli *Cli) AnkaClone(serviceCtx context.Context, template string) error {
-	if serviceCtx.Err() != nil {
+func (cli *Cli) AnkaClone(pluginCtx context.Context, template string) error {
+	if pluginCtx.Err() != nil {
 		return fmt.Errorf("context canceled before AnkaClone")
 	}
-	logger := logging.GetLoggerFromContext(serviceCtx)
-	vm := GetAnkaVmFromContext(serviceCtx)
-	cloneOutput, err := cli.ExecuteParseJson(serviceCtx, "anka", "-j", "clone", template, vm.Name)
+	logger := logging.GetLoggerFromContext(pluginCtx)
+	vm := GetAnkaVmFromContext(pluginCtx)
+	cloneOutput, err := cli.ExecuteParseJson(pluginCtx, "anka", "-j", "clone", template, vm.Name)
 	if err != nil {
 		return err
 	}
 	if cloneOutput.Status != "OK" {
 		return fmt.Errorf("error cloning template: %s", cloneOutput.Message)
 	}
-	logger.InfoContext(serviceCtx, "successfully cloned template to new vm")
+	logger.InfoContext(pluginCtx, "successfully cloned template to new vm")
 	return nil
 }
 
-func (cli *Cli) AnkaStart(serviceCtx context.Context) error {
-	if serviceCtx.Err() != nil {
+func (cli *Cli) AnkaStart(pluginCtx context.Context) error {
+	if pluginCtx.Err() != nil {
 		return fmt.Errorf("context canceled before AnkaStart")
 	}
-	logger := logging.GetLoggerFromContext(serviceCtx)
-	vm := GetAnkaVmFromContext(serviceCtx)
-	startOutput, err := cli.ExecuteParseJson(serviceCtx, "anka", "-j", "start", vm.Name)
+	logger := logging.GetLoggerFromContext(pluginCtx)
+	vm := GetAnkaVmFromContext(pluginCtx)
+	startOutput, err := cli.ExecuteParseJson(pluginCtx, "anka", "-j", "start", vm.Name)
 	if err != nil {
 		return err
 	}
 	if startOutput.Status != "OK" {
 		return fmt.Errorf("error starting vm: %s", startOutput.Message)
 	}
-	logger.InfoContext(serviceCtx, "successfully started vm")
+	logger.InfoContext(pluginCtx, "successfully started vm")
 	return nil
 }
 
-func (cli *Cli) AnkaCopy(serviceCtx context.Context, filesToCopyIn ...string) error {
-	if serviceCtx.Err() != nil {
+func (cli *Cli) AnkaCopy(pluginCtx context.Context, filesToCopyIn ...string) error {
+	if pluginCtx.Err() != nil {
 		return fmt.Errorf("context canceled before AnkaCopy")
 	}
-	logger := logging.GetLoggerFromContext(serviceCtx)
-	vm := GetAnkaVmFromContext(serviceCtx)
+	logger := logging.GetLoggerFromContext(pluginCtx)
+	vm := GetAnkaVmFromContext(pluginCtx)
 	for _, hostLevelFile := range filesToCopyIn {
 		// handle symlinks
 		realPath, err := filepath.EvalSymlinks(hostLevelFile)
@@ -295,67 +295,67 @@ func (cli *Cli) AnkaCopy(serviceCtx context.Context, filesToCopyIn ...string) er
 			return fmt.Errorf("error evaluating symlink for %s: %w", hostLevelFile, err)
 		}
 		hostLevelFile = realPath
-		copyOutput, err := cli.ExecuteParseJson(serviceCtx, "anka", "-j", "cp", "-a", hostLevelFile, fmt.Sprintf("%s:", vm.Name))
+		copyOutput, err := cli.ExecuteParseJson(pluginCtx, "anka", "-j", "cp", "-a", hostLevelFile, fmt.Sprintf("%s:", vm.Name))
 		if err != nil {
 			return err
 		}
 		if copyOutput.Status != "OK" {
 			return fmt.Errorf("error copying into vm: %s", copyOutput.Message)
 		}
-		logger.DebugContext(serviceCtx, "successfully copied file into vm", "file", hostLevelFile)
+		logger.DebugContext(pluginCtx, "successfully copied file into vm", "file", hostLevelFile)
 	}
 
 	return nil
 }
 
-func HostHasVmCapacity(serviceCtx context.Context) bool {
-	logger := logging.GetLoggerFromContext(serviceCtx)
-	ankaCLI := GetAnkaCLIFromContext(serviceCtx)
+func HostHasVmCapacity(pluginCtx context.Context) bool {
+	logger := logging.GetLoggerFromContext(pluginCtx)
+	ankaCLI := GetAnkaCLIFromContext(pluginCtx)
 	// check if there are already two VMS running or not
-	runningVMsList, err := ankaCLI.ExecuteParseJson(serviceCtx, "anka", "-j", "list", "-r")
+	runningVMsList, err := ankaCLI.ExecuteParseJson(pluginCtx, "anka", "-j", "list", "-r")
 	if err != nil {
-		logger.ErrorContext(serviceCtx, "error executing anka list -r", "err", err)
+		logger.ErrorContext(pluginCtx, "error executing anka list -r", "err", err)
 		return false
 	}
 	if runningVMsList.Status != "OK" {
-		logger.ErrorContext(serviceCtx, "error listing running VMs", "status", runningVMsList.Status, "message", runningVMsList.Message)
+		logger.ErrorContext(pluginCtx, "error listing running VMs", "status", runningVMsList.Status, "message", runningVMsList.Message)
 		return false
 	}
 	runningVMsCount := 0
 	if bodySlice, ok := runningVMsList.Body.([]interface{}); ok {
 		runningVMsCount = len(bodySlice)
 	} else {
-		logger.ErrorContext(serviceCtx, "unable to parse running VMs list body to []interface{}")
+		logger.ErrorContext(pluginCtx, "unable to parse running VMs list body to []interface{}")
 		return false
 	}
 	if runningVMsCount >= 2 {
-		logger.WarnContext(serviceCtx, "more than 2 VMs are running; unable to run more than 2 at a time due to Apple SLA")
+		logger.WarnContext(pluginCtx, "more than 2 VMs are running; unable to run more than 2 at a time due to Apple SLA")
 		return false
 	}
 	return true
 }
 
-func (cli *Cli) EnsureVMTemplateExists(workerCtx context.Context, serviceCtx context.Context, targetTemplate string, targetTag string) (error, error) {
-	logger := logging.GetLoggerFromContext(serviceCtx)
-	ankaCLI := GetAnkaCLIFromContext(serviceCtx)
-	globals := config.GetGlobalsFromContext(serviceCtx)
+func (cli *Cli) EnsureVMTemplateExists(workerCtx context.Context, pluginCtx context.Context, targetTemplate string, targetTag string) (error, error) {
+	logger := logging.GetLoggerFromContext(pluginCtx)
+	ankaCLI := GetAnkaCLIFromContext(pluginCtx)
+	globals := config.GetGlobalsFromContext(pluginCtx)
 	pullTemplate := false
-	list, err := ankaCLI.ExecuteParseJson(serviceCtx, "anka", "-j", "list", targetTemplate)
+	list, err := ankaCLI.ExecuteParseJson(pluginCtx, "anka", "-j", "list", targetTemplate)
 	if err != nil {
-		list, innerErr := ankaCLI.ExecuteParseJson(serviceCtx, "anka", "-j", "list")
+		list, innerErr := ankaCLI.ExecuteParseJson(pluginCtx, "anka", "-j", "list")
 		if innerErr != nil {
-			logger.ErrorContext(serviceCtx, "error executing anka list", "err", innerErr)
+			logger.ErrorContext(pluginCtx, "error executing anka list", "err", innerErr)
 			return nil, innerErr
 		}
-		logger.DebugContext(serviceCtx, "list", "stdout", list.Body)
+		logger.DebugContext(pluginCtx, "list", "stdout", list.Body)
 	}
-	logger.DebugContext(serviceCtx, "list output", "json", list)
+	logger.DebugContext(pluginCtx, "list output", "json", list)
 	if list != nil {
 		if list.Status == "ERROR" {
 			if list.Message == fmt.Sprintf("%s: not found", targetTemplate) {
 				pullTemplate = true
 			} else {
-				logger.ErrorContext(serviceCtx, "error executing anka list", "err", list.Message)
+				logger.ErrorContext(pluginCtx, "error executing anka list", "err", list.Message)
 				return nil, fmt.Errorf("error executing anka list: %s", list.Message)
 			}
 		}
@@ -364,8 +364,8 @@ func (cli *Cli) EnsureVMTemplateExists(workerCtx context.Context, serviceCtx con
 			if bodySlice, ok := list.Body.([]interface{}); ok {
 				body, ok := bodySlice[0].(map[string]interface{})
 				if !ok {
-					logger.InfoContext(serviceCtx, "list", "body", list.Body)
-					logger.ErrorContext(serviceCtx, "unable to parse bodySlice[0] to map[string]interface{}")
+					logger.InfoContext(pluginCtx, "list", "body", list.Body)
+					logger.ErrorContext(pluginCtx, "unable to parse bodySlice[0] to map[string]interface{}")
 					return nil, fmt.Errorf("unable to parse bodySlice[0] to map[string]interface{}")
 				}
 				if status, ok := body["status"].(string); ok {
@@ -395,12 +395,12 @@ func (cli *Cli) EnsureVMTemplateExists(workerCtx context.Context, serviceCtx con
 			return nil, fmt.Errorf("a pull is already running on this host")
 		}
 		defer globals.PullLock.Unlock()
-		pullJson, err := cli.AnkaRegistryPull(workerCtx, serviceCtx, targetTemplate, targetTag)
+		pullJson, err := cli.AnkaRegistryPull(workerCtx, pluginCtx, targetTemplate, targetTag)
 		if pullJson.Code == 3 { // registry doesn't have template (or tag)
 			return err, nil
 		}
 		if err != nil {
-			logger.ErrorContext(serviceCtx, "error executing anka registry pull", "err", err)
+			logger.ErrorContext(pluginCtx, "error executing anka registry pull", "err", err)
 			return nil, err
 		}
 	}

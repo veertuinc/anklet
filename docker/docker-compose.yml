@@ -12,7 +12,7 @@ services:
       - "8081:8081"
     environment:
       # - LOG_LEVEL=dev
-      - ANKLET_CONFIG_FILE_NAME=controller-config.yml
+      - ANKLET_CONFIG_FILE_NAME=receiver-config.yml
       # AGGREGATOR ###################################################
       # - ANKLET_METRICS_AGGREGATOR=true
       # - ANKLET_METRICS_PORT=8081 

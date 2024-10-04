@@ -1,19 +1,19 @@
-# GITHUB CONTROLLER PLUGIN
+# GITHUB RECEIVER PLUGIN
 
-The Github Controller Plugin is used to receive webhook events from github and store them in the database for the Github Service Plugin to pick up and process.
+The Github Receiver Plugin is used to receive webhook events from github and store them in the database for the Github Service Plugin to pick up and process.
 
 ### What you need:
 
-1. An active database the controller can access. For help setting up the database, see [Database Setup](https://github.com/veertuinc/anklet/blob/main/docs/database.md#database-setup).
+1. An active database the receiver can access. For help setting up the database, see [Database Setup](https://github.com/veertuinc/anklet/blob/main/docs/database.md#database-setup).
 1. Some sort of Auth method like a PAT or a Github App for the repo you want to receive webhooks about.
-1. A way to receive webhooks. This can be a public URL or IP that points to the server running the Anklet Github Controller.
+1. A way to receive webhooks. This can be a public URL or IP that points to the server running the Anklet Github Receiver.
 
-In the `config.yml`, you can define the `github_controller` plugin as follows:
+In the `config.yml`, you can define the `github_receiver` plugin as follows:
 
 ```
-services:
-  - name: GITHUB_CONTROLLER
-    plugin: github_controller
+plugins:
+  - name: GITHUB_RECEIVER
+    plugin: github_receiver
     hook_id: 489747753
     port: 54321
     secret: 123412342
@@ -32,14 +32,14 @@ services:
       database: 0
 ```
 
-- Note: The controller must come FIRST in the `services` list. Do not place it after other services.
-- On first start, it will scan for failed webhook deliveries for the past 24 hours and send a re-delivery request for each one. This is to ensure that all webhooks are delivered and processed and nothing in your services are orphaned or database.
+- Note: The receiver must come FIRST in the `plugins:` list. Do not place it after other plugins.
+- On first start, it will scan for failed webhook deliveries for the past 24 hours and send a re-delivery request for each one. This is to ensure that all webhooks are delivered and processed and nothing in your plugins are orphaned or database.
 
 ---
 
 ## API Endpoints
 
-- `/jobs/v1/receiver` - This is the endpoint that Github will send the webhook to. This is where the controller will receive the webhook and store it in the database.
+- `/jobs/v1/receiver` - This is the endpoint that Github will send the webhook to. This is where the receiver will receive the webhook and store it in the database.
 
 ## Webhook Trigger Setup
 
@@ -47,7 +47,7 @@ services:
 1. Click on `Settings`
 1. Click on `Webhooks`
 1. Click on `Add webhook`
-1. Set the `Payload URL` to the Public IP or URL that points to the server running the Anklet Github Controller + `/jobs/v1/receiver`. So for example: `http://99.153.180.48:54321/jobs/v1/receiver`
+1. Set the `Payload URL` to the Public IP or URL that points to the server running the Anklet Github Receiver + `/jobs/v1/receiver`. So for example: `http://99.153.180.48:54321/jobs/v1/receiver`
 1. Set `Content Type` to `application/json`
 1. Set the `Secret` to the `secret` from the `config.yml`
 1. `SSL verfifcation` is up to you.
@@ -86,7 +86,7 @@ The following logic consumes [API limits](https://docs.github.com/en/rest/using-
 
 ```
 ❯ curl -s http://127.0.0.1:8080/metrics/v1\?format\=prometheus
-service_status{service_name=github_controller,plugin=github_controller,owner=veertuinc,repo=anklet} running
+service_status{service_name=github_receiver,plugin=github_receiver,owner=veertuinc,repo=anklet} running
 host_cpu_count 12
 host_cpu_used_count 2
 host_cpu_usage_percentage 17.010309
@@ -114,10 +114,10 @@ host_disk_usage_percentage 54.030513
   "host_disk_used_bytes": 537423970304,
   "host_disk_available_bytes": 457238614016,
   "host_disk_usage_percentage": 54.03078177223378,
-  "services": [
+  "plugins": [
     {
-      "name": "github_controller",
-      "plugin_name": "github_controller",
+      "name": "github_receiver",
+      "plugin_name": "github_receiver",
       "repo_name": "anklet",
       "owner_name": "veertuinc",
       "status": "running",

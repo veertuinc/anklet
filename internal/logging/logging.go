@@ -97,9 +97,9 @@ func AppendCtx(parent context.Context, attr slog.Attr) context.Context {
 	return context.WithValue(parent, slogFields, v)
 }
 
-func Panic(workerCtx context.Context, serviceCtx context.Context, errorMessage string) {
-	logger := GetLoggerFromContext(serviceCtx)
-	logger.ErrorContext(serviceCtx, errorMessage)
+func Panic(workerCtx context.Context, pluginCtx context.Context, errorMessage string) {
+	logger := GetLoggerFromContext(pluginCtx)
+	logger.ErrorContext(pluginCtx, errorMessage)
 	panic(errorMessage)
 }
 
