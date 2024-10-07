@@ -470,6 +470,7 @@ func Run(
 	metricsData *metrics.MetricsDataLock,
 ) {
 	ctxPlugin := config.GetPluginFromContext(pluginCtx)
+	// isRepoSet := config.GetIsRepoSetFromContext(pluginCtx)
 
 	metricsData.AddPlugin(metrics.Plugin{
 		PluginBase: &metrics.PluginBase{

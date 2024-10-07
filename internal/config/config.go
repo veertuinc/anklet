@@ -54,7 +54,6 @@ type Plugin struct {
 	Name           string   `yaml:"name"`
 	Plugin         string   `yaml:"plugin"`
 	Token          string   `yaml:"token"`
-	Registration   string   `yaml:"registration"`
 	Repo           string   `yaml:"repo"`
 	Owner          string   `yaml:"owner"`
 	Database       Database `yaml:"database"`

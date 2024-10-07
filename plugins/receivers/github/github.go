@@ -356,13 +356,25 @@ func Run(
 					continue
 				}
 				if hookDelivery.StatusCode != nil && !*hookDelivery.Redelivery && *hookDelivery.Action != "in_progress" {
-					pluginCtx, gottenHookDelivery, _, err := ExecuteGitHubClientFunction(pluginCtx, logger, func() (*github.HookDelivery, *github.Response, error) {
-						gottenHookDelivery, response, err := githubClient.Repositories.GetHookDelivery(pluginCtx, ctxPlugin.Owner, ctxPlugin.Repo, ctxPlugin.HookID, *hookDelivery.ID)
-						if err != nil {
-							return nil, nil, err
-						}
-						return gottenHookDelivery, response, nil
-					})
+					var gottenHookDelivery *github.HookDelivery
+					var err error
+					if isRepoSet {
+						pluginCtx, gottenHookDelivery, _, err = ExecuteGitHubClientFunction(pluginCtx, logger, func() (*github.HookDelivery, *github.Response, error) {
+							gottenHookDelivery, response, err := githubClient.Repositories.GetHookDelivery(pluginCtx, ctxPlugin.Owner, ctxPlugin.Repo, ctxPlugin.HookID, *hookDelivery.ID)
+							if err != nil {
+								return nil, nil, err
+							}
+							return gottenHookDelivery, response, nil
+						})
+					} else {
+						pluginCtx, gottenHookDelivery, _, err = ExecuteGitHubClientFunction(pluginCtx, logger, func() (*github.HookDelivery, *github.Response, error) {
+							gottenHookDelivery, response, err := githubClient.Organizations.GetHookDelivery(pluginCtx, ctxPlugin.Owner, ctxPlugin.HookID, *hookDelivery.ID)
+							if err != nil {
+								return nil, nil, err
+							}
+							return gottenHookDelivery, response, nil
+						})
+					}
 					if err != nil {
 						logger.ErrorContext(pluginCtx, "error listing hooks", "err", err)
 						return
@@ -536,13 +548,24 @@ func Run(
 			// Note; We cannot (and probably should not) stop completed from being redelivered.
 
 			// Redeliver the hook
-			pluginCtx, redelivery, _, _ := ExecuteGitHubClientFunction(pluginCtx, logger, func() (*github.HookDelivery, *github.Response, error) {
-				redelivery, response, err := githubClient.Repositories.RedeliverHookDelivery(pluginCtx, ctxPlugin.Owner, ctxPlugin.Repo, ctxPlugin.HookID, *hookDelivery.ID)
-				if err != nil {
-					return nil, nil, err
-				}
-				return redelivery, response, nil
-			})
+			var redelivery *github.HookDelivery
+			if isRepoSet {
+				pluginCtx, redelivery, _, _ = ExecuteGitHubClientFunction(pluginCtx, logger, func() (*github.HookDelivery, *github.Response, error) {
+					redelivery, response, err := githubClient.Repositories.RedeliverHookDelivery(pluginCtx, ctxPlugin.Owner, ctxPlugin.Repo, ctxPlugin.HookID, *hookDelivery.ID)
+					if err != nil {
+						return nil, nil, err
+					}
+					return redelivery, response, nil
+				})
+			} else {
+				pluginCtx, redelivery, _, _ = ExecuteGitHubClientFunction(pluginCtx, logger, func() (*github.HookDelivery, *github.Response, error) {
+					redelivery, response, err := githubClient.Organizations.RedeliverHookDelivery(pluginCtx, ctxPlugin.Owner, ctxPlugin.HookID, *hookDelivery.ID)
+					if err != nil {
+						return nil, nil, err
+					}
+					return redelivery, response, nil
+				})
+			}
 			// err doesn't matter here and it will always throw "job scheduled on GitHub side; try again later"
 			logger.InfoContext(pluginCtx, "hook redelivered",
 				"redelivery", redelivery,

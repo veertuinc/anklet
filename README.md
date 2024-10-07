@@ -104,7 +104,6 @@ With the github plugin, there is a Receiver Plugin and a Handler Plugin.
           private_key: /Users/nathanpierce/veertuinc-anklet.2024-07-19.private-key.pem
           app_id: 949431
           installation_id: 52970581
-          registration: repo
           repo: anklet
           owner: veertuinc
           registry_url: http://anka.registry:8089
@@ -119,7 +118,6 @@ With the github plugin, there is a Receiver Plugin and a Handler Plugin.
       - name: RUNNER2
           plugin: github
           token: github_pat_1XXXXX
-          registration: repo
           repo: anklet
           owner: veertuinc
           registry_url: http://anka.registry:8089
