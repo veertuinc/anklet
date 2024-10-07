@@ -32,6 +32,7 @@ plugins:
       database: 0
 ```
 
+- If you leave off `repo`, the receiver will be an organization level receiver.
 - Note: The receiver must come FIRST in the `plugins:` list. Do not place it after other plugins.
 - On first start, it will scan for failed webhook deliveries for the past 24 hours and send a re-delivery request for each one. This is to ensure that all webhooks are delivered and processed and nothing in your plugins are orphaned or database.
 
