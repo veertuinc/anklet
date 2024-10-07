@@ -256,6 +256,8 @@ Metrics for monitoring are available at `http://127.0.0.1:8080/metrics?format=js
 
 #### Prometheus
 
+- If repo is not set, the metrics will not show `repo=`.
+
 ```
 total_running_vms 0
 total_successful_runs_since_start 2
