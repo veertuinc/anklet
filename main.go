@@ -314,6 +314,7 @@ func worker(parentCtx context.Context, logger *slog.Logger, loadedConfig config.
 				}
 
 				if plugin.Repo == "" {
+					logger.InfoContext(pluginCtx, "no repo set for plugin; assuming it's an organization level plugin")
 					pluginCtx = context.WithValue(pluginCtx, config.ContextKey("isRepoSet"), false)
 				} else {
 					pluginCtx = context.WithValue(pluginCtx, config.ContextKey("isRepoSet"), true)

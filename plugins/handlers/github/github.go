@@ -31,6 +31,7 @@ type WorkflowRunJobDetail struct {
 	RunID           int64
 	UniqueID        string
 	Labels          []string
+	Repo            string
 }
 
 // func exists_in_array_exact(array_to_search_in []string, desired []string) bool {
@@ -118,13 +119,13 @@ func extractLabelValue(labels []string, prefix string) string {
 	return ""
 }
 
-func sendCancelWorkflowRun(pluginCtx context.Context, logger *slog.Logger, workflowRunID int64) error {
+func sendCancelWorkflowRun(pluginCtx context.Context, logger *slog.Logger, workflow WorkflowRunJobDetail) error {
 	githubClient := internalGithub.GetGitHubClientFromContext(pluginCtx)
 	ctxPlugin := config.GetPluginFromContext(pluginCtx)
 	cancelSent := false
 	for {
 		pluginCtx, workflowRun, _, err := executeGitHubClientFunction[github.WorkflowRun](pluginCtx, logger, func() (*github.WorkflowRun, *github.Response, error) {
-			workflowRun, resp, err := githubClient.Actions.GetWorkflowRunByID(context.Background(), ctxPlugin.Owner, ctxPlugin.Repo, workflowRunID)
+			workflowRun, resp, err := githubClient.Actions.GetWorkflowRunByID(context.Background(), ctxPlugin.Owner, workflow.Repo, workflow.RunID)
 			return workflowRun, resp, err
 		})
 		if err != nil {
@@ -136,10 +137,10 @@ func sendCancelWorkflowRun(pluginCtx context.Context, logger *slog.Logger, workf
 			cancelSent {
 			break
 		} else {
-			logger.WarnContext(pluginCtx, "workflow run is still active... waiting for cancellation so we can clean up...", "workflow_run_id", workflowRunID)
+			logger.WarnContext(pluginCtx, "workflow run is still active... waiting for cancellation so we can clean up...", "workflow_run_id", workflow.RunID)
 			if !cancelSent { // this has to happen here so that it doesn't error with "409 Cannot cancel a workflow run that is completed. " if the job is already cancelled
 				pluginCtx, cancelResponse, _, cancelErr := executeGitHubClientFunction[github.Response](pluginCtx, logger, func() (*github.Response, *github.Response, error) {
-					resp, err := githubClient.Actions.CancelWorkflowRunByID(context.Background(), ctxPlugin.Owner, ctxPlugin.Repo, workflowRunID)
+					resp, err := githubClient.Actions.CancelWorkflowRunByID(context.Background(), ctxPlugin.Owner, workflow.Repo, workflow.RunID)
 					return resp, nil, err
 				})
 				// don't use cancelResponse.Response.StatusCode or else it'll error with SIGSEV
@@ -148,7 +149,7 @@ func sendCancelWorkflowRun(pluginCtx context.Context, logger *slog.Logger, workf
 					return cancelErr
 				}
 				cancelSent = true
-				logger.WarnContext(pluginCtx, "sent cancel workflow run", "workflow_run_id", workflowRunID)
+				logger.WarnContext(pluginCtx, "sent cancel workflow run", "workflow_run_id", workflow.RunID)
 			}
 			time.Sleep(10 * time.Second)
 		}
@@ -223,7 +224,7 @@ func CheckForCompletedJobs(
 		logger.DebugContext(pluginCtx, "CheckForCompletedJobs "+ctxPlugin.Name+" | runOnce "+fmt.Sprint(runOnce))
 		select {
 		case <-failureChannel:
-			logger.ErrorContext(pluginCtx, "CheckForCompletedJobs"+ctxPlugin.Name+" failureChannel")
+			// logger.ErrorContext(pluginCtx, "CheckForCompletedJobs"+ctxPlugin.Name+" failureChannel")
 			returnToMainQueue, ok := workerCtx.Value(config.ContextKey("returnToMainQueue")).(chan bool)
 			if !ok {
 				logger.ErrorContext(pluginCtx, "error getting returnToMainQueue from context")
@@ -470,7 +471,7 @@ func Run(
 	metricsData *metrics.MetricsDataLock,
 ) {
 	ctxPlugin := config.GetPluginFromContext(pluginCtx)
-	// isRepoSet := config.GetIsRepoSetFromContext(pluginCtx)
+	isRepoSet := config.GetIsRepoSetFromContext(pluginCtx)
 
 	metricsData.AddPlugin(metrics.Plugin{
 		PluginBase: &metrics.PluginBase{
@@ -494,9 +495,9 @@ func Run(
 	if ctxPlugin.Owner == "" {
 		logging.Panic(workerCtx, pluginCtx, "owner is not set in ankalet.yaml:plugins:"+ctxPlugin.Name+":owner")
 	}
-	if ctxPlugin.Repo == "" {
-		logging.Panic(workerCtx, pluginCtx, "repo is not set in anklet.yaml:plugins:"+ctxPlugin.Name+":repo")
-	}
+	// if ctxPlugin.Repo == "" {
+	// 	logging.Panic(workerCtx, pluginCtx, "repo is not set in anklet.yaml:plugins:"+ctxPlugin.Name+":repo")
+	// }
 
 	hostHasVmCapacity := anka.HostHasVmCapacity(pluginCtx)
 	if !hostHasVmCapacity {
@@ -522,9 +523,14 @@ func Run(
 
 	githubWrapperClient := internalGithub.NewGitHubClientWrapper(githubClient)
 	pluginCtx = context.WithValue(pluginCtx, config.ContextKey("githubwrapperclient"), githubWrapperClient)
-	pluginCtx = logging.AppendCtx(pluginCtx, slog.String("repo", ctxPlugin.Repo))
+	var repositoryURL string
+	if isRepoSet {
+		pluginCtx = logging.AppendCtx(pluginCtx, slog.String("repo", ctxPlugin.Repo))
+		repositoryURL = fmt.Sprintf("https://github.com/%s/%s", ctxPlugin.Owner, ctxPlugin.Repo)
+	} else {
+		repositoryURL = fmt.Sprintf("https://github.com/%s", ctxPlugin.Owner)
+	}
 	pluginCtx = logging.AppendCtx(pluginCtx, slog.String("owner", ctxPlugin.Owner))
-	repositoryURL := fmt.Sprintf("https://github.com/%s/%s", ctxPlugin.Owner, ctxPlugin.Repo)
 
 	checkForCompletedJobsMu := &sync.Mutex{}
 	cleanupMu := &sync.Mutex{}
@@ -596,6 +602,9 @@ func Run(
 		logger.ErrorContext(pluginCtx, "error unmarshalling job", "err", err)
 		return
 	}
+	if !isRepoSet {
+		pluginCtx = logging.AppendCtx(pluginCtx, slog.String("repo", *queuedJob.Repo.Name))
+	}
 	pluginCtx = logging.AppendCtx(pluginCtx, slog.Int64("workflowJobID", *queuedJob.WorkflowJob.ID))
 	pluginCtx = logging.AppendCtx(pluginCtx, slog.String("workflowJobName", *queuedJob.WorkflowJob.Name))
 	pluginCtx = logging.AppendCtx(pluginCtx, slog.Int64("workflowJobRunID", *queuedJob.WorkflowJob.RunID))
@@ -648,6 +657,7 @@ func Run(
 		RunID:           *queuedJob.WorkflowJob.RunID,
 		UniqueID:        uniqueID,
 		Labels:          queuedJob.WorkflowJob.Labels,
+		Repo:            *queuedJob.Repo.Name,
 	}
 
 	// get anka CLI
@@ -662,14 +672,14 @@ func Run(
 	//TODO: be able to interrupt this
 	noTemplateTagExistsError, returnToQueueError := ankaCLI.EnsureVMTemplateExists(workerCtx, pluginCtx, workflowJob.AnkaTemplate, workflowJob.AnkaTemplateTag)
 	if returnToQueueError != nil {
-		logger.WarnContext(pluginCtx, "error ensuring vm template exists on host", "err", returnToQueueError)
+		logger.WarnContext(pluginCtx, "problem ensuring vm template exists on host", "err", returnToQueueError)
 		failureChannel <- true // return to queue so another node can pick it up
 		return
 	}
 	if noTemplateTagExistsError != nil {
 		logger.ErrorContext(pluginCtx, "error ensuring vm template exists on host", "err", noTemplateTagExistsError)
 		metricsData.IncrementTotalFailedRunsSinceStart()
-		err := sendCancelWorkflowRun(pluginCtx, logger, workflowJob.RunID)
+		err := sendCancelWorkflowRun(pluginCtx, logger, workflowJob)
 		if err != nil {
 			metricsData.IncrementTotalFailedRunsSinceStart()
 			logger.ErrorContext(pluginCtx, "error sending cancel workflow run", "err", err)
@@ -679,28 +689,42 @@ func Run(
 
 	if pluginCtx.Err() != nil {
 		logger.WarnContext(pluginCtx, "context canceled during vm template check")
+		failureChannel <- true
 		return
 	}
 
 	if !skipPrep {
 
 		// Get runner registration token
-		pluginCtx, repoRunnerRegistration, response, err := executeGitHubClientFunction[github.RegistrationToken](pluginCtx, logger, func() (*github.RegistrationToken, *github.Response, error) {
-			repoRunnerRegistration, resp, err := githubClient.Actions.CreateRegistrationToken(context.Background(), ctxPlugin.Owner, ctxPlugin.Repo)
-			return repoRunnerRegistration, resp, err
-		})
+		var runnerRegistration *github.RegistrationToken
+		var response *github.Response
+		var err error
+		if isRepoSet {
+			pluginCtx, runnerRegistration, response, err = executeGitHubClientFunction[github.RegistrationToken](pluginCtx, logger, func() (*github.RegistrationToken, *github.Response, error) {
+				runnerRegistration, resp, err := githubClient.Actions.CreateRegistrationToken(context.Background(), ctxPlugin.Owner, ctxPlugin.Repo)
+				return runnerRegistration, resp, err
+			})
+		} else {
+			pluginCtx, runnerRegistration, response, err = executeGitHubClientFunction[github.RegistrationToken](pluginCtx, logger, func() (*github.RegistrationToken, *github.Response, error) {
+				runnerRegistration, resp, err := githubClient.Actions.CreateOrganizationRegistrationToken(context.Background(), ctxPlugin.Owner)
+				return runnerRegistration, resp, err
+			})
+		}
 		if err != nil {
 			metricsData.IncrementTotalFailedRunsSinceStart()
 			logger.ErrorContext(pluginCtx, "error creating registration token", "err", err, "response", response)
+			failureChannel <- true
 			return
 		}
-		if *repoRunnerRegistration.Token == "" {
+		if *runnerRegistration.Token == "" {
 			logger.ErrorContext(pluginCtx, "registration token is empty; something wrong with github or your service token", "response", response)
+			failureChannel <- true
 			return
 		}
 
 		if pluginCtx.Err() != nil {
 			logger.WarnContext(pluginCtx, "context canceled before ObtainAnkaVM")
+			failureChannel <- true
 			return
 		}
 
@@ -749,7 +773,7 @@ func Run(
 		if installRunnerErr != nil || registerRunnerErr != nil || startRunnerErr != nil {
 			metricsData.IncrementTotalFailedRunsSinceStart()
 			logger.ErrorContext(pluginCtx, "must include install-runner.bash, register-runner.bash, and start-runner.bash in "+globals.PluginsPath+"/handlers/github/", "err", err)
-			err := sendCancelWorkflowRun(pluginCtx, logger, workflowJob.RunID)
+			err := sendCancelWorkflowRun(pluginCtx, logger, workflowJob)
 			if err != nil {
 				logger.ErrorContext(pluginCtx, "error sending cancel workflow run", "err", err)
 			}
@@ -797,14 +821,14 @@ func Run(
 		}
 		registerRunnerErr = ankaCLI.AnkaRun(pluginCtx,
 			"./register-runner.bash",
-			vm.Name, *repoRunnerRegistration.Token, repositoryURL, strings.Join(workflowJob.Labels, ","),
+			vm.Name, *runnerRegistration.Token, repositoryURL, strings.Join(workflowJob.Labels, ","),
 		)
 		if registerRunnerErr != nil {
 			logger.ErrorContext(pluginCtx, "error executing register-runner.bash", "err", registerRunnerErr)
 			failureChannel <- true
 			return
 		}
-		defer removeSelfHostedRunner(pluginCtx, *vm, workflowJob.RunID)
+		defer removeSelfHostedRunner(pluginCtx, *vm, workflowJob)
 		// Install and Start runner
 		select {
 		case <-completedJobChannel:
@@ -929,14 +953,25 @@ func Run(
 
 // removeSelfHostedRunner handles removing a registered runner if the registered runner was orphaned somehow
 // it's extra safety should the runner not be registered with --ephemeral
-func removeSelfHostedRunner(pluginCtx context.Context, vm anka.VM, workflowRunID int64) {
+func removeSelfHostedRunner(pluginCtx context.Context, vm anka.VM, workflow WorkflowRunJobDetail) {
 	logger := logging.GetLoggerFromContext(pluginCtx)
 	ctxPlugin := config.GetPluginFromContext(pluginCtx)
 	githubClient := internalGithub.GetGitHubClientFromContext(pluginCtx)
-	pluginCtx, runnersList, response, err := executeGitHubClientFunction[github.Runners](pluginCtx, logger, func() (*github.Runners, *github.Response, error) {
-		runnersList, resp, err := githubClient.Actions.ListRunners(context.Background(), ctxPlugin.Owner, ctxPlugin.Repo, &github.ListRunnersOptions{})
-		return runnersList, resp, err
-	})
+	isRepoSet := config.GetIsRepoSetFromContext(pluginCtx)
+	var runnersList *github.Runners
+	var response *github.Response
+	var err error
+	if isRepoSet {
+		pluginCtx, runnersList, response, err = executeGitHubClientFunction[github.Runners](pluginCtx, logger, func() (*github.Runners, *github.Response, error) {
+			runnersList, resp, err := githubClient.Actions.ListRunners(context.Background(), ctxPlugin.Owner, ctxPlugin.Repo, &github.ListRunnersOptions{})
+			return runnersList, resp, err
+		})
+	} else {
+		pluginCtx, runnersList, response, err = executeGitHubClientFunction[github.Runners](pluginCtx, logger, func() (*github.Runners, *github.Response, error) {
+			runnersList, resp, err := githubClient.Actions.ListOrganizationRunners(context.Background(), ctxPlugin.Owner, &github.ListRunnersOptions{})
+			return runnersList, resp, err
+		})
+	}
 	if err != nil {
 		logger.ErrorContext(pluginCtx, "error executing githubClient.Actions.ListRunners", "err", err, "response", response)
 		return
@@ -955,15 +990,22 @@ func removeSelfHostedRunner(pluginCtx context.Context, vm anka.VM, workflowRunID
 					"ankaTemplateTag": "(using latest)",
 					"err": "DELETE https://api.github.com/repos/veertuinc/anklet/actions/runners/142: 422 Bad request - Runner \"anklet-vm-\u003cuuid\u003e\" is still running a job\" []",
 				*/
-				err := sendCancelWorkflowRun(pluginCtx, logger, workflowRunID)
+				err := sendCancelWorkflowRun(pluginCtx, logger, workflow)
 				if err != nil {
 					logger.ErrorContext(pluginCtx, "error sending cancel workflow run", "err", err)
 					return
 				}
-				pluginCtx, _, _, err = executeGitHubClientFunction[github.Response](pluginCtx, logger, func() (*github.Response, *github.Response, error) {
-					response, err := githubClient.Actions.RemoveRunner(context.Background(), ctxPlugin.Owner, ctxPlugin.Repo, *runner.ID)
-					return response, nil, err
-				})
+				if isRepoSet {
+					pluginCtx, _, _, err = executeGitHubClientFunction[github.Response](pluginCtx, logger, func() (*github.Response, *github.Response, error) {
+						response, err := githubClient.Actions.RemoveRunner(context.Background(), ctxPlugin.Owner, ctxPlugin.Repo, *runner.ID)
+						return response, nil, err
+					})
+				} else {
+					pluginCtx, _, _, err = executeGitHubClientFunction[github.Response](pluginCtx, logger, func() (*github.Response, *github.Response, error) {
+						response, err := githubClient.Actions.RemoveOrganizationRunner(context.Background(), ctxPlugin.Owner, *runner.ID)
+						return response, nil, err
+					})
+				}
 				if err != nil {
 					logger.ErrorContext(pluginCtx, "error executing githubClient.Actions.RemoveRunner", "err", err)
 					return

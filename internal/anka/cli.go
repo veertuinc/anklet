@@ -396,7 +396,7 @@ func (cli *Cli) EnsureVMTemplateExists(workerCtx context.Context, pluginCtx cont
 		}
 		defer globals.PullLock.Unlock()
 		pullJson, err := cli.AnkaRegistryPull(workerCtx, pluginCtx, targetTemplate, targetTag)
-		if pullJson.Code == 3 { // registry doesn't have template (or tag)
+		if pullJson == nil || pullJson.Code == 3 { // registry doesn't have template (or tag)
 			return err, nil
 		}
 		if err != nil {
