@@ -313,6 +313,12 @@ func worker(parentCtx context.Context, logger *slog.Logger, loadedConfig config.
 					panic("name is required for plugins")
 				}
 
+				if plugin.Repo == "" {
+					pluginCtx = context.WithValue(pluginCtx, config.ContextKey("isRepoSet"), false)
+				} else {
+					pluginCtx = context.WithValue(pluginCtx, config.ContextKey("isRepoSet"), true)
+				}
+
 				pluginCtx = context.WithValue(pluginCtx, config.ContextKey("plugin"), plugin)
 				pluginCtx = logging.AppendCtx(pluginCtx, slog.String("pluginName", plugin.Name))
 				pluginCtx = context.WithValue(pluginCtx, config.ContextKey("logger"), logger)

@@ -194,3 +194,11 @@ func GetLoadedConfigFromContext(ctx context.Context) *Config {
 	}
 	return config
 }
+
+func GetIsRepoSetFromContext(ctx context.Context) bool {
+	isRepoSet, ok := ctx.Value(ContextKey("isRepoSet")).(bool)
+	if !ok {
+		panic("GetIsRepoSetFromContext failed")
+	}
+	return isRepoSet
+}

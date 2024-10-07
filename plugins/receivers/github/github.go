@@ -124,6 +124,7 @@ func Run(
 	metricsData *metrics.MetricsDataLock,
 ) {
 	ctxPlugin := config.GetPluginFromContext(pluginCtx)
+	isRepoSet := config.GetIsRepoSetFromContext(pluginCtx)
 	metricsData.AddPlugin(
 		metrics.PluginBase{
 			Name:        ctxPlugin.Name,
@@ -326,13 +327,26 @@ func Run(
 		doneWithHooks := false
 		logger.InfoContext(pluginCtx, "listing hook deliveries to see if any need redelivery (may take a while)...")
 		for {
-			pluginCtx, hookDeliveries, response, err := ExecuteGitHubClientFunction(pluginCtx, logger, func() (*[]*github.HookDelivery, *github.Response, error) {
-				hookDeliveries, response, err := githubClient.Repositories.ListHookDeliveries(pluginCtx, ctxPlugin.Owner, ctxPlugin.Repo, ctxPlugin.HookID, opts)
-				if err != nil {
-					return nil, nil, err
-				}
-				return &hookDeliveries, response, nil
-			})
+			var hookDeliveries *[]*github.HookDelivery
+			var response *github.Response
+			var err error
+			if isRepoSet {
+				pluginCtx, hookDeliveries, response, err = ExecuteGitHubClientFunction(pluginCtx, logger, func() (*[]*github.HookDelivery, *github.Response, error) {
+					hookDeliveries, response, err := githubClient.Repositories.ListHookDeliveries(pluginCtx, ctxPlugin.Owner, ctxPlugin.Repo, ctxPlugin.HookID, opts)
+					if err != nil {
+						return nil, nil, err
+					}
+					return &hookDeliveries, response, nil
+				})
+			} else {
+				pluginCtx, hookDeliveries, response, err = ExecuteGitHubClientFunction(pluginCtx, logger, func() (*[]*github.HookDelivery, *github.Response, error) {
+					hookDeliveries, response, err := githubClient.Organizations.ListHookDeliveries(pluginCtx, ctxPlugin.Owner, ctxPlugin.HookID, opts)
+					if err != nil {
+						return nil, nil, err
+					}
+					return &hookDeliveries, response, nil
+				})
+			}
 			if err != nil {
 				logger.ErrorContext(pluginCtx, "error listing hooks", "err", err)
 				return
