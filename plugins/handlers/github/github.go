@@ -323,7 +323,7 @@ func CheckForCompletedJobs(
 		if checkForCompletedJobsMu != nil {
 			checkForCompletedJobsMu.Unlock()
 		}
-		time.Sleep(3 * time.Second)
+		time.Sleep(time.Duration(ctxPlugin.SleepInterval) * time.Second)
 	}
 }
 
