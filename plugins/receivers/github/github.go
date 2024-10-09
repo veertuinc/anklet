@@ -197,7 +197,7 @@ func Run(
 			if *workflowJob.Action == "queued" {
 				if exists_in_array_exact(workflowJob.WorkflowJob.Labels, []string{"self-hosted", "anka"}) {
 					// make sure it doesn't already exist
-					inQueue, err := InQueue(pluginCtx, logger, *workflowJob.WorkflowJob.ID, "anklet/jobs/github/queued")
+					inQueue, err := InQueue(pluginCtx, logger, *workflowJob.WorkflowJob.ID, "anklet/jobs/github/queued/"+ctxPlugin.Owner)
 					if err != nil {
 						logger.ErrorContext(pluginCtx, "error searching in queue", "error", err)
 						return
@@ -213,7 +213,7 @@ func Run(
 							logger.ErrorContext(pluginCtx, "error converting job payload to JSON", "error", err)
 							return
 						}
-						push := databaseContainer.Client.RPush(pluginCtx, "anklet/jobs/github/queued", wrappedPayloadJSON)
+						push := databaseContainer.Client.RPush(pluginCtx, "anklet/jobs/github/queued/"+ctxPlugin.Owner, wrappedPayloadJSON)
 						if push.Err() != nil {
 							logger.ErrorContext(pluginCtx, "error pushing job to queue", "error", push.Err())
 							return
@@ -226,7 +226,7 @@ func Run(
 
 					queues := []string{}
 					// get all keys from database for the main queue and service queues as well as completed
-					queuedKeys, err := databaseContainer.Client.Keys(pluginCtx, "anklet/jobs/github/queued*").Result()
+					queuedKeys, err := databaseContainer.Client.Keys(pluginCtx, "anklet/jobs/github/queued/"+ctxPlugin.Owner+"*").Result()
 					if err != nil {
 						logger.ErrorContext(pluginCtx, "error getting list of keys", "err", err)
 						return
@@ -258,7 +258,7 @@ func Run(
 						}
 					}
 					if inAQueue { // only add completed if it's in a queue
-						inCompletedQueue, err := InQueue(pluginCtx, logger, *workflowJob.WorkflowJob.ID, "anklet/jobs/github/completed")
+						inCompletedQueue, err := InQueue(pluginCtx, logger, *workflowJob.WorkflowJob.ID, "anklet/jobs/github/completed/"+ctxPlugin.Owner)
 						if err != nil {
 							logger.ErrorContext(pluginCtx, "error searching in queue", "error", err)
 							return
@@ -274,7 +274,7 @@ func Run(
 								logger.ErrorContext(pluginCtx, "error converting job payload to JSON", "error", err)
 								return
 							}
-							push := databaseContainer.Client.RPush(pluginCtx, "anklet/jobs/github/completed", wrappedPayloadJSON)
+							push := databaseContainer.Client.RPush(pluginCtx, "anklet/jobs/github/completed/"+ctxPlugin.Owner, wrappedPayloadJSON)
 							if push.Err() != nil {
 								logger.ErrorContext(pluginCtx, "error pushing job to queue", "error", push.Err())
 								return
@@ -422,7 +422,7 @@ func Run(
 	}
 
 	// get all keys from database for the main queue and service queues as well as completed
-	queuedKeys, err := databaseContainer.Client.Keys(pluginCtx, "anklet/jobs/github/queued*").Result()
+	queuedKeys, err := databaseContainer.Client.Keys(pluginCtx, "anklet/jobs/github/queued/"+ctxPlugin.Owner+"*").Result()
 	if err != nil {
 		logger.ErrorContext(pluginCtx, "error getting list of keys", "err", err)
 		return
@@ -436,7 +436,7 @@ func Run(
 		}
 		allQueuedJobs[key] = queuedJobs
 	}
-	completedKeys, err := databaseContainer.Client.Keys(pluginCtx, "anklet/jobs/github/completed*").Result()
+	completedKeys, err := databaseContainer.Client.Keys(pluginCtx, "anklet/jobs/github/completed"+ctxPlugin.Owner+"*").Result()
 	if err != nil {
 		logger.ErrorContext(pluginCtx, "error getting list of keys", "err", err)
 		return
@@ -535,7 +535,7 @@ func Run(
 			if inCompleted && !inQueued {
 				_, err = databaseContainer.Client.LRem(pluginCtx, inCompletedListKey, 1, allCompletedJobs[inCompletedListKey][inCompletedIndex]).Result()
 				if err != nil {
-					logger.ErrorContext(pluginCtx, "error removing completedJob from anklet/jobs/github/completed", "err", err, "completedJob", allCompletedJobs[inCompletedListKey][inCompletedIndex])
+					logger.ErrorContext(pluginCtx, "error removing completedJob from anklet/jobs/github/completed/"+ctxPlugin.Owner, "err", err, "completedJob", allCompletedJobs[inCompletedListKey][inCompletedIndex])
 					return
 				}
 				continue
