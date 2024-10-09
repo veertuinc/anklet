@@ -41,7 +41,6 @@ cp anklet_${LATEST_VERSION}_darwin_${ARCH} /usr/local/bin/anklet
 mkdir -p ~/.config/
 sudo chown -R $AWS_INSTANCE_USER:staff ~/.config
 cd ~/.config/
-touch ~/.config/anklet/config.yml
 if [ ! -f ~/.config/anklet/config.yml ]; then
   cat <<EOF > ~/.config/anklet/config.yml
 ---
