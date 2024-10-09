@@ -21,6 +21,7 @@ plugins:
     repo: anklet # Optional; only needed if registering a specific runner for a repo, otherwise it will be an org level runner.
     owner: veertuinc
     registry_url: http://anka.registry:8089
+    runner_group: macOS # requires Enterprise github
     # sleep_interval: 5 # Optional; defaults to 1 second.
     database:
       enabled: true

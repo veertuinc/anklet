@@ -821,7 +821,7 @@ func Run(
 		}
 		registerRunnerErr = ankaCLI.AnkaRun(pluginCtx,
 			"./register-runner.bash",
-			vm.Name, *runnerRegistration.Token, repositoryURL, strings.Join(workflowJob.Labels, ","),
+			vm.Name, *runnerRegistration.Token, repositoryURL, strings.Join(workflowJob.Labels, ","), ctxPlugin.RunnerGroup,
 		)
 		if registerRunnerErr != nil {
 			logger.ErrorContext(pluginCtx, "error executing register-runner.bash", "err", registerRunnerErr)

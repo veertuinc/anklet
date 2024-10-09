@@ -66,6 +66,7 @@ type Plugin struct {
 	Secret         string   `yaml:"secret"`
 	HookID         int64    `yaml:"hook_id"`
 	SkipRedeliver  bool     `yaml:"skip_redeliver"`
+	RunnerGroup    string   `yaml:"runner_group"`
 }
 
 func LoadConfig(configPath string) (Config, error) {
