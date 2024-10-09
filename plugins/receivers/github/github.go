@@ -137,9 +137,12 @@ func Run(
 		},
 	)
 
+	configFileName := config.GetConfigFileNameFromContext(pluginCtx)
 	if ctxPlugin.Token == "" && ctxPlugin.PrivateKey == "" {
-		configFileName := config.GetConfigFileNameFromContext(pluginCtx)
 		logging.Panic(workerCtx, pluginCtx, "token or private_key are not set at global level or in "+configFileName+":plugins:"+ctxPlugin.Name+"<token/private_key>")
+	}
+	if ctxPlugin.Owner == "" {
+		logging.Panic(workerCtx, pluginCtx, "owner is not set in "+configFileName+":plugins:"+ctxPlugin.Name+"<owner>")
 	}
 
 	databaseContainer, err := database.GetDatabaseFromContext(pluginCtx)
