@@ -486,14 +486,16 @@ func Run(
 
 	logger.InfoContext(pluginCtx, "checking for jobs....")
 
+	configFileName := config.GetConfigFileNameFromContext(pluginCtx)
+
 	if ctxPlugin.Token == "" && ctxPlugin.PrivateKey == "" {
-		logging.Panic(workerCtx, pluginCtx, "token and private_key are not set in anklet.yaml:plugins:"+ctxPlugin.Name+":token/private_key")
+		logging.Panic(workerCtx, pluginCtx, "token or private_key are not set at global level or in "+configFileName+":plugins:"+ctxPlugin.Name+"<token/private_key>")
 	}
 	if ctxPlugin.PrivateKey != "" && (ctxPlugin.AppID == 0 || ctxPlugin.InstallationID == 0) {
-		logging.Panic(workerCtx, pluginCtx, "private_key, app_id, and installation_id must all be set in anklet.yaml:plugins:"+ctxPlugin.Name+"")
+		logging.Panic(workerCtx, pluginCtx, "private_key, app_id, and installation_id must all be set in "+configFileName+":plugins:"+ctxPlugin.Name+"<token/private_key>")
 	}
 	if ctxPlugin.Owner == "" {
-		logging.Panic(workerCtx, pluginCtx, "owner is not set in anklet.yaml:plugins:"+ctxPlugin.Name+":owner")
+		logging.Panic(workerCtx, pluginCtx, "owner is not set in "+configFileName+":plugins:"+ctxPlugin.Name+"<owner>")
 	}
 	// if ctxPlugin.Repo == "" {
 	// 	logging.Panic(workerCtx, pluginCtx, "repo is not set in anklet.yaml:plugins:"+ctxPlugin.Name+":repo")
@@ -509,7 +511,15 @@ func Run(
 	httpTransport := config.GetHttpTransportFromContext(pluginCtx)
 	var githubClient *github.Client
 	if ctxPlugin.PrivateKey != "" {
-		itr, err := ghinstallation.NewKeyFromFile(httpTransport, int64(ctxPlugin.AppID), int64(ctxPlugin.InstallationID), ctxPlugin.PrivateKey)
+		// support private key in a file or as text
+		var privateKey []byte
+		privateKeyData, err := os.ReadFile(ctxPlugin.PrivateKey)
+		if err == nil {
+			privateKey = privateKeyData
+		} else {
+			privateKey = []byte(ctxPlugin.PrivateKey)
+		}
+		itr, err := ghinstallation.New(httpTransport, int64(ctxPlugin.AppID), int64(ctxPlugin.InstallationID), privateKey)
 		if err != nil {
 			metricsData.IncrementTotalFailedRunsSinceStart()
 			logger.ErrorContext(pluginCtx, "error creating github app installation token", "err", err)

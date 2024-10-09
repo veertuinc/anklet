@@ -71,11 +71,12 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+
 	var configPath string
+	var configFileName string
 	if *configFlag != "" {
 		configPath = *configFlag
 	} else {
-		var configFileName string
 		envConfigFileName := os.Getenv("ANKLET_CONFIG_FILE_NAME")
 		if envConfigFileName != "" {
 			configFileName = envConfigFileName
@@ -84,6 +85,7 @@ func main() {
 		}
 		configPath = filepath.Join(homeDir, ".config", "anklet", configFileName)
 	}
+	parentCtx = context.WithValue(parentCtx, config.ContextKey("configFileName"), configFileName)
 
 	// obtain config
 	loadedConfig, err := config.LoadConfig(configPath)
@@ -320,18 +322,23 @@ func worker(parentCtx context.Context, logger *slog.Logger, loadedConfig config.
 					pluginCtx = context.WithValue(pluginCtx, config.ContextKey("isRepoSet"), true)
 				}
 
+				if plugin.PrivateKey == "" && loadedConfig.GlobalPrivateKey != "" {
+					plugin.PrivateKey = loadedConfig.GlobalPrivateKey
+				}
+
 				pluginCtx = context.WithValue(pluginCtx, config.ContextKey("plugin"), plugin)
 				pluginCtx = logging.AppendCtx(pluginCtx, slog.String("pluginName", plugin.Name))
 				pluginCtx = context.WithValue(pluginCtx, config.ContextKey("logger"), logger)
 
-				ankaCLI, err := anka.NewCLI(pluginCtx)
-				if err != nil {
-					pluginCancel()
-					logger.ErrorContext(pluginCtx, "unable to create anka cli", "error", err)
-					return
+				if !strings.Contains(plugin.Plugin, "_receiver") {
+					ankaCLI, err := anka.NewCLI(pluginCtx)
+					if err != nil {
+						pluginCancel()
+						logger.ErrorContext(pluginCtx, "unable to create anka cli", "error", err)
+						return
+					}
+					pluginCtx = context.WithValue(pluginCtx, config.ContextKey("ankacli"), ankaCLI)
 				}
-
-				pluginCtx = context.WithValue(pluginCtx, config.ContextKey("ankacli"), ankaCLI)
 
 				if plugin.Database.Enabled {
 					databaseClient, err := database.NewClient(pluginCtx, plugin.Database)

@@ -15,12 +15,13 @@ import (
 type ContextKey string
 
 type Config struct {
-	Plugins    []Plugin `yaml:"plugins"`
-	Log        Log      `yaml:"log"`
-	PidFileDir string   `yaml:"pid_file_dir"`
-	LogFileDir string   `yaml:"log_file_dir"`
-	WorkDir    string   `yaml:"work_dir"`
-	Metrics    Metrics  `yaml:"metrics"`
+	Plugins          []Plugin `yaml:"plugins"`
+	Log              Log      `yaml:"log"`
+	PidFileDir       string   `yaml:"pid_file_dir"`
+	LogFileDir       string   `yaml:"log_file_dir"`
+	WorkDir          string   `yaml:"work_dir"`
+	Metrics          Metrics  `yaml:"metrics"`
+	GlobalPrivateKey string   `yaml:"global_private_key"`
 }
 
 type Log struct {
@@ -146,6 +147,10 @@ func LoadInEnvs(config Config) (Config, error) {
 	if workDir != "" {
 		config.WorkDir = workDir
 	}
+	envGlobalPrivateKey := os.Getenv("ANKLET_GLOBAL_PRIVATE_KEY")
+	if envGlobalPrivateKey != "" {
+		config.GlobalPrivateKey = envGlobalPrivateKey
+	}
 	// pidFileDir := os.Getenv("ANKLET_PID_FILE_DIR")
 	// if pidFileDir != "" {
 	// 	config.PidFileDir = pidFileDir
@@ -201,4 +206,12 @@ func GetIsRepoSetFromContext(ctx context.Context) bool {
 		panic("GetIsRepoSetFromContext failed")
 	}
 	return isRepoSet
+}
+
+func GetConfigFileNameFromContext(ctx context.Context) string {
+	configFileName, ok := ctx.Value(ContextKey("configFileName")).(string)
+	if !ok {
+		panic("GetConfigFileNameFromContext failed")
+	}
+	return configFileName
 }

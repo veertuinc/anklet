@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -135,6 +136,12 @@ func Run(
 			StatusSince: time.Now(),
 		},
 	)
+
+	if ctxPlugin.Token == "" && ctxPlugin.PrivateKey == "" {
+		configFileName := config.GetConfigFileNameFromContext(pluginCtx)
+		logging.Panic(workerCtx, pluginCtx, "token or private_key are not set at global level or in "+configFileName+":plugins:"+ctxPlugin.Name+"<token/private_key>")
+	}
+
 	databaseContainer, err := database.GetDatabaseFromContext(pluginCtx)
 	if err != nil {
 		logger.ErrorContext(pluginCtx, "error getting database client from context", "error", err)
@@ -144,7 +151,15 @@ func Run(
 	httpTransport := config.GetHttpTransportFromContext(pluginCtx)
 	var githubClient *github.Client
 	if ctxPlugin.PrivateKey != "" {
-		itr, err := ghinstallation.NewKeyFromFile(httpTransport, int64(ctxPlugin.AppID), int64(ctxPlugin.InstallationID), ctxPlugin.PrivateKey)
+		// support private key in a file or as text
+		var privateKey []byte
+		privateKeyData, err := os.ReadFile(ctxPlugin.PrivateKey)
+		if err == nil {
+			privateKey = privateKeyData
+		} else {
+			privateKey = []byte(ctxPlugin.PrivateKey)
+		}
+		itr, err := ghinstallation.New(httpTransport, int64(ctxPlugin.AppID), int64(ctxPlugin.InstallationID), privateKey)
 		if err != nil {
 			logger.ErrorContext(pluginCtx, "error creating github app installation token", "err", err)
 			return
