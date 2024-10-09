@@ -49,3 +49,12 @@ go.build:
 
 build-linux:
 	GOOS=linux OS_TYPE=linux $(MAKE) go.build
+
+run-docker-compose:
+	cp dist/anklet_v$(VERSION)*_linux_$(ARCH).zip docker/
+	cd docker && \
+		rm -f anklet_linux_$(ARCH) && \
+		unzip anklet_v$(VERSION)*_linux_$(ARCH).zip && \
+		mv anklet_v$(VERSION)*_linux_$(ARCH) anklet_linux_$(ARCH) && \
+		rm -f anklet_v$(VERSION)*_linux_$(ARCH).zip && \
+		docker-compose up --build --force-recreate

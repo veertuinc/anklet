@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -124,6 +125,7 @@ func Run(
 	metricsData *metrics.MetricsDataLock,
 ) {
 	ctxPlugin := config.GetPluginFromContext(pluginCtx)
+	isRepoSet := config.GetIsRepoSetFromContext(pluginCtx)
 	metricsData.AddPlugin(
 		metrics.PluginBase{
 			Name:        ctxPlugin.Name,
@@ -134,6 +136,12 @@ func Run(
 			StatusSince: time.Now(),
 		},
 	)
+
+	if ctxPlugin.Token == "" && ctxPlugin.PrivateKey == "" {
+		configFileName := config.GetConfigFileNameFromContext(pluginCtx)
+		logging.Panic(workerCtx, pluginCtx, "token or private_key are not set at global level or in "+configFileName+":plugins:"+ctxPlugin.Name+"<token/private_key>")
+	}
+
 	databaseContainer, err := database.GetDatabaseFromContext(pluginCtx)
 	if err != nil {
 		logger.ErrorContext(pluginCtx, "error getting database client from context", "error", err)
@@ -143,7 +151,15 @@ func Run(
 	httpTransport := config.GetHttpTransportFromContext(pluginCtx)
 	var githubClient *github.Client
 	if ctxPlugin.PrivateKey != "" {
-		itr, err := ghinstallation.NewKeyFromFile(httpTransport, int64(ctxPlugin.AppID), int64(ctxPlugin.InstallationID), ctxPlugin.PrivateKey)
+		// support private key in a file or as text
+		var privateKey []byte
+		privateKeyData, err := os.ReadFile(ctxPlugin.PrivateKey)
+		if err == nil {
+			privateKey = privateKeyData
+		} else {
+			privateKey = []byte(ctxPlugin.PrivateKey)
+		}
+		itr, err := ghinstallation.New(httpTransport, int64(ctxPlugin.AppID), int64(ctxPlugin.InstallationID), privateKey)
 		if err != nil {
 			logger.ErrorContext(pluginCtx, "error creating github app installation token", "err", err)
 			return
@@ -181,7 +197,7 @@ func Run(
 			if *workflowJob.Action == "queued" {
 				if exists_in_array_exact(workflowJob.WorkflowJob.Labels, []string{"self-hosted", "anka"}) {
 					// make sure it doesn't already exist
-					inQueue, err := InQueue(pluginCtx, logger, *workflowJob.WorkflowJob.ID, "anklet/jobs/github/queued")
+					inQueue, err := InQueue(pluginCtx, logger, *workflowJob.WorkflowJob.ID, "anklet/jobs/github/queued/"+ctxPlugin.Owner)
 					if err != nil {
 						logger.ErrorContext(pluginCtx, "error searching in queue", "error", err)
 						return
@@ -197,7 +213,7 @@ func Run(
 							logger.ErrorContext(pluginCtx, "error converting job payload to JSON", "error", err)
 							return
 						}
-						push := databaseContainer.Client.RPush(pluginCtx, "anklet/jobs/github/queued", wrappedPayloadJSON)
+						push := databaseContainer.Client.RPush(pluginCtx, "anklet/jobs/github/queued/"+ctxPlugin.Owner, wrappedPayloadJSON)
 						if push.Err() != nil {
 							logger.ErrorContext(pluginCtx, "error pushing job to queue", "error", push.Err())
 							return
@@ -210,7 +226,7 @@ func Run(
 
 					queues := []string{}
 					// get all keys from database for the main queue and service queues as well as completed
-					queuedKeys, err := databaseContainer.Client.Keys(pluginCtx, "anklet/jobs/github/queued*").Result()
+					queuedKeys, err := databaseContainer.Client.Keys(pluginCtx, "anklet/jobs/github/queued/"+ctxPlugin.Owner+"*").Result()
 					if err != nil {
 						logger.ErrorContext(pluginCtx, "error getting list of keys", "err", err)
 						return
@@ -242,7 +258,7 @@ func Run(
 						}
 					}
 					if inAQueue { // only add completed if it's in a queue
-						inCompletedQueue, err := InQueue(pluginCtx, logger, *workflowJob.WorkflowJob.ID, "anklet/jobs/github/completed")
+						inCompletedQueue, err := InQueue(pluginCtx, logger, *workflowJob.WorkflowJob.ID, "anklet/jobs/github/completed/"+ctxPlugin.Owner)
 						if err != nil {
 							logger.ErrorContext(pluginCtx, "error searching in queue", "error", err)
 							return
@@ -258,7 +274,7 @@ func Run(
 								logger.ErrorContext(pluginCtx, "error converting job payload to JSON", "error", err)
 								return
 							}
-							push := databaseContainer.Client.RPush(pluginCtx, "anklet/jobs/github/completed", wrappedPayloadJSON)
+							push := databaseContainer.Client.RPush(pluginCtx, "anklet/jobs/github/completed/"+ctxPlugin.Owner, wrappedPayloadJSON)
 							if push.Err() != nil {
 								logger.ErrorContext(pluginCtx, "error pushing job to queue", "error", push.Err())
 								return
@@ -326,13 +342,26 @@ func Run(
 		doneWithHooks := false
 		logger.InfoContext(pluginCtx, "listing hook deliveries to see if any need redelivery (may take a while)...")
 		for {
-			pluginCtx, hookDeliveries, response, err := ExecuteGitHubClientFunction(pluginCtx, logger, func() (*[]*github.HookDelivery, *github.Response, error) {
-				hookDeliveries, response, err := githubClient.Repositories.ListHookDeliveries(pluginCtx, ctxPlugin.Owner, ctxPlugin.Repo, ctxPlugin.HookID, opts)
-				if err != nil {
-					return nil, nil, err
-				}
-				return &hookDeliveries, response, nil
-			})
+			var hookDeliveries *[]*github.HookDelivery
+			var response *github.Response
+			var err error
+			if isRepoSet {
+				pluginCtx, hookDeliveries, response, err = ExecuteGitHubClientFunction(pluginCtx, logger, func() (*[]*github.HookDelivery, *github.Response, error) {
+					hookDeliveries, response, err := githubClient.Repositories.ListHookDeliveries(pluginCtx, ctxPlugin.Owner, ctxPlugin.Repo, ctxPlugin.HookID, opts)
+					if err != nil {
+						return nil, nil, err
+					}
+					return &hookDeliveries, response, nil
+				})
+			} else {
+				pluginCtx, hookDeliveries, response, err = ExecuteGitHubClientFunction(pluginCtx, logger, func() (*[]*github.HookDelivery, *github.Response, error) {
+					hookDeliveries, response, err := githubClient.Organizations.ListHookDeliveries(pluginCtx, ctxPlugin.Owner, ctxPlugin.HookID, opts)
+					if err != nil {
+						return nil, nil, err
+					}
+					return &hookDeliveries, response, nil
+				})
+			}
 			if err != nil {
 				logger.ErrorContext(pluginCtx, "error listing hooks", "err", err)
 				return
@@ -342,13 +371,25 @@ func Run(
 					continue
 				}
 				if hookDelivery.StatusCode != nil && !*hookDelivery.Redelivery && *hookDelivery.Action != "in_progress" {
-					pluginCtx, gottenHookDelivery, _, err := ExecuteGitHubClientFunction(pluginCtx, logger, func() (*github.HookDelivery, *github.Response, error) {
-						gottenHookDelivery, response, err := githubClient.Repositories.GetHookDelivery(pluginCtx, ctxPlugin.Owner, ctxPlugin.Repo, ctxPlugin.HookID, *hookDelivery.ID)
-						if err != nil {
-							return nil, nil, err
-						}
-						return gottenHookDelivery, response, nil
-					})
+					var gottenHookDelivery *github.HookDelivery
+					var err error
+					if isRepoSet {
+						pluginCtx, gottenHookDelivery, _, err = ExecuteGitHubClientFunction(pluginCtx, logger, func() (*github.HookDelivery, *github.Response, error) {
+							gottenHookDelivery, response, err := githubClient.Repositories.GetHookDelivery(pluginCtx, ctxPlugin.Owner, ctxPlugin.Repo, ctxPlugin.HookID, *hookDelivery.ID)
+							if err != nil {
+								return nil, nil, err
+							}
+							return gottenHookDelivery, response, nil
+						})
+					} else {
+						pluginCtx, gottenHookDelivery, _, err = ExecuteGitHubClientFunction(pluginCtx, logger, func() (*github.HookDelivery, *github.Response, error) {
+							gottenHookDelivery, response, err := githubClient.Organizations.GetHookDelivery(pluginCtx, ctxPlugin.Owner, ctxPlugin.HookID, *hookDelivery.ID)
+							if err != nil {
+								return nil, nil, err
+							}
+							return gottenHookDelivery, response, nil
+						})
+					}
 					if err != nil {
 						logger.ErrorContext(pluginCtx, "error listing hooks", "err", err)
 						return
@@ -381,7 +422,7 @@ func Run(
 	}
 
 	// get all keys from database for the main queue and service queues as well as completed
-	queuedKeys, err := databaseContainer.Client.Keys(pluginCtx, "anklet/jobs/github/queued*").Result()
+	queuedKeys, err := databaseContainer.Client.Keys(pluginCtx, "anklet/jobs/github/queued/"+ctxPlugin.Owner+"*").Result()
 	if err != nil {
 		logger.ErrorContext(pluginCtx, "error getting list of keys", "err", err)
 		return
@@ -395,7 +436,7 @@ func Run(
 		}
 		allQueuedJobs[key] = queuedJobs
 	}
-	completedKeys, err := databaseContainer.Client.Keys(pluginCtx, "anklet/jobs/github/completed*").Result()
+	completedKeys, err := databaseContainer.Client.Keys(pluginCtx, "anklet/jobs/github/completed"+ctxPlugin.Owner+"*").Result()
 	if err != nil {
 		logger.ErrorContext(pluginCtx, "error getting list of keys", "err", err)
 		return
@@ -494,7 +535,7 @@ func Run(
 			if inCompleted && !inQueued {
 				_, err = databaseContainer.Client.LRem(pluginCtx, inCompletedListKey, 1, allCompletedJobs[inCompletedListKey][inCompletedIndex]).Result()
 				if err != nil {
-					logger.ErrorContext(pluginCtx, "error removing completedJob from anklet/jobs/github/completed", "err", err, "completedJob", allCompletedJobs[inCompletedListKey][inCompletedIndex])
+					logger.ErrorContext(pluginCtx, "error removing completedJob from anklet/jobs/github/completed/"+ctxPlugin.Owner, "err", err, "completedJob", allCompletedJobs[inCompletedListKey][inCompletedIndex])
 					return
 				}
 				continue
@@ -522,13 +563,24 @@ func Run(
 			// Note; We cannot (and probably should not) stop completed from being redelivered.
 
 			// Redeliver the hook
-			pluginCtx, redelivery, _, _ := ExecuteGitHubClientFunction(pluginCtx, logger, func() (*github.HookDelivery, *github.Response, error) {
-				redelivery, response, err := githubClient.Repositories.RedeliverHookDelivery(pluginCtx, ctxPlugin.Owner, ctxPlugin.Repo, ctxPlugin.HookID, *hookDelivery.ID)
-				if err != nil {
-					return nil, nil, err
-				}
-				return redelivery, response, nil
-			})
+			var redelivery *github.HookDelivery
+			if isRepoSet {
+				pluginCtx, redelivery, _, _ = ExecuteGitHubClientFunction(pluginCtx, logger, func() (*github.HookDelivery, *github.Response, error) {
+					redelivery, response, err := githubClient.Repositories.RedeliverHookDelivery(pluginCtx, ctxPlugin.Owner, ctxPlugin.Repo, ctxPlugin.HookID, *hookDelivery.ID)
+					if err != nil {
+						return nil, nil, err
+					}
+					return redelivery, response, nil
+				})
+			} else {
+				pluginCtx, redelivery, _, _ = ExecuteGitHubClientFunction(pluginCtx, logger, func() (*github.HookDelivery, *github.Response, error) {
+					redelivery, response, err := githubClient.Organizations.RedeliverHookDelivery(pluginCtx, ctxPlugin.Owner, ctxPlugin.HookID, *hookDelivery.ID)
+					if err != nil {
+						return nil, nil, err
+					}
+					return redelivery, response, nil
+				})
+			}
 			// err doesn't matter here and it will always throw "job scheduled on GitHub side; try again later"
 			logger.InfoContext(pluginCtx, "hook redelivered",
 				"redelivery", redelivery,

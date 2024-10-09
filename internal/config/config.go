@@ -15,12 +15,13 @@ import (
 type ContextKey string
 
 type Config struct {
-	Plugins    []Plugin `yaml:"plugins"`
-	Log        Log      `yaml:"log"`
-	PidFileDir string   `yaml:"pid_file_dir"`
-	LogFileDir string   `yaml:"log_file_dir"`
-	WorkDir    string   `yaml:"work_dir"`
-	Metrics    Metrics  `yaml:"metrics"`
+	Plugins          []Plugin `yaml:"plugins"`
+	Log              Log      `yaml:"log"`
+	PidFileDir       string   `yaml:"pid_file_dir"`
+	LogFileDir       string   `yaml:"log_file_dir"`
+	WorkDir          string   `yaml:"work_dir"`
+	Metrics          Metrics  `yaml:"metrics"`
+	GlobalPrivateKey string   `yaml:"global_private_key"`
 }
 
 type Log struct {
@@ -54,7 +55,6 @@ type Plugin struct {
 	Name           string   `yaml:"name"`
 	Plugin         string   `yaml:"plugin"`
 	Token          string   `yaml:"token"`
-	Registration   string   `yaml:"registration"`
 	Repo           string   `yaml:"repo"`
 	Owner          string   `yaml:"owner"`
 	Database       Database `yaml:"database"`
@@ -67,6 +67,7 @@ type Plugin struct {
 	Secret         string   `yaml:"secret"`
 	HookID         int64    `yaml:"hook_id"`
 	SkipRedeliver  bool     `yaml:"skip_redeliver"`
+	RunnerGroup    string   `yaml:"runner_group"`
 }
 
 func LoadConfig(configPath string) (Config, error) {
@@ -146,6 +147,10 @@ func LoadInEnvs(config Config) (Config, error) {
 	if workDir != "" {
 		config.WorkDir = workDir
 	}
+	envGlobalPrivateKey := os.Getenv("ANKLET_GLOBAL_PRIVATE_KEY")
+	if envGlobalPrivateKey != "" {
+		config.GlobalPrivateKey = envGlobalPrivateKey
+	}
 	// pidFileDir := os.Getenv("ANKLET_PID_FILE_DIR")
 	// if pidFileDir != "" {
 	// 	config.PidFileDir = pidFileDir
@@ -193,4 +198,20 @@ func GetLoadedConfigFromContext(ctx context.Context) *Config {
 		panic("GetLoadedConfigFromContext failed")
 	}
 	return config
+}
+
+func GetIsRepoSetFromContext(ctx context.Context) bool {
+	isRepoSet, ok := ctx.Value(ContextKey("isRepoSet")).(bool)
+	if !ok {
+		panic("GetIsRepoSetFromContext failed")
+	}
+	return isRepoSet
+}
+
+func GetConfigFileNameFromContext(ctx context.Context) string {
+	configFileName, ok := ctx.Value(ContextKey("configFileName")).(string)
+	if !ok {
+		panic("GetConfigFileNameFromContext failed")
+	}
+	return configFileName
 }

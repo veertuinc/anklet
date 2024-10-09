@@ -95,7 +95,9 @@ func (s *Server) handleAggregatorPrometheusMetrics(workerCtx context.Context, lo
 				pluginName = pluginMap["plugin_name"].(string)
 				Name = pluginMap["name"].(string)
 				ownerName = pluginMap["owner_name"].(string)
-				repoName = pluginMap["repo_name"].(string)
+				if pluginMap["repo_name"] != nil {
+					repoName = pluginMap["repo_name"].(string)
+				}
 				status = pluginMap["status"].(string)
 				statusSince, err = time.Parse(time.RFC3339, pluginMap["status_since"].(string))
 				if err != nil {
@@ -116,12 +118,25 @@ func (s *Server) handleAggregatorPrometheusMetrics(workerCtx context.Context, lo
 						return
 					}
 				}
-				w.Write([]byte(fmt.Sprintf("plugin_status{name=%s,owner=%s,repo=%s,metricsUrl=%s} %s\n", Name, ownerName, repoName, metricsURL, status)))
-				if !strings.Contains(pluginName, "_receiver") {
-					w.Write([]byte(fmt.Sprintf("plugin_last_successful_run{name=%s,owner=%s,repo=%s,job_url=%s,metricsUrl=%s} %s\n", Name, ownerName, repoName, lastSuccessfulRunJobUrl, metricsURL, lastSuccessfulRun.Format(time.RFC3339))))
-					w.Write([]byte(fmt.Sprintf("plugin_last_failed_run{name=%s,owner=%s,repo=%s,job_url=%s,metricsUrl=%s} %s\n", Name, ownerName, repoName, lastFailedRunJobUrl, metricsURL, lastFailedRun.Format(time.RFC3339))))
+				if repoName == "" {
+					w.Write([]byte(fmt.Sprintf("plugin_status{name=%s,owner=%s,metricsUrl=%s} %s\n", Name, ownerName, metricsURL, status)))
+				} else {
+					w.Write([]byte(fmt.Sprintf("plugin_status{name=%s,owner=%s,repo=%s,metricsUrl=%s} %s\n", Name, ownerName, repoName, metricsURL, status)))
 				}
-				w.Write([]byte(fmt.Sprintf("plugin_status_since{name=%s,owner=%s,repo=%s,metricsUrl=%s} %s\n", Name, ownerName, repoName, metricsURL, statusSince.Format(time.RFC3339))))
+				if !strings.Contains(pluginName, "_receiver") {
+					if repoName == "" {
+						w.Write([]byte(fmt.Sprintf("plugin_last_successful_run{name=%s,owner=%s,job_url=%s,metricsUrl=%s} %s\n", Name, ownerName, lastSuccessfulRunJobUrl, metricsURL, lastSuccessfulRun.Format(time.RFC3339))))
+						w.Write([]byte(fmt.Sprintf("plugin_last_failed_run{name=%s,owner=%s,job_url=%s,metricsUrl=%s} %s\n", Name, ownerName, lastFailedRunJobUrl, metricsURL, lastFailedRun.Format(time.RFC3339))))
+					} else {
+						w.Write([]byte(fmt.Sprintf("plugin_last_successful_run{name=%s,owner=%s,repo=%s,job_url=%s,metricsUrl=%s} %s\n", Name, ownerName, repoName, lastSuccessfulRunJobUrl, metricsURL, lastSuccessfulRun.Format(time.RFC3339))))
+						w.Write([]byte(fmt.Sprintf("plugin_last_failed_run{name=%s,owner=%s,repo=%s,job_url=%s,metricsUrl=%s} %s\n", Name, ownerName, repoName, lastFailedRunJobUrl, metricsURL, lastFailedRun.Format(time.RFC3339))))
+					}
+				}
+				if repoName == "" {
+					w.Write([]byte(fmt.Sprintf("plugin_status_since{name=%s,owner=%s,metricsUrl=%s} %s\n", Name, ownerName, metricsURL, statusSince.Format(time.RFC3339))))
+				} else {
+					w.Write([]byte(fmt.Sprintf("plugin_status_since{name=%s,owner=%s,repo=%s,metricsUrl=%s} %s\n", Name, ownerName, repoName, metricsURL, statusSince.Format(time.RFC3339))))
+				}
 				if strings.Contains(pluginName, "_receiver") {
 					soloReceiver = true
 				} else {

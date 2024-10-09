@@ -349,7 +349,9 @@ func (s *Server) handleJsonMetrics(ctx context.Context, soloReceiver bool) http.
 						case Plugin:
 							pluginMap["name"] = s.Name
 							pluginMap["plugin_name"] = s.PluginName
-							pluginMap["repo_name"] = s.RepoName
+							if s.RepoName != "" {
+								pluginMap["repo_name"] = s.RepoName
+							}
 							pluginMap["owner_name"] = s.OwnerName
 							pluginMap["status"] = s.Status
 							pluginMap["status_since"] = s.StatusSince
@@ -360,7 +362,9 @@ func (s *Server) handleJsonMetrics(ctx context.Context, soloReceiver bool) http.
 						case PluginBase:
 							pluginMap["name"] = s.Name
 							pluginMap["plugin_name"] = s.PluginName
-							pluginMap["repo_name"] = s.RepoName
+							if s.RepoName != "" {
+								pluginMap["repo_name"] = s.RepoName
+							}
 							pluginMap["owner_name"] = s.OwnerName
 							pluginMap["status"] = s.Status
 							pluginMap["status_since"] = s.StatusSince
@@ -410,7 +414,9 @@ func (s *Server) handleJsonMetrics(ctx context.Context, soloReceiver bool) http.
 						case Plugin:
 							pluginMap["name"] = s.Name
 							pluginMap["plugin_name"] = s.PluginName
-							pluginMap["repo_name"] = s.RepoName
+							if s.RepoName != "" {
+								pluginMap["repo_name"] = s.RepoName
+							}
 							pluginMap["owner_name"] = s.OwnerName
 							pluginMap["status"] = s.Status
 							pluginMap["status_since"] = s.StatusSince
@@ -421,7 +427,9 @@ func (s *Server) handleJsonMetrics(ctx context.Context, soloReceiver bool) http.
 						case PluginBase:
 							pluginMap["name"] = s.Name
 							pluginMap["plugin_name"] = s.PluginName
-							pluginMap["repo_name"] = s.RepoName
+							if s.RepoName != "" {
+								pluginMap["repo_name"] = s.RepoName
+							}
 							pluginMap["owner_name"] = s.OwnerName
 							pluginMap["status"] = s.Status
 							pluginMap["status_since"] = s.StatusSince
@@ -459,7 +467,9 @@ func (s *Server) handlePrometheusMetrics(ctx context.Context, soloReceiver bool)
 			case Plugin:
 				name = plugin.Name
 				pluginName = plugin.PluginName
-				repoName = plugin.RepoName
+				if plugin.RepoName != "" {
+					repoName = plugin.RepoName
+				}
 				ownerName = plugin.OwnerName
 				status = plugin.Status
 				StatusSince = plugin.StatusSince
@@ -470,19 +480,34 @@ func (s *Server) handlePrometheusMetrics(ctx context.Context, soloReceiver bool)
 			case PluginBase:
 				name = plugin.Name
 				pluginName = plugin.PluginName
-				repoName = plugin.RepoName
+				if plugin.RepoName != "" {
+					repoName = plugin.RepoName
+				}
 				ownerName = plugin.OwnerName
 				status = plugin.Status
 				StatusSince = plugin.StatusSince
 			default:
 				panic("unable to convert plugin to Plugin or PluginBase")
 			}
-			w.Write([]byte(fmt.Sprintf("plugin_status{name=%s,plugin=%s,owner=%s,repo=%s} %s\n", name, pluginName, ownerName, repoName, status)))
-			if !strings.Contains(pluginName, "_receiver") {
-				w.Write([]byte(fmt.Sprintf("plugin_last_successful_run{name=%s,plugin=%s,owner=%s,repo=%s,job_url=%s} %s\n", name, pluginName, ownerName, repoName, lastSuccessfulRunJobUrl, lastSuccessfulRun.Format(time.RFC3339))))
-				w.Write([]byte(fmt.Sprintf("plugin_last_failed_run{name=%s,plugin=%s,owner=%s,repo=%s,job_url=%s} %s\n", name, pluginName, ownerName, repoName, lastFailedRunJobUrl, lastFailedRun.Format(time.RFC3339))))
+			if repoName == "" {
+				w.Write([]byte(fmt.Sprintf("plugin_status{name=%s,plugin=%s,owner=%s} %s\n", name, pluginName, ownerName, status)))
+			} else {
+				w.Write([]byte(fmt.Sprintf("plugin_status{name=%s,plugin=%s,owner=%s,repo=%s} %s\n", name, pluginName, ownerName, repoName, status)))
 			}
-			w.Write([]byte(fmt.Sprintf("plugin_status_since{name=%s,plugin=%s,owner=%s,repo=%s} %s\n", name, pluginName, ownerName, repoName, StatusSince.Format(time.RFC3339))))
+			if !strings.Contains(pluginName, "_receiver") {
+				if repoName == "" {
+					w.Write([]byte(fmt.Sprintf("plugin_last_successful_run{name=%s,plugin=%s,owner=%s,job_url=%s} %s\n", name, pluginName, ownerName, lastSuccessfulRunJobUrl, lastSuccessfulRun.Format(time.RFC3339))))
+					w.Write([]byte(fmt.Sprintf("plugin_last_failed_run{name=%s,plugin=%s,owner=%s,job_url=%s} %s\n", name, pluginName, ownerName, lastFailedRunJobUrl, lastFailedRun.Format(time.RFC3339))))
+				} else {
+					w.Write([]byte(fmt.Sprintf("plugin_last_successful_run{name=%s,plugin=%s,owner=%s,repo=%s,job_url=%s} %s\n", name, pluginName, ownerName, repoName, lastSuccessfulRunJobUrl, lastSuccessfulRun.Format(time.RFC3339))))
+					w.Write([]byte(fmt.Sprintf("plugin_last_failed_run{name=%s,plugin=%s,owner=%s,repo=%s,job_url=%s} %s\n", name, pluginName, ownerName, repoName, lastFailedRunJobUrl, lastFailedRun.Format(time.RFC3339))))
+				}
+			}
+			if repoName == "" {
+				w.Write([]byte(fmt.Sprintf("plugin_status_since{name=%s,plugin=%s,owner=%s} %s\n", name, pluginName, ownerName, StatusSince.Format(time.RFC3339))))
+			} else {
+				w.Write([]byte(fmt.Sprintf("plugin_status_since{name=%s,plugin=%s,owner=%s,repo=%s} %s\n", name, pluginName, ownerName, repoName, StatusSince.Format(time.RFC3339))))
+			}
 		}
 		w.Write([]byte(fmt.Sprintf("host_cpu_count %d\n", metricsData.HostCPUCount)))
 		w.Write([]byte(fmt.Sprintf("host_cpu_used_count %d\n", metricsData.HostCPUUsedCount)))

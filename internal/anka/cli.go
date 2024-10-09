@@ -106,6 +106,7 @@ func (cli *Cli) Execute(pluginCtx context.Context, args ...string) ([]byte, int,
 		case <-ticker.C:
 			logger.InfoContext(pluginCtx, fmt.Sprintf("execution of command %v is still in progress...", args))
 		case err := <-done:
+			// logger.InfoContext(pluginCtx, fmt.Sprintf("execution of command %v completed", args))
 			exitCode := 0
 			if exitErr, ok := err.(*exec.ExitError); ok {
 				exitCode = exitErr.ExitCode()
@@ -208,6 +209,7 @@ func (cli *Cli) AnkaDelete(workerCtx context.Context, pluginCtx context.Context,
 	deleteOutput, err := cli.ExecuteParseJson(pluginCtx, "anka", "-j", "delete", "--yes", vm.Name)
 	if err != nil {
 		logger.ErrorContext(pluginCtx, "error executing anka delete", "err", err)
+		cli.Execute(pluginCtx, "anka", "delete", "--yes", vm.Name)
 		return err
 	}
 	logger.DebugContext(pluginCtx, "successfully deleted vm", "std", deleteOutput.Message)
@@ -396,7 +398,7 @@ func (cli *Cli) EnsureVMTemplateExists(workerCtx context.Context, pluginCtx cont
 		}
 		defer globals.PullLock.Unlock()
 		pullJson, err := cli.AnkaRegistryPull(workerCtx, pluginCtx, targetTemplate, targetTag)
-		if pullJson.Code == 3 { // registry doesn't have template (or tag)
+		if pullJson == nil || pullJson.Code == 3 { // registry doesn't have template (or tag)
 			return err, nil
 		}
 		if err != nil {
