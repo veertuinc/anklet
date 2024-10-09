@@ -5,7 +5,9 @@ set -exo pipefail
 [ -z "$3" ] && (echo "Error: URL argument is missing." && exit 1)
 [ -z "$4" ] && (echo "Error: Labels argument is missing." && exit 1)
 RUNNER_HOME="${RUNNER_HOME:-"$HOME/actions-runner"}"
-RUNNER_GROUP_FLAG="${RUNNER_GROUP_FLAG:-"--runnergroup ${5}"}"
+if [[ -n "${5}" ]]; then
+  RUNNER_GROUP_FLAG="--runnergroup ${5}"
+fi
 mkdir -p "${RUNNER_HOME}"
 cd "${RUNNER_HOME}"
 eval ./config.sh --name "${1}" \
