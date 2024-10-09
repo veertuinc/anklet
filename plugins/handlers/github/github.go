@@ -487,13 +487,13 @@ func Run(
 	logger.InfoContext(pluginCtx, "checking for jobs....")
 
 	if ctxPlugin.Token == "" && ctxPlugin.PrivateKey == "" {
-		logging.Panic(workerCtx, pluginCtx, "token and private_key are not set in ankalet.yaml:plugins:"+ctxPlugin.Name+":token/private_key")
+		logging.Panic(workerCtx, pluginCtx, "token and private_key are not set in anklet.yaml:plugins:"+ctxPlugin.Name+":token/private_key")
 	}
 	if ctxPlugin.PrivateKey != "" && (ctxPlugin.AppID == 0 || ctxPlugin.InstallationID == 0) {
-		logging.Panic(workerCtx, pluginCtx, "private_key, app_id, and installation_id must all be set in ankalet.yaml:plugins:"+ctxPlugin.Name+"")
+		logging.Panic(workerCtx, pluginCtx, "private_key, app_id, and installation_id must all be set in anklet.yaml:plugins:"+ctxPlugin.Name+"")
 	}
 	if ctxPlugin.Owner == "" {
-		logging.Panic(workerCtx, pluginCtx, "owner is not set in ankalet.yaml:plugins:"+ctxPlugin.Name+":owner")
+		logging.Panic(workerCtx, pluginCtx, "owner is not set in anklet.yaml:plugins:"+ctxPlugin.Name+":owner")
 	}
 	// if ctxPlugin.Repo == "" {
 	// 	logging.Panic(workerCtx, pluginCtx, "repo is not set in anklet.yaml:plugins:"+ctxPlugin.Name+":repo")
