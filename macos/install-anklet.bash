@@ -32,12 +32,15 @@ cat <<EOF > /Library/LaunchDaemons/com.veertu.anklet.plist
 </plist>
 EOF
 # install anklet
-curl -O -L https://github.com/veertuinc/anklet/releases/download/v0.2.0/anklet-v0.2.0-darwin-arm64.zip
-unzip anklet-v0.2.0-darwin-arm64.zip
-chmod +x anklet-v0.2.0-darwin-arm64
-sudo mv anklet-v0.2.0-darwin-arm64 /usr/local/bin/anklet
-# create config
-mkdir -p ~/.config/anklet
+ARCH=$([[ $(arch) == "arm64" ]] && echo "arm64" || echo "amd64")
+LATEST_VERSION=$(curl -sL https://api.github.com/repos/veertuinc/anklet/releases | jq -r '.[0].tag_name')
+curl -L -O https://github.com/veertuinc/anklet/releases/download/${LATEST_VERSION}/anklet_${LATEST_VERSION}_darwin_${ARCH}.zip
+unzip anklet_${LATEST_VERSION}_darwin_${ARCH}.zip
+chmod +x anklet_${LATEST_VERSION}_darwin_${ARCH}
+cp anklet_${LATEST_VERSION}_darwin_${ARCH} /usr/local/bin/anklet
+mkdir -p ~/.config/
+sudo chown -R $AWS_INSTANCE_USER:staff ~/.config
+cd ~/.config/
 touch ~/.config/anklet/config.yml
 if [ ! -f ~/.config/anklet/config.yml ]; then
   cat <<EOF > ~/.config/anklet/config.yml
