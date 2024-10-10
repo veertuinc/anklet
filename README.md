@@ -38,7 +38,6 @@ Note: It does not run as root, and will use the current user's space/environment
       "workflowRunId": 8544945071,
       "workflowJobId": 23414111000,
       "workflowJobName": "testJob",
-      "uniqueId": "1",
       "ankaTemplate": "d792c6f6-198c-470f-9526-9c998efe7ab4",
       "ankaTemplateTag": "(using latest)",
       "jobURL": "https://github.com/veertuinc/anklet/actions/runs/8544945071/job/23414111000",
@@ -477,7 +476,6 @@ The `dev` LOG_LEVEL has colored output with text + pretty printed JSON for easie
     "function": "github.com/veertuinc/anklet/plugins/handlers/github.Run",
     "line": 408
   },
-  "uniqueId": "1",
   "uniqueRunKey": "8608565514:1",
   "vmName": "anklet-vm-83685657-9bda-4b32-84db-6c50ee712268",
   "workflowJobId": 23591139958,
