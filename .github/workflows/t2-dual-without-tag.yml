@@ -8,8 +8,7 @@ jobs:
       "self-hosted", 
       "anka", 
       "anka-template:d792c6f6-198c-470f-9526-9c998efe7ab4",
-      "run-id:${{ github.run_id }}", 
-      "unique-id:1"
+      "run-id:${{ github.run_id }}",
     ]
     steps:
       - uses: actions/checkout@v3
@@ -23,8 +22,7 @@ jobs:
       "self-hosted", 
       "anka", 
       "anka-template:6abae54f-025d-4a27-b5eb-b985d5eddac9",
-      "run-id:${{ github.run_id }}", 
-      "unique-id:2"
+      "run-id:${{ github.run_id }}",
     ]
     steps:
       - uses: actions/checkout@v3
