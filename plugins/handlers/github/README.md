@@ -43,8 +43,8 @@ Next, in your workflow yml you need to add several labels to `runs-on`. Here is 
 1. `anka` (required)
 1. `anka-template:{UUID OF TEMPLATE HERE}` (required)
 1. `anka-template-tag:{TAG NAME OF TEMPLATE HERE}` (optional; uses latest if not populated)
-1. `run-id:${{ github.run_id }}` (do not change this) - label that is used to ensure that jobs in the same workspace don't compete for the same runner.
-1. `unique-id:{UNIQUE ID OF JOB HERE}` - a label that is used to ensure multiple jobs in the same run don't compete for the same runner.
+<!-- 1. `run-id:${{ github.run_id }}` (do not change this) - label that is used to ensure that jobs in the same workspace don't compete for the same runner. -->
+<!-- 1. `unique-id:{UNIQUE ID OF JOB HERE}` - a label that is used to ensure multiple jobs in the same run don't compete for the same runner. -->
 
 (from [t1-with-tag-1.yml](.github/workflows/t1-with-tag-1.yml))
 
@@ -60,8 +60,6 @@ jobs:
       "anka", 
       "anka-template:d792c6f6-198c-470f-9526-9c998efe7ab4", 
       "anka-template-tag:vanilla+port-forward-22+brew-git",
-      "run-id:${{ github.run_id }}", 
-      "unique-id:1"
     ]
     steps:
       - uses: actions/checkout@v3

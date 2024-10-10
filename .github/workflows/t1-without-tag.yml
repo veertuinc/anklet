@@ -7,9 +7,7 @@ jobs:
     runs-on: [ 
       "self-hosted", 
       "anka", 
-      "anka-template:d792c6f6-198c-470f-9526-9c998efe7ab4", 
-      "run-id:${{ github.run_id }}", 
-      "unique-id:1"
+      "anka-template:d792c6f6-198c-470f-9526-9c998efe7ab4",
     ]
     steps:
       - uses: actions/checkout@v3
