@@ -174,6 +174,10 @@ func Run(
 	}
 
 	server := &http.Server{Addr: ":" + ctxPlugin.Port}
+	http.HandleFunc("/healthcheck", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("ok"))
+	})
 	http.HandleFunc("/jobs/v1/receiver", func(w http.ResponseWriter, r *http.Request) {
 		databaseContainer, err := database.GetDatabaseFromContext(pluginCtx)
 		if err != nil {
