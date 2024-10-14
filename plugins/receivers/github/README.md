@@ -127,3 +127,9 @@ host_disk_usage_percentage 54.030513
   ]
 }
 ```
+
+---
+
+## Healthcheck
+
+A Healthcheck endpoint is available at `http://{url/ip}:{port}/healthcheck`. It will return a 200 status code and `ok` if the plugin is running.
