@@ -11,7 +11,7 @@ services:
     ports: 
       - "8081:8081"
     environment:
-      # - LOG_LEVEL=dev
+      # - LOG_LEVEL=debug
       - ANKLET_CONFIG_FILE_NAME=org-receiver-config.yml
       ##################################################################################
       # ANKLET_GLOBAL_PRIVATE_KEY allows you to use the same private key for all runners

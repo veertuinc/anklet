@@ -310,6 +310,7 @@ func worker(parentCtx context.Context, logger *slog.Logger, loadedConfig config.
 			go func(plugin config.Plugin) {
 				defer wg.Done()
 				pluginCtx, pluginCancel := context.WithCancel(workerCtx) // Inherit from parent context
+				pluginCtx = context.WithValue(pluginCtx, config.ContextKey("logger"), logger)
 
 				if plugin.Name == "" {
 					panic("name is required for plugins")
@@ -317,20 +318,24 @@ func worker(parentCtx context.Context, logger *slog.Logger, loadedConfig config.
 
 				if plugin.Repo == "" {
 					logger.InfoContext(pluginCtx, "no repo set for plugin; assuming it's an organization level plugin")
+					logging.DevDebug(pluginCtx, "setting isRepoSet to false")
 					pluginCtx = context.WithValue(pluginCtx, config.ContextKey("isRepoSet"), false)
+					logging.DevDebug(pluginCtx, "set isRepoSet to false")
 				} else {
 					pluginCtx = context.WithValue(pluginCtx, config.ContextKey("isRepoSet"), true)
+					logging.DevDebug(pluginCtx, "setting isRepoSet to true")
 				}
 
 				if plugin.PrivateKey == "" && loadedConfig.GlobalPrivateKey != "" {
+					logging.DevDebug(pluginCtx, "using global private key")
 					plugin.PrivateKey = loadedConfig.GlobalPrivateKey
 				}
 
 				pluginCtx = context.WithValue(pluginCtx, config.ContextKey("plugin"), plugin)
 				pluginCtx = logging.AppendCtx(pluginCtx, slog.String("pluginName", plugin.Name))
-				pluginCtx = context.WithValue(pluginCtx, config.ContextKey("logger"), logger)
 
 				if !strings.Contains(plugin.Plugin, "_receiver") {
+					logging.DevDebug(pluginCtx, "plugin is not a receiver; loading the anka CLI")
 					ankaCLI, err := anka.NewCLI(pluginCtx)
 					if err != nil {
 						pluginCancel()
@@ -338,28 +343,34 @@ func worker(parentCtx context.Context, logger *slog.Logger, loadedConfig config.
 						return
 					}
 					pluginCtx = context.WithValue(pluginCtx, config.ContextKey("ankacli"), ankaCLI)
+					logging.DevDebug(pluginCtx, "loaded the anka CLI")
 				}
 
 				if plugin.Database.Enabled {
+					logging.DevDebug(pluginCtx, "connecting to database")
 					databaseClient, err := database.NewClient(pluginCtx, plugin.Database)
 					if err != nil {
 						panic(fmt.Sprintf("unable to access database: %v", err))
 					}
 					pluginCtx = context.WithValue(pluginCtx, config.ContextKey("database"), databaseClient)
+					logging.DevDebug(pluginCtx, "connected to database")
 				}
 
-				logger.InfoContext(pluginCtx, "starting service")
+				logger.InfoContext(pluginCtx, "starting plugin")
 
 				for {
 					select {
 					case <-pluginCtx.Done():
+						logging.DevDebug(pluginCtx, "plugin for loop::pluginCtx.Done()")
 						metricsData.SetStatus(pluginCtx, logger, "stopped")
 						logger.WarnContext(pluginCtx, shutDownMessage)
 						pluginCancel()
 						return
 					default:
+						logging.DevDebug(pluginCtx, "plugin for loop::default")
 						run.Plugin(workerCtx, pluginCtx, pluginCancel, logger, firstPluginStarted, metricsData)
 						if workerCtx.Err() != nil || toRunOnce == "true" {
+							logging.DevDebug(pluginCtx, "plugin for loop::default::workerCtx.Err() != nil || toRunOnce == \"true\"")
 							pluginCancel()
 							logger.WarnContext(pluginCtx, shutDownMessage)
 							return
@@ -368,7 +379,7 @@ func worker(parentCtx context.Context, logger *slog.Logger, loadedConfig config.
 						select {
 						case <-time.After(time.Duration(plugin.SleepInterval) * time.Second):
 						case <-pluginCtx.Done():
-							fmt.Println("pluginCtx.Done()")
+							logging.DevDebug(pluginCtx, "plugin for loop::default::pluginCtx.Done()")
 							break
 						}
 					}

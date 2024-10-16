@@ -23,15 +23,13 @@ type ContextHandler struct {
 func New() *slog.Logger {
 	logLevel := os.Getenv("LOG_LEVEL")
 	var options *slog.HandlerOptions
-	if logLevel == "dev" {
+	if strings.ToUpper(logLevel) == "DEBUG" || strings.ToUpper(logLevel) == "DEV" {
 		handler := &ContextHandler{Handler: NewPrettyHandler(&slog.HandlerOptions{
 			Level:       slog.LevelDebug,
 			AddSource:   true,
 			ReplaceAttr: nil,
 		})}
 		return slog.New(handler)
-	} else if strings.ToUpper(logLevel) == "DEBUG" {
-		options = &slog.HandlerOptions{Level: slog.LevelDebug}
 	} else if strings.ToUpper(logLevel) == "ERROR" {
 		options = &slog.HandlerOptions{Level: slog.LevelError}
 	} else {
@@ -101,6 +99,13 @@ func Panic(workerCtx context.Context, pluginCtx context.Context, errorMessage st
 	logger := GetLoggerFromContext(pluginCtx)
 	logger.ErrorContext(pluginCtx, errorMessage)
 	panic(errorMessage)
+}
+
+func DevDebug(pluginCtx context.Context, errorMessage string) {
+	if strings.ToUpper(os.Getenv("LOG_LEVEL")) == "DEV" {
+		logger := GetLoggerFromContext(pluginCtx)
+		logger.DebugContext(pluginCtx, errorMessage)
+	}
 }
 
 func GetLoggerFromContext(ctx context.Context) *slog.Logger {
