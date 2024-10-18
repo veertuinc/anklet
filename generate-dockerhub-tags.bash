@@ -6,9 +6,13 @@ DOCKERFILE_PATH="${SCRIPT_DIR}/docker"
 NAME="anklet"
 cleanup() {
   rm -f "${DOCKERFILE_PATH}/${NAME}"*
+  rm -rf dist
 }
+rm -rf dist
 ARCH=amd64 make build-linux
 ARCH=arm64 make build-linux
+cp -f dist/anklet_v$(cat "${SCRIPT_DIR}"/VERSION)_linux_amd64 "${DOCKERFILE_PATH}/anklet_linux_amd64"
+cp -f dist/anklet_v$(cat "${SCRIPT_DIR}"/VERSION)_linux_arm64 "${DOCKERFILE_PATH}/anklet_linux_arm64"
 ls -alht "${DOCKERFILE_PATH}/"
 trap cleanup EXIT
 pushd "${DOCKERFILE_PATH}"
