@@ -75,6 +75,7 @@ With the github plugin, there is a Receiver Plugin and a Handler Plugin.
     ---
     work_dir: /tmp/
     pid_file_dir: /tmp/
+    # plugins_path: ~/.config/anklet/plugins/
     log:
         # if file_dir is not set, it will be set to current directory you execute anklet in
         file_dir: /Users/myUser/Library/Logs/
@@ -158,6 +159,8 @@ tail -fF /opt/homebrew/var/log/redis.log
 For production, we recommend running a [redis cluster](https://redis.io/docs/latest/operate/oss_and_stack/reference/cluster-spec/) on infrastructure that is separate from your Anklet hosts and has guaranteed uptime.
 
 ### Plugin Setup and Usage Guides
+
+You can control the location plugins are stored on the host by setting the `plugins_path` in the `config.yml` file. If not set, it will default to `~/.config/anklet/plugins/`.
 
 #### Github Actions
 

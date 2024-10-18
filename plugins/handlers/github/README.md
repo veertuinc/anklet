@@ -70,7 +70,7 @@ jobs:
           echo "123"
 ```
 
-Finally, the `github` plugin requires three different bash scripts available on the host, which it will copy into the VM and run. You can find them under https://github.com/veertuinc/anklet/tree/main/plugins/handlers/github. They can be customized to fit your needs. You'll need to place all three in `~/.config/anklet/plugins/handlers/github/`.
+Finally, the `github` plugin requires three different bash scripts available on the host, which it will copy into the VM and run. You can find them under https://github.com/veertuinc/anklet/tree/main/plugins/handlers/github. They can be customized to fit your needs. Place them in under `${plugins_path}/handlers/github/`.
 
 ---
 
