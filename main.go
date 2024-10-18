@@ -148,7 +148,12 @@ func main() {
 	// 	return
 	// }
 
-	pluginsPath := filepath.Join(homeDir, ".config", "anklet", "plugins")
+	var pluginsPath string
+	if loadedConfig.PluginsPath != "" {
+		pluginsPath = loadedConfig.PluginsPath
+	} else {
+		pluginsPath = filepath.Join(homeDir, ".config", "anklet", "plugins")
+	}
 	parentCtx = context.WithValue(parentCtx, config.ContextKey("globals"), config.Globals{
 		RunOnce:     runOnce,
 		PullLock:    &sync.Mutex{},

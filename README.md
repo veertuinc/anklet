@@ -75,6 +75,7 @@ With the github plugin, there is a Receiver Plugin and a Handler Plugin.
     ---
     work_dir: /tmp/
     pid_file_dir: /tmp/
+    plugins_path: ~/.config/anklet/plugins/
     log:
         # if file_dir is not set, it will be set to current directory you execute anklet in
         file_dir: /Users/myUser/Library/Logs/

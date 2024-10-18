@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -773,9 +774,9 @@ func Run(
 		// Install runner
 		globals := config.GetGlobalsFromContext(pluginCtx)
 		logger.InfoContext(pluginCtx, "installing github runner inside of vm")
-		installRunnerPath := globals.PluginsPath + "/handlers/github/install-runner.bash"
-		registerRunnerPath := globals.PluginsPath + "/handlers/github/register-runner.bash"
-		startRunnerPath := globals.PluginsPath + "/handlers/github/start-runner.bash"
+		installRunnerPath := filepath.Join(globals.PluginsPath, "handlers", "github", "install-runner.bash")
+		registerRunnerPath := filepath.Join(globals.PluginsPath, "handlers", "github", "register-runner.bash")
+		startRunnerPath := filepath.Join(globals.PluginsPath, "handlers", "github", "start-runner.bash")
 		_, installRunnerErr := os.Stat(installRunnerPath)
 		_, registerRunnerErr := os.Stat(registerRunnerPath)
 		_, startRunnerErr := os.Stat(startRunnerPath)

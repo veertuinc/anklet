@@ -22,6 +22,7 @@ type Config struct {
 	WorkDir          string   `yaml:"work_dir"`
 	Metrics          Metrics  `yaml:"metrics"`
 	GlobalPrivateKey string   `yaml:"global_private_key"`
+	PluginsPath      string   `yaml:"plugins_path"`
 }
 
 type Log struct {
