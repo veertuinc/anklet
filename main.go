@@ -154,6 +154,9 @@ func main() {
 	} else {
 		pluginsPath = filepath.Join(homeDir, ".config", "anklet", "plugins")
 	}
+
+	logger.InfoContext(parentCtx, "plugins path", slog.String("pluginsPath", pluginsPath))
+
 	parentCtx = context.WithValue(parentCtx, config.ContextKey("globals"), config.Globals{
 		RunOnce:     runOnce,
 		PullLock:    &sync.Mutex{},
