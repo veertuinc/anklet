@@ -151,6 +151,7 @@ For production, we recommend running a [redis cluster](https://redis.io/docs/lat
 Your config.yml file must define the database in one of the following ways:
 - Using the `database` variables (under each plugin).
 - Using the `global_database_*` variables (applies to and overrides the `database` variables under each plugin).
+- Using the ENVs: `ANKLET_GLOBAL_DATABASE_URL`, `ANKLET_GLOBAL_DATABASE_PORT`, `ANKLET_GLOBAL_DATABASE_USER`, `ANKLET_GLOBAL_DATABASE_PASSWORD`, `ANKLET_GLOBAL_DATABASE_DATABASE`.
 
 ### Plugin Setup and Usage Guides
 
