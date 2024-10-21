@@ -23,17 +23,17 @@ plugins:
     registry_url: http://anka.registry:8089
     runner_group: macOS # requires Enterprise github
     # sleep_interval: 5 # Optional; defaults to 1 second.
-    database:
-      enabled: true
-      url: localhost
-      port: 6379
-      user: ""
-      password: ""
-      database: 0
+    #database:
+    #  enabled: true
+    #  url: localhost
+    #  port: 6379
+    #  user: ""
+    #  password: ""
+    #  database: 0
 ```
 
 - Your PAT or Github App must have **Actions** and **Administration** Read & Write permissions.
-- The `database` is required. You can find installation instructions in the anklet main [README.md](../../README.md#database-setup).
+- You must define the database in the config.yml file either using the `database` section or the `global_database_*` variables. You can find installation instructions in the anklet main [README.md](../../README.md#database-setup).
 - If you are attempting to register runners for an entire organization, do NOT set `repo` and make sure your Github App has `Self-hosted runners` > `Read and write` permissions.
 - If your Organization level runner is registered and your public repo jobs are not picking it up even though the labels are a perfect match, make sure the Runner groups (likely `Default`) has `Allow public repositories`.
 

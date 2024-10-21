@@ -232,6 +232,21 @@ func worker(parentCtx context.Context, logger *slog.Logger, loadedConfig config.
 			}
 		}
 	}()
+
+	// set global database variables
+	var databaseURL string
+	var databasePort int
+	var databaseUser string
+	var databasePassword string
+	var databaseDatabase int
+	if loadedConfig.GlobalDatabaseURL != "" {
+		databaseURL = loadedConfig.GlobalDatabaseURL
+		databasePort = loadedConfig.GlobalDatabasePort
+		databaseUser = loadedConfig.GlobalDatabaseUser
+		databasePassword = loadedConfig.GlobalDatabasePassword
+		databaseDatabase = loadedConfig.GlobalDatabaseDatabase
+	}
+
 	// Setup Metrics Server and context
 	metricsPort := "8080"
 	if loadedConfig.Metrics.Port != "" {
@@ -246,7 +261,20 @@ func worker(parentCtx context.Context, logger *slog.Logger, loadedConfig config.
 	metricsService := metrics.NewServer(metricsPort)
 	if loadedConfig.Metrics.Aggregator {
 		workerCtx = logging.AppendCtx(workerCtx, slog.Any("metrics_urls", loadedConfig.Metrics.MetricsURLs))
-		databaseContainer, err := database.NewClient(workerCtx, loadedConfig.Metrics.Database)
+		if databaseURL == "" { // if no global database URL is set, use the metrics database URL
+			databaseURL = loadedConfig.Metrics.Database.URL
+			databasePort = loadedConfig.Metrics.Database.Port
+			databaseUser = loadedConfig.Metrics.Database.User
+			databasePassword = loadedConfig.Metrics.Database.Password
+			databaseDatabase = loadedConfig.Metrics.Database.Database
+		}
+		databaseContainer, err := database.NewClient(workerCtx, config.Database{
+			URL:      databaseURL,
+			Port:     databasePort,
+			User:     databaseUser,
+			Password: databasePassword,
+			Database: databaseDatabase,
+		})
 		if err != nil {
 			panic(fmt.Sprintf("unable to access database: %v", err))
 		}
@@ -326,12 +354,11 @@ func worker(parentCtx context.Context, logger *slog.Logger, loadedConfig config.
 
 				if plugin.Repo == "" {
 					logger.InfoContext(pluginCtx, "no repo set for plugin; assuming it's an organization level plugin")
-					logging.DevDebug(pluginCtx, "setting isRepoSet to false")
 					pluginCtx = context.WithValue(pluginCtx, config.ContextKey("isRepoSet"), false)
 					logging.DevDebug(pluginCtx, "set isRepoSet to false")
 				} else {
 					pluginCtx = context.WithValue(pluginCtx, config.ContextKey("isRepoSet"), true)
-					logging.DevDebug(pluginCtx, "setting isRepoSet to true")
+					logging.DevDebug(pluginCtx, "set isRepoSet to true")
 				}
 
 				if plugin.PrivateKey == "" && loadedConfig.GlobalPrivateKey != "" {
@@ -354,12 +381,26 @@ func worker(parentCtx context.Context, logger *slog.Logger, loadedConfig config.
 					logging.DevDebug(pluginCtx, "loaded the anka CLI")
 				}
 
-				if plugin.Database.Enabled {
-					logging.DevDebug(pluginCtx, "connecting to database")
-					databaseClient, err := database.NewClient(pluginCtx, plugin.Database)
-					if err != nil {
-						panic(fmt.Sprintf("unable to access database: %v", err))
+				if databaseURL != "" || plugin.Database.URL != "" {
+					if databaseURL == "" {
+						databaseURL = plugin.Database.URL
+						databasePort = plugin.Database.Port
+						databaseUser = plugin.Database.User
+						databasePassword = plugin.Database.Password
+						databaseDatabase = plugin.Database.Database
 					}
+					logging.DevDebug(pluginCtx, "connecting to database")
+					databaseClient, err := database.NewClient(pluginCtx, config.Database{
+						URL:      databaseURL,
+						Port:     databasePort,
+						User:     databaseUser,
+						Password: databasePassword,
+						Database: databaseDatabase,
+					})
+					if err != nil {
+						panic("unable to access database: " + err.Error())
+					}
+					logger.InfoContext(pluginCtx, "connected to database", slog.Any("database", databaseClient))
 					pluginCtx = context.WithValue(pluginCtx, config.ContextKey("database"), databaseClient)
 					logging.DevDebug(pluginCtx, "connected to database")
 				}
@@ -378,7 +419,6 @@ func worker(parentCtx context.Context, logger *slog.Logger, loadedConfig config.
 						logging.DevDebug(pluginCtx, "plugin for loop::default")
 						run.Plugin(workerCtx, pluginCtx, pluginCancel, logger, firstPluginStarted, metricsData)
 						if workerCtx.Err() != nil || toRunOnce == "true" {
-							logging.DevDebug(pluginCtx, "plugin for loop::default::workerCtx.Err() != nil || toRunOnce == \"true\"")
 							pluginCancel()
 							logger.WarnContext(pluginCtx, shutDownMessage)
 							return
@@ -403,6 +443,7 @@ func worker(parentCtx context.Context, logger *slog.Logger, loadedConfig config.
 		go metricsService.Start(workerCtx, logger, soloReceiver)
 	}
 	wg.Wait()
+	time.Sleep(time.Second) // prevents exiting before the logger has a chance to write the final log entry (from panics)
 	logger.WarnContext(workerCtx, "anklet (and all plugins) shut down")
 	os.Exit(0)
 }

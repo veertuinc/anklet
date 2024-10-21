@@ -76,6 +76,12 @@ With the github plugin, there is a Receiver Plugin and a Handler Plugin.
     work_dir: /tmp/
     pid_file_dir: /tmp/
     # plugins_path: ~/.config/anklet/plugins/
+    global_database_url: localhost
+    global_database_port: 6379
+    global_database_user: ""
+    global_database_password: ""
+    global_database_database: 0
+    global_private_key: /Users/nathanpierce/veertuinc-anklet.2024-07-19.private-key.pem
     log:
         # if file_dir is not set, it will be set to current directory you execute anklet in
         file_dir: /Users/myUser/Library/Logs/
@@ -86,48 +92,32 @@ With the github plugin, there is a Receiver Plugin and a Handler Plugin.
         hook_id: 489747753
         port: 54321 # port that's open to the internet so github can post to it
         secret: 00000000
-        private_key: /Users/nathanpierce/veertuinc-anklet.2024-07-19.private-key.pem
+        #private_key: /Users/nathanpierce/veertuinc-anklet.2024-07-19.private-key.pem
         app_id: 949431
         installation_id: 52970581
         repo: anklet
         owner: veertuinc
-        database:
-          enabled: true
-          url: localhost
-          port: 6379
-          user: ""
-          password: ""
-          database: 0
+        #database:
+          #url: localhost
+          #port: 6379
+          #user: ""
+          #password: ""
+          #database: 0
       # GITHUB HANDLERS
       - name: RUNNER1
           plugin: github
-          private_key: /Users/nathanpierce/veertuinc-anklet.2024-07-19.private-key.pem
           app_id: 949431
           installation_id: 52970581
           repo: anklet
           owner: veertuinc
           registry_url: http://anka.registry:8089
           sleep_interval: 10 # sleep 10 seconds between checks for new jobs
-          database:
-              enabled: true
-              url: localhost
-              port: 6379
-              user: ""
-              password: ""
-              database: 0
       - name: RUNNER2
           plugin: github
           token: github_pat_1XXXXX
           repo: anklet
           owner: veertuinc
           registry_url: http://anka.registry:8089
-          database:
-              enabled: true
-              url: localhost
-              port: 6379
-              user: ""
-              password: ""
-              database: 0
 
     ```
     > Note: You can only ever run two VMs per host per the Apple macOS SLA. While you can specify more than two plugins, only two will ever be running a VM at one time. `sleep_interval` can be used to control the frequency/priority of a plugin and increase the odds that a job will be picked up.
@@ -157,6 +147,10 @@ tail -fF /opt/homebrew/var/log/redis.log
 ```
 
 For production, we recommend running a [redis cluster](https://redis.io/docs/latest/operate/oss_and_stack/reference/cluster-spec/) on infrastructure that is separate from your Anklet hosts and has guaranteed uptime.
+
+Your config.yml file must define the database in one of the following ways:
+- Using the `database` variables (under each plugin).
+- Using the `global_database_*` variables (applies to and overrides the `database` variables under each plugin).
 
 ### Plugin Setup and Usage Guides
 
@@ -298,6 +292,11 @@ pid_file_dir: /tmp/
 log:
   # if file_dir is not set, it will be set to current directory you execute anklet in
   file_dir: /Users/nathanpierce/Library/Logs/
+global_database_url: localhost
+global_database_port: 6379
+global_database_user: ""
+global_database_password: ""
+global_database_database: 0
 metrics:
   aggregator: true
   metrics_urls:
@@ -306,13 +305,6 @@ metrics:
     - http://192.168.1.203:8080/metrics
   port: 8081 # port to serve aggregator on
   sleep_interval: 10 # how often to fetch metrics from each Anklet defined
-  database:
-    enabled: true
-    url: localhost
-    port: 6379
-    user: ""
-    password: ""
-    database: 0
 ```
 
 You can see that this requires a database to be running. The aggregator will store the metrics in Redis so that it can serve them up without delay.

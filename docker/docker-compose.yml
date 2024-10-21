@@ -8,16 +8,17 @@ services:
     container_name: anklet
     volumes:
       - /Users/nathanpierce/.config/anklet:/root/.config/anklet/
+      - /Users/nathanpierce/veertuinc-anklet.2024-10-09.private-key.pem:/private-key.pem
     ports: 
       - "8081:8081"
     environment:
-      # - LOG_LEVEL=debug
+      # - LOG_LEVEL=dev
       - ANKLET_CONFIG_FILE_NAME=org-receiver-config.yml
       ##################################################################################
       # ANKLET_GLOBAL_PRIVATE_KEY allows you to use the same private key for all runners
       # instead of defining a different one in the config.yml file for each runner.
       # You can also set it to be the PEM contents, vs pointing to a file.
-      # - ANKLET_GLOBAL_PRIVATE_KEY=/Users/nathanpierce/veertuinc-anklet.2024-07-19.private-key.pem
+      - ANKLET_GLOBAL_PRIVATE_KEY=/private-key.pem
       # - |-
       #   ANKLET_GLOBAL_PRIVATE_KEY=-----BEGIN RSA PRIVATE KEY-----
       #   MIIEpAIBAAKCAQEAyqZDXOEzV5gRocWAhH73chGjn4HBh1UCG2Du4v9JmcjfyYT3
@@ -35,4 +36,10 @@ services:
       # - ANKLET_METRICS_DATABASE_USER=
       # - ANKLET_METRICS_DATABASE_PASSWORD=
       # - ANKLET_METRICS_DATABASE_DATABASE=0
-
+      ##################################################################################
+      # GLOBAL DATABASE ENVs: if set, they will be used instead of the definitions in the config .yml file
+      - ANKLET_GLOBAL_DATABASE_URL=host.docker.internal
+      - ANKLET_GLOBAL_DATABASE_PORT=6379
+      - ANKLET_GLOBAL_DATABASE_USER=
+      - ANKLET_GLOBAL_DATABASE_PASSWORD=
+      - ANKLET_GLOBAL_DATABASE_DATABASE=0

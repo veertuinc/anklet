@@ -30,9 +30,8 @@ func NewClient(ctx context.Context, config config.Database) (*Database, error) {
 
 	logging.DevDebug(ctx, "pinging redis client")
 	ping := rdb.Ping(ctx)
-	if ping.Err() != nil {
-		logging.DevDebug(ctx, fmt.Sprintf("error pinging redis client: %v", ping.Err()))
-		return nil, ping.Err()
+	if ping.Err() != nil && ping.Err().Error() != "" {
+		return nil, errors.New("error pinging redis client: " + ping.Err().Error())
 	}
 	pong, err := ping.Result()
 	if err != nil {

@@ -15,14 +15,19 @@ import (
 type ContextKey string
 
 type Config struct {
-	Plugins          []Plugin `yaml:"plugins"`
-	Log              Log      `yaml:"log"`
-	PidFileDir       string   `yaml:"pid_file_dir"`
-	LogFileDir       string   `yaml:"log_file_dir"`
-	WorkDir          string   `yaml:"work_dir"`
-	Metrics          Metrics  `yaml:"metrics"`
-	GlobalPrivateKey string   `yaml:"global_private_key"`
-	PluginsPath      string   `yaml:"plugins_path"`
+	Plugins                []Plugin `yaml:"plugins"`
+	Log                    Log      `yaml:"log"`
+	PidFileDir             string   `yaml:"pid_file_dir"`
+	LogFileDir             string   `yaml:"log_file_dir"`
+	WorkDir                string   `yaml:"work_dir"`
+	Metrics                Metrics  `yaml:"metrics"`
+	GlobalPrivateKey       string   `yaml:"global_private_key"`
+	PluginsPath            string   `yaml:"plugins_path"`
+	GlobalDatabaseURL      string   `yaml:"global_database_url"`
+	GlobalDatabasePort     int      `yaml:"global_database_port"`
+	GlobalDatabaseUser     string   `yaml:"global_database_user"`
+	GlobalDatabasePassword string   `yaml:"global_database_password"`
+	GlobalDatabaseDatabase int      `yaml:"global_database_database"`
 }
 
 type Log struct {
@@ -43,7 +48,6 @@ type Database struct {
 	User     string `yaml:"user"`
 	Password string `yaml:"password"`
 	Database int    `yaml:"database"`
-	Enabled  bool   `yaml:"enabled"`
 }
 
 type Workflow struct {
@@ -110,10 +114,6 @@ func LoadInEnvs(config Config) (Config, error) {
 		}
 		config.Metrics.SleepInterval = value
 	}
-	envDBEnabled := os.Getenv("ANKLET_METRICS_DATABASE_ENABLED")
-	if envDBEnabled != "" {
-		config.Metrics.Database.Enabled = envDBEnabled == "true"
-	}
 	envDBUser := os.Getenv("ANKLET_METRICS_DATABASE_USER")
 	if envDBUser != "" {
 		config.Metrics.Database.User = envDBUser
@@ -152,6 +152,28 @@ func LoadInEnvs(config Config) (Config, error) {
 	if envGlobalPrivateKey != "" {
 		config.GlobalPrivateKey = envGlobalPrivateKey
 	}
+
+	envGlobalDatabaseURL := os.Getenv("ANKLET_GLOBAL_DATABASE_URL")
+	if envGlobalDatabaseURL != "" {
+		config.GlobalDatabaseURL = envGlobalDatabaseURL
+	}
+	envGlobalDatabasePort := os.Getenv("ANKLET_GLOBAL_DATABASE_PORT")
+	if envGlobalDatabasePort != "" {
+		port, err := strconv.Atoi(envGlobalDatabasePort)
+		if err != nil {
+			return Config{}, err
+		}
+		config.GlobalDatabasePort = port
+	}
+	envGlobalDatabaseUser := os.Getenv("ANKLET_GLOBAL_DATABASE_USER")
+	if envGlobalDatabaseUser != "" {
+		config.GlobalDatabaseUser = envGlobalDatabaseUser
+	}
+	envGlobalDatabasePassword := os.Getenv("ANKLET_GLOBAL_DATABASE_PASSWORD")
+	if envGlobalDatabasePassword != "" {
+		config.GlobalDatabasePassword = envGlobalDatabasePassword
+	}
+
 	// pidFileDir := os.Getenv("ANKLET_PID_FILE_DIR")
 	// if pidFileDir != "" {
 	// 	config.PidFileDir = pidFileDir

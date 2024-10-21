@@ -23,13 +23,12 @@ plugins:
     repo: anklet
     owner: veertuinc
     skip_redeliver: true
-    database:
-      enabled: true
-      url: localhost
-      port: 6379
-      user: ""
-      password: ""
-      database: 0
+    #database:
+    #  url: localhost
+    #  port: 6379
+    #  user: ""
+    #  password: ""
+    #  database: 0
 ```
 
 - If you leave off `repo`, the receiver will be an organization level receiver.

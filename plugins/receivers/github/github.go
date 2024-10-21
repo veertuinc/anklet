@@ -52,8 +52,7 @@ func exists_in_array_exact(array_to_search_in []string, desired []string) bool {
 func InQueue(pluginCtx context.Context, logger *slog.Logger, jobID int64, queue string) (bool, error) {
 	databaseContainer, err := database.GetDatabaseFromContext(pluginCtx)
 	if err != nil {
-		logger.ErrorContext(pluginCtx, "error getting database client from context", "error", err)
-		return false, err
+		logging.Panic(pluginCtx, pluginCtx, "error getting database client from context: "+err.Error())
 	}
 	queued, err := databaseContainer.Client.LRange(pluginCtx, queue, 0, -1).Result()
 	if err != nil {
@@ -147,8 +146,7 @@ func Run(
 
 	databaseContainer, err := database.GetDatabaseFromContext(pluginCtx)
 	if err != nil {
-		logger.ErrorContext(pluginCtx, "error getting database client from context", "error", err)
-		return
+		logging.Panic(pluginCtx, pluginCtx, "error getting database client from context: "+err.Error())
 	}
 	rateLimiter := internalGithub.GetRateLimitWaiterClientFromContext(pluginCtx)
 	httpTransport := config.GetHttpTransportFromContext(pluginCtx)
@@ -164,8 +162,11 @@ func Run(
 		}
 		itr, err := ghinstallation.New(httpTransport, int64(ctxPlugin.AppID), int64(ctxPlugin.InstallationID), privateKey)
 		if err != nil {
-			logger.ErrorContext(pluginCtx, "error creating github app installation token", "err", err)
-			return
+			if strings.Contains(err.Error(), "invalid key") {
+				logging.Panic(pluginCtx, pluginCtx, "error creating github app installation token: "+err.Error()+" (does the key exist on the filesystem?)")
+			} else {
+				logging.Panic(pluginCtx, pluginCtx, "error creating github app installation token: "+err.Error())
+			}
 		}
 		rateLimiter.Transport = itr
 		githubClient = github.NewClient(rateLimiter)
@@ -181,8 +182,7 @@ func Run(
 	http.HandleFunc("/jobs/v1/receiver", func(w http.ResponseWriter, r *http.Request) {
 		databaseContainer, err := database.GetDatabaseFromContext(pluginCtx)
 		if err != nil {
-			logger.ErrorContext(pluginCtx, "error getting database client from context", "error", err)
-			return
+			logging.Panic(pluginCtx, pluginCtx, "error getting database client from context: "+err.Error())
 		}
 		payload, err := github.ValidatePayload(r, []byte(ctxPlugin.Secret))
 		if err != nil {
