@@ -426,6 +426,7 @@ func worker(parentCtx context.Context, logger *slog.Logger, loadedConfig config.
 						metricsData.SetStatus(pluginCtx, logger, "idle")
 						select {
 						case <-time.After(time.Duration(plugin.SleepInterval) * time.Second):
+							fmt.Println("======================================")
 						case <-pluginCtx.Done():
 							logging.DevDebug(pluginCtx, "plugin for loop::default::pluginCtx.Done()")
 							break

@@ -26,22 +26,23 @@ func Plugin(
 		panic("plugin is not set in yaml:plugins:" + ctxPlugin.Name + ":plugin")
 	}
 	if ctxPlugin.Plugin == "github" {
-		for {
+		// for {
+		select {
+		case <-pluginCtx.Done():
+			pluginCancel()
+			return
+		default:
+			// notify the main thread that the service has started
 			select {
-			case <-pluginCtx.Done():
-				pluginCancel()
-				return
+			case <-firstPluginStarted:
 			default:
-				// notify the main thread that the service has started
-				select {
-				case <-firstPluginStarted:
-				default:
-					close(firstPluginStarted)
-				}
-				github.Run(workerCtx, pluginCtx, pluginCancel, logger, metricsData)
-				metricsData.SetStatus(pluginCtx, logger, "idle")
+				close(firstPluginStarted)
 			}
+			github.Run(workerCtx, pluginCtx, pluginCancel, logger, metricsData)
+			// metricsData.SetStatus(pluginCtx, logger, "idle")
+			return // pass back to the main thread/loop
 		}
+		// }
 	} else if ctxPlugin.Plugin == "github_receiver" {
 		github_receiver.Run(workerCtx, pluginCtx, pluginCancel, logger, firstPluginStarted, metricsData)
 	} else {
