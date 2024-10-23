@@ -43,3 +43,5 @@ services:
       - ANKLET_GLOBAL_DATABASE_USER=
       - ANKLET_GLOBAL_DATABASE_PASSWORD=
       - ANKLET_GLOBAL_DATABASE_DATABASE=0
+      # ANKLET_GLOBAL_RECEIVER_SECRET allows you to set a global secret for all receivers
+      # - ANKLET_GLOBAL_RECEIVER_SECRET=12345

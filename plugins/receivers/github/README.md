@@ -11,12 +11,13 @@ The Github Receiver Plugin is used to receive webhook events from github and sto
 In the `config.yml`, you can define the `github_receiver` plugin as follows:
 
 ```
+global_receiver_secret: 12345 # this can be set using the ANKLET_GLOBAL_RECEIVER_SECRET env var too
 plugins:
   - name: GITHUB_RECEIVER
     plugin: github_receiver
     hook_id: 489747753
     port: 54321
-    secret: 123412342
+    # secret: 12345
     private_key: /Users/nathanpierce/veertuinc-anklet.2024-07-19.private-key.pem
     app_id: 949431
     installation_id: 52970581

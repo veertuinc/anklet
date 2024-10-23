@@ -123,6 +123,15 @@ func main() {
 		loadedConfig.WorkDir = "./"
 	}
 
+	// handle global receiver secret
+	if loadedConfig.GlobalReceiverSecret != "" {
+		for index, plugin := range loadedConfig.Plugins {
+			if strings.Contains(plugin.Plugin, "_receiver") {
+				loadedConfig.Plugins[index].Secret = loadedConfig.GlobalReceiverSecret
+			}
+		}
+	}
+
 	logger.DebugContext(parentCtx, "loaded config", slog.Any("config", loadedConfig))
 	parentCtx = context.WithValue(parentCtx, config.ContextKey("config"), &loadedConfig)
 

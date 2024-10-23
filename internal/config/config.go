@@ -28,6 +28,7 @@ type Config struct {
 	GlobalDatabaseUser     string   `yaml:"global_database_user"`
 	GlobalDatabasePassword string   `yaml:"global_database_password"`
 	GlobalDatabaseDatabase int      `yaml:"global_database_database"`
+	GlobalReceiverSecret   string   `yaml:"global_receiver_secret"`
 }
 
 type Log struct {
@@ -172,6 +173,11 @@ func LoadInEnvs(config Config) (Config, error) {
 	envGlobalDatabasePassword := os.Getenv("ANKLET_GLOBAL_DATABASE_PASSWORD")
 	if envGlobalDatabasePassword != "" {
 		config.GlobalDatabasePassword = envGlobalDatabasePassword
+	}
+
+	envGlobalReceiverSecret := os.Getenv("ANKLET_GLOBAL_RECEIVER_SECRET")
+	if envGlobalReceiverSecret != "" {
+		config.GlobalReceiverSecret = envGlobalReceiverSecret
 	}
 
 	// pidFileDir := os.Getenv("ANKLET_PID_FILE_DIR")
