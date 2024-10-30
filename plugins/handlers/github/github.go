@@ -222,7 +222,7 @@ func CheckForCompletedJobs(
 		// BE VERY CAREFUL when you use return here. You could orphan the job if you're not careful.
 		checkForCompletedJobsMu.Lock()
 		// do not use 'continue' in the loop or else the ranOnce won't happen
-		logger.DebugContext(pluginCtx, "CheckForCompletedJobs "+ctxPlugin.Name+" | runOnce "+fmt.Sprint(runOnce))
+		// logging.DevContext(pluginCtx, "CheckForCompletedJobs "+ctxPlugin.Name+" | runOnce "+fmt.Sprint(runOnce))
 		select {
 		case <-failureChannel:
 			// logger.ErrorContext(pluginCtx, "CheckForCompletedJobs"+ctxPlugin.Name+" failureChannel")
@@ -773,7 +773,6 @@ func Run(
 
 		// Install runner
 		globals := config.GetGlobalsFromContext(pluginCtx)
-		logger.InfoContext(pluginCtx, "installing github runner inside of vm")
 		installRunnerPath := filepath.Join(globals.PluginsPath, "handlers", "github", "install-runner.bash")
 		registerRunnerPath := filepath.Join(globals.PluginsPath, "handlers", "github", "register-runner.bash")
 		startRunnerPath := filepath.Join(globals.PluginsPath, "handlers", "github", "start-runner.bash")
@@ -789,6 +788,7 @@ func Run(
 			}
 			return
 		}
+		logger.DebugContext(pluginCtx, "copying install-runner.bash, register-runner.bash, and start-runner.bash to vm")
 		err = ankaCLI.AnkaCopy(pluginCtx,
 			installRunnerPath,
 			registerRunnerPath,
@@ -812,6 +812,7 @@ func Run(
 		default:
 		}
 
+		logger.DebugContext(pluginCtx, "installing github runner inside of vm")
 		installRunnerErr = ankaCLI.AnkaRun(pluginCtx, "./install-runner.bash")
 		if installRunnerErr != nil {
 			logger.ErrorContext(pluginCtx, "error executing install-runner.bash", "err", installRunnerErr)
@@ -829,6 +830,7 @@ func Run(
 			return
 		default:
 		}
+		logger.DebugContext(pluginCtx, "registering github runner inside of vm")
 		registerRunnerErr = ankaCLI.AnkaRun(pluginCtx,
 			"./register-runner.bash",
 			vm.Name, *runnerRegistration.Token, repositoryURL, strings.Join(workflowJob.Labels, ","), ctxPlugin.RunnerGroup,
@@ -850,6 +852,7 @@ func Run(
 			return
 		default:
 		}
+		logger.DebugContext(pluginCtx, "starting github runner inside of vm")
 		startRunnerErr = ankaCLI.AnkaRun(pluginCtx, "./start-runner.bash")
 		if startRunnerErr != nil {
 			logger.ErrorContext(pluginCtx, "error executing start-runner.bash", "err", startRunnerErr)

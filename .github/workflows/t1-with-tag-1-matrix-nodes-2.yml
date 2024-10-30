@@ -1,12 +1,16 @@
-name: 't1-with-tag-1'
+name: 't1-with-tag-1-matrix-nodes-2'
 on:
   workflow_dispatch:
 
 jobs:
-  t1-with-tag-1:
+  t1-with-tag-1-matrix-nodes-2:
+    strategy:
+      matrix:
+        node: ["1", "2"]
     runs-on: [ 
       "anka-template:d792c6f6-198c-470f-9526-9c998efe7ab4", 
       "anka-template-tag:vanilla+port-forward-22+brew-git",
+      "unique-id:${{ github.run_id }}-${{ matrix.node }}",
     ]
     steps:
       - uses: actions/checkout@v3
@@ -15,4 +19,4 @@ jobs:
           sw_vers
           hostname
           echo "123"
-      - run: whoami
+          env

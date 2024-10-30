@@ -26,9 +26,9 @@ func NewClient(ctx context.Context, config config.Database) (*Database, error) {
 		Password: config.Password, // no password set
 		DB:       config.Database, // use default DB,
 	})
-	logging.DevDebug(ctx, fmt.Sprintf("created redis client: %v", rdb))
+	logging.DevContext(ctx, fmt.Sprintf("created redis client: %v", rdb))
 
-	logging.DevDebug(ctx, "pinging redis client")
+	logging.DevContext(ctx, "pinging redis client")
 	ping := rdb.Ping(ctx)
 	if ping.Err() != nil && ping.Err().Error() != "" {
 		return nil, errors.New("error pinging redis client: " + ping.Err().Error())
@@ -38,7 +38,7 @@ func NewClient(ctx context.Context, config config.Database) (*Database, error) {
 		return nil, err
 	}
 
-	logging.DevDebug(ctx, fmt.Sprintf("pinged redis client: %s", pong))
+	logging.DevContext(ctx, fmt.Sprintf("pinged redis client: %s", pong))
 
 	if pong != "PONG" {
 		return nil, fmt.Errorf("unable to connect to Redis, received: %s", pong)

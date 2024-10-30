@@ -167,9 +167,10 @@ func main() {
 	logger.InfoContext(parentCtx, "plugins path", slog.String("pluginsPath", pluginsPath))
 
 	parentCtx = context.WithValue(parentCtx, config.ContextKey("globals"), config.Globals{
-		RunOnce:     runOnce,
-		PullLock:    &sync.Mutex{},
-		PluginsPath: pluginsPath,
+		RunOnce:      runOnce,
+		PullLock:     &sync.Mutex{},
+		PluginsPath:  pluginsPath,
+		DebugEnabled: logging.IsDebugEnabled(),
 	})
 
 	httpTransport := http.DefaultTransport
@@ -364,14 +365,14 @@ func worker(parentCtx context.Context, logger *slog.Logger, loadedConfig config.
 				if plugin.Repo == "" {
 					logger.InfoContext(pluginCtx, "no repo set for plugin; assuming it's an organization level plugin")
 					pluginCtx = context.WithValue(pluginCtx, config.ContextKey("isRepoSet"), false)
-					logging.DevDebug(pluginCtx, "set isRepoSet to false")
+					logging.DevContext(pluginCtx, "set isRepoSet to false")
 				} else {
 					pluginCtx = context.WithValue(pluginCtx, config.ContextKey("isRepoSet"), true)
-					logging.DevDebug(pluginCtx, "set isRepoSet to true")
+					logging.DevContext(pluginCtx, "set isRepoSet to true")
 				}
 
 				if plugin.PrivateKey == "" && loadedConfig.GlobalPrivateKey != "" {
-					logging.DevDebug(pluginCtx, "using global private key")
+					logging.DevContext(pluginCtx, "using global private key")
 					plugin.PrivateKey = loadedConfig.GlobalPrivateKey
 				}
 
@@ -379,7 +380,7 @@ func worker(parentCtx context.Context, logger *slog.Logger, loadedConfig config.
 				pluginCtx = logging.AppendCtx(pluginCtx, slog.String("pluginName", plugin.Name))
 
 				if !strings.Contains(plugin.Plugin, "_receiver") {
-					logging.DevDebug(pluginCtx, "plugin is not a receiver; loading the anka CLI")
+					logging.DevContext(pluginCtx, "plugin is not a receiver; loading the anka CLI")
 					ankaCLI, err := anka.NewCLI(pluginCtx)
 					if err != nil {
 						pluginCancel()
@@ -387,7 +388,7 @@ func worker(parentCtx context.Context, logger *slog.Logger, loadedConfig config.
 						return
 					}
 					pluginCtx = context.WithValue(pluginCtx, config.ContextKey("ankacli"), ankaCLI)
-					logging.DevDebug(pluginCtx, "loaded the anka CLI")
+					logging.DevContext(pluginCtx, "loaded the anka CLI")
 				}
 
 				if databaseURL != "" || plugin.Database.URL != "" {
@@ -398,7 +399,7 @@ func worker(parentCtx context.Context, logger *slog.Logger, loadedConfig config.
 						databasePassword = plugin.Database.Password
 						databaseDatabase = plugin.Database.Database
 					}
-					logging.DevDebug(pluginCtx, "connecting to database")
+					logging.DevContext(pluginCtx, "connecting to database")
 					databaseClient, err := database.NewClient(pluginCtx, config.Database{
 						URL:      databaseURL,
 						Port:     databasePort,
@@ -411,7 +412,7 @@ func worker(parentCtx context.Context, logger *slog.Logger, loadedConfig config.
 					}
 					logger.InfoContext(pluginCtx, "connected to database", slog.Any("database", databaseClient))
 					pluginCtx = context.WithValue(pluginCtx, config.ContextKey("database"), databaseClient)
-					logging.DevDebug(pluginCtx, "connected to database")
+					logging.DevContext(pluginCtx, "connected to database")
 				}
 
 				logger.InfoContext(pluginCtx, "starting plugin")
@@ -419,13 +420,13 @@ func worker(parentCtx context.Context, logger *slog.Logger, loadedConfig config.
 				for {
 					select {
 					case <-pluginCtx.Done():
-						logging.DevDebug(pluginCtx, "plugin for loop::pluginCtx.Done()")
+						logging.DevContext(pluginCtx, "plugin for loop::pluginCtx.Done()")
 						metricsData.SetStatus(pluginCtx, logger, "stopped")
 						logger.WarnContext(pluginCtx, shutDownMessage)
 						pluginCancel()
 						return
 					default:
-						logging.DevDebug(pluginCtx, "plugin for loop::default")
+						// logging.DevContext(pluginCtx, "plugin for loop::default")
 						run.Plugin(workerCtx, pluginCtx, pluginCancel, logger, firstPluginStarted, metricsData)
 						if workerCtx.Err() != nil || toRunOnce == "true" {
 							pluginCancel()
@@ -436,7 +437,7 @@ func worker(parentCtx context.Context, logger *slog.Logger, loadedConfig config.
 						select {
 						case <-time.After(time.Duration(plugin.SleepInterval) * time.Second):
 						case <-pluginCtx.Done():
-							logging.DevDebug(pluginCtx, "plugin for loop::default::pluginCtx.Done()")
+							logging.DevContext(pluginCtx, "plugin for loop::default::pluginCtx.Done()")
 							break
 						}
 					}

@@ -20,10 +20,14 @@ type ContextHandler struct {
 	attrs []slog.Attr
 }
 
+func IsDebugEnabled() bool {
+	return strings.ToUpper(os.Getenv("LOG_LEVEL")) == "DEBUG" || strings.ToUpper(os.Getenv("LOG_LEVEL")) == "DEV"
+}
+
 func New() *slog.Logger {
 	logLevel := os.Getenv("LOG_LEVEL")
 	var options *slog.HandlerOptions
-	if strings.ToUpper(logLevel) == "DEBUG" || strings.ToUpper(logLevel) == "DEV" {
+	if IsDebugEnabled() {
 		handler := &ContextHandler{Handler: NewPrettyHandler(&slog.HandlerOptions{
 			Level:       slog.LevelDebug,
 			AddSource:   true,
@@ -101,7 +105,7 @@ func Panic(workerCtx context.Context, pluginCtx context.Context, errorMessage st
 	panic(errorMessage)
 }
 
-func DevDebug(pluginCtx context.Context, errorMessage string) {
+func DevContext(pluginCtx context.Context, errorMessage string) {
 	if strings.ToUpper(os.Getenv("LOG_LEVEL")) == "DEV" {
 		logger := GetLoggerFromContext(pluginCtx)
 		logger.DebugContext(pluginCtx, errorMessage)

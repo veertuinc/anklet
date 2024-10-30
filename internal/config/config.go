@@ -200,9 +200,10 @@ func GetPluginFromContext(ctx context.Context) Plugin {
 }
 
 type Globals struct {
-	RunOnce     string
-	PullLock    *sync.Mutex
-	PluginsPath string
+	RunOnce      string
+	PullLock     *sync.Mutex
+	PluginsPath  string
+	DebugEnabled bool
 }
 
 func GetGlobalsFromContext(ctx context.Context) Globals {

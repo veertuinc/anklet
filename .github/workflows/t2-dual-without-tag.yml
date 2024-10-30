@@ -5,8 +5,6 @@ on:
 jobs:
   testJob:
     runs-on: [ 
-      "self-hosted", 
-      "anka", 
       "anka-template:d792c6f6-198c-470f-9526-9c998efe7ab4",
     ]
     steps:
@@ -18,8 +16,6 @@ jobs:
           echo "123"
   testJob2:
     runs-on: [ 
-      "self-hosted", 
-      "anka", 
       "anka-template:6abae54f-025d-4a27-b5eb-b985d5eddac9",
     ]
     steps:

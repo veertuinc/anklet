@@ -12,7 +12,7 @@ TRIGGER_RUN_COUNT="${4:-10}"
 
 for ((i=1; i<=TRIGGER_RUN_COUNT; i++)); do
     echo "Triggering run $i"
-    WORKFLOW_FILES=$(ls ./.github/workflows/*.yml | grep -v "check-pr")
+    WORKFLOW_FILES=$(ls ./.github/workflows/*.yml | grep -v "check-pr") # | grep -E "matrix|t1-with-tag-1"
     for FILE in $WORKFLOW_FILES; do
         WORKFLOW_ID=$(basename $FILE)
         curl \

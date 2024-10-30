@@ -3,7 +3,6 @@ package github
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -32,11 +31,11 @@ func NewServer(port string) *Server {
 	}
 }
 
-func exists_in_array_exact(array_to_search_in []string, desired []string) bool {
+func exists_in_array_partial(array_to_search_in []string, desired []string) bool {
 	for _, desired_string := range desired {
 		found := false
 		for _, item := range array_to_search_in {
-			if item == desired_string {
+			if strings.Contains(item, desired_string) {
 				found = true
 				break
 			}
@@ -69,7 +68,8 @@ func InQueue(pluginCtx context.Context, logger *slog.Logger, jobID int64, queue 
 			continue
 		}
 		if *workflowJobEvent.WorkflowJob.ID == jobID {
-			return true, fmt.Errorf("WorkflowJob.ID %d already in queue", jobID)
+			// logger.WarnContext(pluginCtx, "WorkflowJob.ID already in queue", "WorkflowJob.ID", jobID)
+			return true, nil
 		}
 	}
 	return false, nil
@@ -203,9 +203,11 @@ func Run(
 				"workflowJob.Action", *workflowJob.Action,
 				"workflowJob.WorkflowJob.Labels", workflowJob.WorkflowJob.Labels,
 				"workflowJob.WorkflowJob.ID", *workflowJob.WorkflowJob.ID,
+				"workflowJob.WorkflowJob.Name", *workflowJob.WorkflowJob.Name,
+				"workflowJob.WorkflowJob.RunID", *workflowJob.WorkflowJob.RunID,
 			)
 			if *workflowJob.Action == "queued" {
-				if exists_in_array_exact(workflowJob.WorkflowJob.Labels, []string{"self-hosted", "anka"}) {
+				if exists_in_array_partial(workflowJob.WorkflowJob.Labels, []string{"anka-template"}) {
 					// make sure it doesn't already exist
 					inQueue, err := InQueue(pluginCtx, logger, *workflowJob.WorkflowJob.ID, "anklet/jobs/github/queued/"+ctxPlugin.Owner)
 					if err != nil {
@@ -228,11 +230,20 @@ func Run(
 							logger.ErrorContext(pluginCtx, "error pushing job to queue", "error", push.Err())
 							return
 						}
-						logger.InfoContext(pluginCtx, "job pushed to queued queue", "json", string(wrappedPayloadJSON))
+						logger.InfoContext(pluginCtx, "job pushed to queued queue",
+							"workflowJob.ID", *workflowJob.WorkflowJob.ID,
+							"workflowJob.Name", *workflowJob.WorkflowJob.Name,
+							"workflowJob.RunID", *workflowJob.WorkflowJob.RunID,
+							"html_url", *workflowJob.WorkflowJob.HTMLURL,
+							"status", *workflowJob.WorkflowJob.Status,
+							"conclusion", workflowJob.WorkflowJob.Conclusion,
+							"started_at", workflowJob.WorkflowJob.StartedAt,
+							"completed_at", workflowJob.WorkflowJob.CompletedAt,
+						)
 					}
 				}
 			} else if *workflowJob.Action == "completed" {
-				if exists_in_array_exact(workflowJob.WorkflowJob.Labels, []string{"self-hosted", "anka"}) {
+				if exists_in_array_partial(workflowJob.WorkflowJob.Labels, []string{"anka-template"}) {
 
 					queues := []string{}
 					// get all keys from database for the main queue and service queues as well as completed
@@ -242,7 +253,6 @@ func Run(
 						return
 					}
 					queues = append(queues, queuedKeys...)
-
 					results := make(chan bool, len(queues))
 					var wg sync.WaitGroup
 					for _, queue := range queues {
@@ -289,7 +299,16 @@ func Run(
 								logger.ErrorContext(pluginCtx, "error pushing job to queue", "error", push.Err())
 								return
 							}
-							logger.InfoContext(pluginCtx, "job pushed to completed queue", "json", string(wrappedPayloadJSON))
+							logger.InfoContext(pluginCtx, "job pushed to completed queue",
+								"workflowJob.ID", *workflowJob.WorkflowJob.ID,
+								"workflowJob.Name", *workflowJob.WorkflowJob.Name,
+								"workflowJob.RunID", *workflowJob.WorkflowJob.RunID,
+								"html_url", *workflowJob.WorkflowJob.HTMLURL,
+								"status", *workflowJob.WorkflowJob.Status,
+								"conclusion", workflowJob.WorkflowJob.Conclusion,
+								"started_at", workflowJob.WorkflowJob.StartedAt,
+								"completed_at", workflowJob.WorkflowJob.CompletedAt,
+							)
 						}
 					}
 
@@ -414,7 +433,7 @@ func Run(
 						doneWithHooks = true
 						break
 					}
-					if !exists_in_array_exact(workflowJobEvent.WorkflowJob.Labels, []string{"self-hosted", "anka"}) {
+					if !exists_in_array_partial(workflowJobEvent.WorkflowJob.Labels, []string{"anka-template"}) {
 						continue
 					}
 					allHooks = append(allHooks, map[string]interface{}{
