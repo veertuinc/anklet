@@ -77,14 +77,15 @@ func InQueue(pluginCtx context.Context, logger *slog.Logger, jobID int64, queue 
 
 // https://github.com/gofri/go-github-ratelimit has yet to support primary rate limits, so we have to do it ourselves.
 func ExecuteGitHubClientFunction[T any](pluginCtx context.Context, logger *slog.Logger, executeFunc func() (*T, *github.Response, error)) (context.Context, *T, *github.Response, error) {
+	innerPluginCtx, _ := context.WithCancel(pluginCtx) // Inherit from parent context
 	result, response, err := executeFunc()
 	if response != nil {
-		pluginCtx = logging.AppendCtx(pluginCtx, slog.Int("api_limit_remaining", response.Rate.Remaining))
-		pluginCtx = logging.AppendCtx(pluginCtx, slog.String("api_limit_reset_time", response.Rate.Reset.Time.Format(time.RFC3339)))
-		pluginCtx = logging.AppendCtx(pluginCtx, slog.Int("api_limit", response.Rate.Limit))
+		innerPluginCtx = logging.AppendCtx(innerPluginCtx, slog.Int("api_limit_remaining", response.Rate.Remaining))
+		innerPluginCtx = logging.AppendCtx(innerPluginCtx, slog.String("api_limit_reset_time", response.Rate.Reset.Time.Format(time.RFC3339)))
+		innerPluginCtx = logging.AppendCtx(innerPluginCtx, slog.Int("api_limit", response.Rate.Limit))
 		if response.Rate.Remaining <= 10 { // handle primary rate limiting
 			sleepDuration := time.Until(response.Rate.Reset.Time) + time.Second // Adding a second to ensure we're past the reset time
-			logger.WarnContext(pluginCtx, "GitHub API rate limit exceeded, sleeping until reset")
+			logger.WarnContext(innerPluginCtx, "GitHub API rate limit exceeded, sleeping until reset")
 			metricsData := metrics.GetMetricsDataFromContext(pluginCtx)
 			ctxPlugin := config.GetPluginFromContext(pluginCtx)
 			metricsData.UpdatePlugin(pluginCtx, logger, metrics.PluginBase{
