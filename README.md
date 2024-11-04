@@ -449,7 +449,6 @@ Docker images are available at [veertu/anklet](https://hub.docker.com/r/veertu/a
 brew install go
 go mod tidy
 LOG_LEVEL=dev go run main.go
-tail -fF ~/Library/Logs/anklet.log
 ```
 
 The `dev` LOG_LEVEL has colored output with text + pretty printed JSON for easier debugging. Here is an example:
@@ -501,7 +500,7 @@ lrwxr-xr-x  1 nathanpierce  staff    62B Apr  4 16:02 register-runner.bash
 lrwxr-xr-x  1 nathanpierce  staff    59B Apr  4 16:02 start-runner.bash
 ```
 
-Each plugin must have a `{name}.go` file with a `Run` function that takes in `context.Context` and `logger *slog.Logger`. See `github` plugin for an example.
+Each plugin must have a `{name}.go` file with a `Run` function that takes in `context.Context`, `logger *slog.Logger`, etc . See `github` plugin for an example.
 
 The `Run` function should be designed to run multiple times in parallel. It should not rely on any state from the previous runs.
     - Always `return` out of `Run` so the sleep interval and main.go can handle the next run properly with new context. Never loop inside of the plugin code.
