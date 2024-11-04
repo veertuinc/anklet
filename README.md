@@ -448,11 +448,14 @@ Docker images are available at [veertu/anklet](https://hub.docker.com/r/veertu/a
 ```bash
 brew install go
 go mod tidy
-LOG_LEVEL=dev go run main.go
 cd ${REPO_ROOT}
 ln -s ~/.config/anklet/org-config.yml org-config.yml
 ln -s ~/.config/anklet/repo-receiver-config.yml repo-receiver-config.yml
+LOG_LEVEL=dev go run main.go -c org-receiver-config.yml # run the receiver
+LOG_LEVEL=dev go run main.go -c org-config.yml # run the handler
 ```
+
+- **NOTE:** You'll need to change the webhook URL so it points to the public IP of the server running the receiver (for me, that's my ISP's public IP + open port forwarding to my local machine).
 
 The `dev` LOG_LEVEL has colored output with text + pretty printed JSON for easier debugging. Here is an example:
 
