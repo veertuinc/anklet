@@ -1,6 +1,6 @@
-# GITHUB SERVICE PLUGIN
+# GITHUB HANDLER PLUGIN
 
-The Github Service Plugin is responsible for pulling a job from the database/queue, preparing a macOS VM, and registering it to the github repo as an action runner so it can execute the job inside.
+The Github Handler Plugin is responsible for pulling a job from the database/queue, preparing a macOS VM, and registering it to the github repo as an action runner so it can execute the job inside.
 
 Workflow Run Jobs are processed in order of creation. The Github Webhook Receiver Plugin will place the jobs in the database/queue in the order they're created. Be sure to run the [Receiver](../receivers/github) first!
 
