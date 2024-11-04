@@ -57,12 +57,12 @@ Anklet handles VM [Templates/Tags](https://docs.veertu.com/anka/anka-virtualizat
 
 ## Setup Guide
 
-We're going to use github as an example, but the process is similar for other plugins.
+We're going to use Github Actions as an example, but the process is similar for other plugins.
 
-With the github plugin, there is a Receiver Plugin and a Handler Plugin.
+With the Github Actions plugin, there is a **Receiver** Plugin and a **Handler** Plugin.
 
-- The github Receiver Plugin is a web server that listens for webhooks github sends and then places the events in the database/queue. It can run on mac and linux.
-- The github Handler Plugin is responsible for pulling a job from the database/queue, preparing a macOS VM, and registering it to the repo's action runners so it can execute the job inside. It can run on mac as it needs access to the Anka CLI.
+- The Github Actions **Receiver** Plugin is a web server that listens for webhooks Github sends and then places the events in the database/queue. It can run on mac and linux.
+- The Github Actions **Handler** Plugin is responsible for pulling a job from the database/queue, preparing a macOS VM, and registering it to the repo's action runners so it can execute the job inside. It can run on mac as it needs access to the Anka CLI.
 
 ### Anklet Setup
 
