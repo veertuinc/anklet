@@ -10,7 +10,7 @@ Here are the requirements:
 
 While these reasons are specific to Github Actions, they apply to many other CI platforms too. 
 
-Anklet will have a configuration and run custom plugins (written by us or the community) which handle all of the logic necessary to watch/listen for jobs in the specific CI platform. The plugins determine what logic happens host-side to prepare a macOS VM and optionally register it to the CI platform for use. We'll talk more about that below. At the time of writing this, plugins are not idependent, but will eventually be separated.
+Anklet will have a configuration and run custom plugins (written by us or the community) which handle all of the logic necessary to watch/listen for jobs in the specific CI platform. The plugins determine what logic happens host-side to prepare a macOS VM and optionally register it to the CI platform for use. We'll talk more about that below. At the time of writing this, plugins are not independent, but will eventually be separated.
 
 Note: It does not run as root, and will use the current user's space/environment to run VMs. Our Controller will run under `sudo/root`, but we *do not require* that for anklet.
 
