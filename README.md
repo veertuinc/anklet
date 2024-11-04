@@ -15,7 +15,7 @@ Anklet will have a configuration and run custom plugins (written by us or the co
 ### How does it really work?
 
 1. Anklet loads the configuration from the `~/.config/anklet/config.yml` file on the same host. The configuration defines the plugins that will be started.
-    - Each plugin in the config specifies a plugin to load and use, the database (if there is one), and any other specific configuration for that plugin.
+    - Each `plugins:` list item in the config specifies a plugin to load and use, the database (if there is one;optional), and any other specific configuration for that plugin.
 1. Plugins run in parallel, but have separate internal context to avoid collisions.
 1. It supports loading in a database (currently `redis`) to manage state across all of your hosts.
     - The `github` plugin, and likely others, rely on this to prevent race conditions with picking up jobs.
