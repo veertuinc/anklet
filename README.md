@@ -449,6 +449,9 @@ Docker images are available at [veertu/anklet](https://hub.docker.com/r/veertu/a
 brew install go
 go mod tidy
 LOG_LEVEL=dev go run main.go
+cd ${REPO_ROOT}
+ln -s ~/.config/anklet/org-config.yml org-config.yml
+ln -s ~/.config/anklet/repo-receiver-config.yml repo-receiver-config.yml
 ```
 
 The `dev` LOG_LEVEL has colored output with text + pretty printed JSON for easier debugging. Here is an example:
