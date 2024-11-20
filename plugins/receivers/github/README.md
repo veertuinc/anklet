@@ -24,6 +24,7 @@ plugins:
     repo: anklet
     owner: veertuinc
     skip_redeliver: true
+    # redeliver_hours: 24 # default is 24 hours
     #database:
     #  url: localhost
     #  port: 6379
@@ -34,7 +35,7 @@ plugins:
 
 - If you leave off `repo`, the receiver will be an organization level receiver.
 - Note: The receiver must come FIRST in the `plugins:` list. Do not place it after other plugins.
-- On first start, it will scan for failed webhook deliveries for the past 24 hours and send a re-delivery request for each one. This is to ensure that all webhooks are delivered and processed and nothing in your plugins are orphaned or database.
+- **IMPORTANT**: On first start, it will scan for failed webhook deliveries for the past 24 hours and send a re-delivery request for each one. This is to ensure that all webhooks are delivered and processed and nothing in your plugins are orphaned or database. Avoid excessive restarts or else you'll eat up your API limits quickly. You can use `skip_redeliver: true` to disable this behavior.
 
 ---
 
@@ -62,7 +63,6 @@ The following logic consumes [API limits](https://docs.github.com/en/rest/using-
   - Requesting all hook deliveries for the past 24 hours.
   - To get verbose information for each hook delivery that's `in_progress` still.
   - Then again to post the redelivery request if all other conditions are met indicating it was orphaned.
-
 
 ---
 

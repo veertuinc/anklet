@@ -123,10 +123,13 @@ func main() {
 		loadedConfig.WorkDir = "./"
 	}
 
-	// handle global receiver secret
-	if loadedConfig.GlobalReceiverSecret != "" {
-		for index, plugin := range loadedConfig.Plugins {
-			if strings.Contains(plugin.Plugin, "_receiver") {
+	// Handle setting defaults for receiver plugins
+	for index, plugin := range loadedConfig.Plugins {
+		if strings.Contains(plugin.Plugin, "_receiver") {
+			if plugin.RedeliverHours == 0 {
+				loadedConfig.Plugins[index].RedeliverHours = 24
+			}
+			if loadedConfig.GlobalReceiverSecret != "" {
 				loadedConfig.Plugins[index].Secret = loadedConfig.GlobalReceiverSecret
 			}
 		}

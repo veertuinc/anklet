@@ -3,6 +3,7 @@ package github
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -77,7 +78,8 @@ func InQueue(pluginCtx context.Context, logger *slog.Logger, jobID int64, queue 
 
 // https://github.com/gofri/go-github-ratelimit has yet to support primary rate limits, so we have to do it ourselves.
 func ExecuteGitHubClientFunction[T any](pluginCtx context.Context, logger *slog.Logger, executeFunc func() (*T, *github.Response, error)) (context.Context, *T, *github.Response, error) {
-	innerPluginCtx, _ := context.WithCancel(pluginCtx) // Inherit from parent context
+	innerPluginCtx, cancel := context.WithCancel(pluginCtx) // Inherit from parent context
+	defer cancel()
 	result, response, err := executeFunc()
 	if response != nil {
 		innerPluginCtx = logging.AppendCtx(innerPluginCtx, slog.Int("api_limit_remaining", response.Rate.Remaining))
@@ -367,10 +369,11 @@ func Run(
 		// Redeliver queued jobs
 		githubWrapperClient := internalGithub.NewGitHubClientWrapper(githubClient)
 		pluginCtx = context.WithValue(pluginCtx, config.ContextKey("githubwrapperclient"), githubWrapperClient)
-		limitForHooks := time.Now().Add(-time.Hour * 24) // the time we want the stop search for redeliveries
+		fmt.Println("ctxPlugin.RedeliverHours", ctxPlugin.RedeliverHours)
+		limitForHooks := time.Now().Add(-time.Hour * time.Duration(ctxPlugin.RedeliverHours)) // the time we want the stop search for redeliveries
 		opts := &github.ListCursorOptions{PerPage: 10}
 		doneWithHooks := false
-		logger.InfoContext(pluginCtx, "listing hook deliveries to see if any need redelivery (may take a while)...")
+		logger.InfoContext(pluginCtx, fmt.Sprintf("listing hook deliveries for the last %d hours to see if any need redelivery (may take a while)...", ctxPlugin.RedeliverHours))
 		for {
 			var hookDeliveries *[]*github.HookDelivery
 			var response *github.Response

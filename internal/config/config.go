@@ -74,6 +74,7 @@ type Plugin struct {
 	HookID         int64    `yaml:"hook_id"`
 	SkipRedeliver  bool     `yaml:"skip_redeliver"`
 	RunnerGroup    string   `yaml:"runner_group"`
+	RedeliverHours int      `yaml:"redeliver_hours"`
 }
 
 func LoadConfig(configPath string) (Config, error) {
