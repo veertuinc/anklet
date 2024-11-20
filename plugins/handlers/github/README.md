@@ -79,6 +79,9 @@ Finally, the `github` plugin requires three different bash scripts available on 
 ## API LIMITS
 
 The following logic consumes [API limits](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api?apiVersion=2022-11-28). Should you run out, all processing will pause until the limits are reset after the specific github duration and then resume where it left off.
-  - Obtaining a registration token.
-  - Should the runner be orphaned and not have been shut down cleanly so it unregistred itself, we will send a removal request.
-  - Should the job request a template or tag that doesn't exist, we need to forcefully cancel the job in github or else other anklets will attempt processing indefinitely.
+
+  1. Obtaining a registration token. (single call)
+  2. Should the job request a template or tag that doesn't exist, we need to forcefully cancel the job in github or else other anklets will attempt processing indefinitely. (one call to check if already cancelled, one to cancel)
+  3. Should the runner be orphaned and not have been shut down cleanly so it unregistred itself, we will send a removal request. It can not happen with #2. (one to check if already removed, one to remove)
+
+This means in the worst case scenario it could make a total of 3 api calls total.
