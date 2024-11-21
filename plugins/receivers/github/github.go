@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/bradleyfalzon/ghinstallation/v2"
-	"github.com/google/go-github/v63/github"
+	"github.com/google/go-github/v66/github"
 	"github.com/veertuinc/anklet/internal/config"
 	"github.com/veertuinc/anklet/internal/database"
 	internalGithub "github.com/veertuinc/anklet/internal/github"
@@ -363,7 +363,122 @@ func Run(
 		}
 	}()
 
-	var allHooks []map[string]interface{}
+	// var allHooks []map[string]interface{}
+
+	/// OLD STUFF
+
+	// if !ctxPlugin.SkipRedeliver {
+	// 	// Redeliver queued jobs
+	// 	githubWrapperClient := internalGithub.NewGitHubClientWrapper(githubClient)
+	// 	pluginCtx = context.WithValue(pluginCtx, config.ContextKey("githubwrapperclient"), githubWrapperClient)
+	// 	limitForHooks := time.Now().Add(-time.Hour * time.Duration(ctxPlugin.RedeliverHours)) // the time we want the stop search for redeliveries
+	// 	opts := &github.ListCursorOptions{PerPage: 10}
+	// 	logger.InfoContext(pluginCtx, fmt.Sprintf("listing hook deliveries for the last %d hours to see if any need redelivery (may take a while)...", ctxPlugin.RedeliverHours))
+	// 	reachedLimitTime := false
+
+	// 	for {
+	// 		if reachedLimitTime {
+	// 			break
+	// 		}
+	// 		var hookDeliveries *[]*github.HookDelivery
+	// 		var response *github.Response
+	// 		var err error
+	// 		if isRepoSet {
+	// 			pluginCtx, hookDeliveries, response, err = ExecuteGitHubClientFunction(pluginCtx, logger, func() (*[]*github.HookDelivery, *github.Response, error) {
+	// 				hookDeliveries, response, err := githubClient.Repositories.ListHookDeliveries(pluginCtx, ctxPlugin.Owner, ctxPlugin.Repo, ctxPlugin.HookID, opts)
+	// 				if err != nil {
+	// 					return nil, nil, err
+	// 				}
+	// 				return &hookDeliveries, response, nil
+	// 			})
+	// 		} else {
+	// 			pluginCtx, hookDeliveries, response, err = ExecuteGitHubClientFunction(pluginCtx, logger, func() (*[]*github.HookDelivery, *github.Response, error) {
+	// 				hookDeliveries, response, err := githubClient.Organizations.ListHookDeliveries(pluginCtx, ctxPlugin.Owner, ctxPlugin.HookID, opts)
+	// 				if err != nil {
+	// 					return nil, nil, err
+	// 				}
+	// 				return &hookDeliveries, response, nil
+	// 			})
+	// 		}
+	// 		if err != nil {
+	// 			logger.ErrorContext(pluginCtx, "error listing hooks", "err", err)
+	// 			return
+	// 		}
+
+	// 		// // Filter out any objects in hookDeliveries that have status_code != 200
+	// 		// var failedHookDeliveries []*github.HookDelivery
+	// 		// for _, hookDelivery := range *hookDeliveries {
+	// 		// 	if hookDelivery.StatusCode != nil && *hookDelivery.StatusCode != 200 {
+	// 		// 		failedHookDeliveries = append(failedHookDeliveries, hookDelivery)
+	// 		// 	}
+	// 		// }
+
+	// 		// // Pretty print hookDeliveries
+	// 		// hookDeliveriesJSON, err := json.MarshalIndent(failedHookDeliveries, "", "  ")
+	// 		// if err != nil {
+	// 		// 	logger.ErrorContext(pluginCtx, "error marshalling hook deliveries to JSON", "err", err)
+	// 		// 	return
+	// 		// }
+	// 		// fmt.Println("Hook Deliveries:", string(hookDeliveriesJSON))
+
+	// 		for _, hookDelivery := range *hookDeliveries {
+	// 			if hookDelivery.Action == nil { // this prevents webhooks like the ping which might be in the list from causing errors since they dont have an action
+	// 				continue
+	// 			}
+	// 			fmt.Println("hookDelivery", hookDelivery)
+	// 			if limitForHooks.After(hookDelivery.DeliveredAt.Time) {
+	// 				fmt.Println("reached end of time")
+	// 				reachedLimitTime = true
+	// 				break
+	// 			}
+	// 			if hookDelivery.StatusCode != nil && !*hookDelivery.Redelivery && *hookDelivery.Action != "in_progress" {
+	// 				var gottenHookDelivery *github.HookDelivery
+	// 				var err error
+	// 				if isRepoSet {
+	// 					pluginCtx, gottenHookDelivery, _, err = ExecuteGitHubClientFunction(pluginCtx, logger, func() (*github.HookDelivery, *github.Response, error) {
+	// 						gottenHookDelivery, response, err := githubClient.Repositories.GetHookDelivery(pluginCtx, ctxPlugin.Owner, ctxPlugin.Repo, ctxPlugin.HookID, *hookDelivery.ID)
+	// 						if err != nil {
+	// 							return nil, nil, err
+	// 						}
+	// 						return gottenHookDelivery, response, nil
+	// 					})
+	// 				} else {
+	// 					pluginCtx, gottenHookDelivery, _, err = ExecuteGitHubClientFunction(pluginCtx, logger, func() (*github.HookDelivery, *github.Response, error) {
+	// 						gottenHookDelivery, response, err := githubClient.Organizations.GetHookDelivery(pluginCtx, ctxPlugin.Owner, ctxPlugin.HookID, *hookDelivery.ID)
+	// 						if err != nil {
+	// 							return nil, nil, err
+	// 						}
+	// 						return gottenHookDelivery, response, nil
+	// 					})
+	// 				}
+	// 				if err != nil {
+	// 					logger.ErrorContext(pluginCtx, "error listing hooks", "err", err)
+	// 					return
+	// 				}
+	// 				var workflowJobEvent github.WorkflowJobEvent
+	// 				err = json.Unmarshal(*gottenHookDelivery.Request.RawPayload, &workflowJobEvent)
+	// 				if err != nil {
+	// 					logger.ErrorContext(pluginCtx, "error unmarshalling hook request raw payload to HookResponse", "err", err)
+	// 					return
+	// 				}
+	// 				if !exists_in_array_partial(workflowJobEvent.WorkflowJob.Labels, []string{"anka-template"}) {
+	// 					continue
+	// 				}
+	// 				allHooks = append(allHooks, map[string]interface{}{
+	// 					"hookDelivery":     gottenHookDelivery,
+	// 					"workflowJobEvent": workflowJobEvent,
+	// 				})
+	// 			}
+	// 		}
+	// 		if response.Cursor == "" {
+	// 			break
+	// 		}
+	// 		opts.Cursor = response.Cursor
+	// 	}
+	// }
+
+	var hookDeliveries *[]*github.HookDelivery
+	toRedeliver := []*github.HookDelivery{}
 
 	if !ctxPlugin.SkipRedeliver {
 		// Redeliver queued jobs
@@ -371,89 +486,65 @@ func Run(
 		pluginCtx = context.WithValue(pluginCtx, config.ContextKey("githubwrapperclient"), githubWrapperClient)
 		limitForHooks := time.Now().Add(-time.Hour * time.Duration(ctxPlugin.RedeliverHours)) // the time we want the stop search for redeliveries
 		opts := &github.ListCursorOptions{PerPage: 10}
-		doneWithHooks := false
 		logger.InfoContext(pluginCtx, fmt.Sprintf("listing hook deliveries for the last %d hours to see if any need redelivery (may take a while)...", ctxPlugin.RedeliverHours))
-		for {
-			var hookDeliveries *[]*github.HookDelivery
-			var response *github.Response
-			var err error
-			if isRepoSet {
-				pluginCtx, hookDeliveries, response, err = ExecuteGitHubClientFunction(pluginCtx, logger, func() (*[]*github.HookDelivery, *github.Response, error) {
-					hookDeliveries, response, err := githubClient.Repositories.ListHookDeliveries(pluginCtx, ctxPlugin.Owner, ctxPlugin.Repo, ctxPlugin.HookID, opts)
-					if err != nil {
-						return nil, nil, err
-					}
-					return &hookDeliveries, response, nil
-				})
-			} else {
-				pluginCtx, hookDeliveries, response, err = ExecuteGitHubClientFunction(pluginCtx, logger, func() (*[]*github.HookDelivery, *github.Response, error) {
-					hookDeliveries, response, err := githubClient.Organizations.ListHookDeliveries(pluginCtx, ctxPlugin.Owner, ctxPlugin.HookID, opts)
-					if err != nil {
-						return nil, nil, err
-					}
-					return &hookDeliveries, response, nil
-				})
-			}
-			if err != nil {
-				logger.ErrorContext(pluginCtx, "error listing hooks", "err", err)
-				return
-			}
-			for _, hookDelivery := range *hookDeliveries {
-				if hookDelivery.Action == nil { // this prevents webhooks like the ping which might be in the list from causing errors since they dont have an action
-					continue
+		// var response *github.Response
+		var err error
+		if isRepoSet {
+			pluginCtx, hookDeliveries, _, err = ExecuteGitHubClientFunction(pluginCtx, logger, func() (*[]*github.HookDelivery, *github.Response, error) {
+				hookDeliveries, response, err := githubClient.Repositories.ListHookDeliveries(pluginCtx, ctxPlugin.Owner, ctxPlugin.Repo, ctxPlugin.HookID, opts)
+				if err != nil {
+					return nil, nil, err
 				}
-				if hookDelivery.StatusCode != nil && !*hookDelivery.Redelivery && *hookDelivery.Action != "in_progress" {
-					var gottenHookDelivery *github.HookDelivery
-					var err error
-					if isRepoSet {
-						pluginCtx, gottenHookDelivery, _, err = ExecuteGitHubClientFunction(pluginCtx, logger, func() (*github.HookDelivery, *github.Response, error) {
-							gottenHookDelivery, response, err := githubClient.Repositories.GetHookDelivery(pluginCtx, ctxPlugin.Owner, ctxPlugin.Repo, ctxPlugin.HookID, *hookDelivery.ID)
-							if err != nil {
-								return nil, nil, err
-							}
-							return gottenHookDelivery, response, nil
-						})
-					} else {
-						pluginCtx, gottenHookDelivery, _, err = ExecuteGitHubClientFunction(pluginCtx, logger, func() (*github.HookDelivery, *github.Response, error) {
-							gottenHookDelivery, response, err := githubClient.Organizations.GetHookDelivery(pluginCtx, ctxPlugin.Owner, ctxPlugin.HookID, *hookDelivery.ID)
-							if err != nil {
-								return nil, nil, err
-							}
-							return gottenHookDelivery, response, nil
-						})
-					}
-					if err != nil {
-						logger.ErrorContext(pluginCtx, "error listing hooks", "err", err)
-						return
-					}
-					var workflowJobEvent github.WorkflowJobEvent
-					err = json.Unmarshal(*gottenHookDelivery.Request.RawPayload, &workflowJobEvent)
-					if err != nil {
-						logger.ErrorContext(pluginCtx, "error unmarshalling hook request raw payload to HookResponse", "err", err)
-						return
-					}
-					if len(allHooks) > 0 && limitForHooks.After(gottenHookDelivery.DeliveredAt.Time) {
-						doneWithHooks = true
-						break
-					}
-					if !exists_in_array_partial(workflowJobEvent.WorkflowJob.Labels, []string{"anka-template"}) {
-						continue
-					}
-					allHooks = append(allHooks, map[string]interface{}{
-						"hookDelivery":     gottenHookDelivery,
-						"workflowJobEvent": workflowJobEvent,
-					})
+				return &hookDeliveries, response, nil
+			})
+		} else {
+			pluginCtx, hookDeliveries, _, err = ExecuteGitHubClientFunction(pluginCtx, logger, func() (*[]*github.HookDelivery, *github.Response, error) {
+				hookDeliveries, response, err := githubClient.Organizations.ListHookDeliveries(pluginCtx, ctxPlugin.Owner, ctxPlugin.HookID, opts)
+				if err != nil {
+					return nil, nil, err
 				}
-			}
-			if response.Cursor == "" || doneWithHooks {
-				break
-			}
-			opts.Cursor = response.Cursor
+				return &hookDeliveries, response, nil
+			})
+		}
+		if err != nil {
+			logger.ErrorContext(pluginCtx, "error listing hooks", "err", err)
+			return
 		}
 
+		for _, hookDelivery := range *hookDeliveries {
+			if hookDelivery.Action == nil { // this prevents webhooks like the ping which might be in the list from causing errors since they dont have an action
+				continue
+			}
+			if limitForHooks.After(hookDelivery.DeliveredAt.Time) {
+				// fmt.Println("reached end of time")
+				break
+			}
+			if hookDelivery.StatusCode != nil && *hookDelivery.StatusCode != 200 && !*hookDelivery.Redelivery && *hookDelivery.Action != "in_progress" {
+				// fmt.Println("NEED: ", hookDelivery)
+				var found *github.HookDelivery
+				for _, otherHookDelivery := range *hookDeliveries {
+					if hookDelivery.ID != nil && otherHookDelivery.ID != nil && *hookDelivery.ID != *otherHookDelivery.ID &&
+						otherHookDelivery.GUID != nil && hookDelivery.GUID != nil && *otherHookDelivery.GUID == *hookDelivery.GUID &&
+						otherHookDelivery.Redelivery != nil && *otherHookDelivery.Redelivery &&
+						otherHookDelivery.DeliveredAt.Time.After(hookDelivery.DeliveredAt.Time) {
+						found = otherHookDelivery
+						break
+					}
+				}
+				if found != nil {
+					// fmt.Println("FOUND :", found)
+					continue
+				} else {
+					// schedule for redelivery
+					toRedeliver = append(toRedeliver, hookDelivery)
+					// fmt.Println("NOT FOUND: ", hookDelivery)
+				}
+			}
+		}
 	}
 
-	// get all keys from database for the main queue and service queues as well as completed
+	// if len(allHooks) > 0 {
+	// 	// get all keys from database for the main queue and service queues as well as completed
 	queuedKeys, err := databaseContainer.Client.Keys(pluginCtx, "anklet/jobs/github/queued/"+ctxPlugin.Owner+"*").Result()
 	if err != nil {
 		logger.ErrorContext(pluginCtx, "error getting list of keys", "err", err)
@@ -483,37 +574,91 @@ func Run(
 		allCompletedJobs[key] = completedJobs
 	}
 
-	if len(allHooks) > 0 {
-	MainLoop:
-		for i := len(allHooks) - 1; i >= 0; i-- { // make sure we process/redeliver queued before completed
-			hookWrapper := allHooks[i]
-			hookDelivery := hookWrapper["hookDelivery"].(*github.HookDelivery)
-			workflowJobEvent := hookWrapper["workflowJobEvent"].(github.WorkflowJobEvent)
+MainLoop:
+	for i := len(toRedeliver) - 1; i >= 0; i-- { // make sure we process/redeliver queued before completed
+		hookDelivery := toRedeliver[i]
 
-			inQueued := false
-			// inQueuedListKey := ""
-			// inQueuedListIndex := 0
-			inCompleted := false
-			inCompletedListKey := ""
-			inCompletedIndex := 0
+		var gottenHookDelivery *github.HookDelivery
+		var err error
+		if isRepoSet {
+			pluginCtx, gottenHookDelivery, _, err = ExecuteGitHubClientFunction(pluginCtx, logger, func() (*github.HookDelivery, *github.Response, error) {
+				gottenHookDelivery, response, err := githubClient.Repositories.GetHookDelivery(pluginCtx, ctxPlugin.Owner, ctxPlugin.Repo, ctxPlugin.HookID, *hookDelivery.ID)
+				if err != nil {
+					return nil, nil, err
+				}
+				return gottenHookDelivery, response, nil
+			})
+		} else {
+			pluginCtx, gottenHookDelivery, _, err = ExecuteGitHubClientFunction(pluginCtx, logger, func() (*github.HookDelivery, *github.Response, error) {
+				gottenHookDelivery, response, err := githubClient.Organizations.GetHookDelivery(pluginCtx, ctxPlugin.Owner, ctxPlugin.HookID, *hookDelivery.ID)
+				if err != nil {
+					return nil, nil, err
+				}
+				return gottenHookDelivery, response, nil
+			})
+		}
+		if err != nil {
+			logger.ErrorContext(pluginCtx, "error listing hooks", "err", err)
+			return
+		}
+		var workflowJobEvent github.WorkflowJobEvent
+		err = json.Unmarshal(*gottenHookDelivery.Request.RawPayload, &workflowJobEvent)
+		if err != nil {
+			logger.ErrorContext(pluginCtx, "error unmarshalling hook request raw payload to HookResponse", "err", err)
+			return
+		}
 
-			// logger.DebugContext(pluginCtx, "hookDelivery", "hookDelivery", hookDelivery)
-			// logger.DebugContext(pluginCtx, "workflowJobEvent", "workflowJobEvent", workflowJobEvent)
+		inQueued := false
+		// inQueuedListKey := ""
+		// inQueuedListIndex := 0
+		inCompleted := false
+		inCompletedListKey := ""
+		inCompletedIndex := 0
 
-			// Check if the job is already in the queue
-			if workflowJobEvent.WorkflowJob == nil || workflowJobEvent.WorkflowJob.ID == nil {
-				logger.WarnContext(pluginCtx, "WorkflowJob or WorkflowJob.ID is nil")
-				continue
+		// logger.DebugContext(pluginCtx, "hookDelivery", "hookDelivery", hookDelivery)
+		// logger.DebugContext(pluginCtx, "workflowJobEvent", "workflowJobEvent", workflowJobEvent)
+
+		// Check if the job is already in the queue
+		if workflowJobEvent.WorkflowJob == nil || workflowJobEvent.WorkflowJob.ID == nil {
+			logger.WarnContext(pluginCtx, "WorkflowJob or WorkflowJob.ID is nil")
+			continue
+		}
+
+		// Queued deliveries
+		// // always get queued jobs so that completed cleanup (when there is no queued but there is a completed) works
+		for _, queuedJobs := range allQueuedJobs {
+			for _, queuedJob := range queuedJobs {
+				if queuedJob == "" {
+					continue
+				}
+				wrappedPayload, err, typeErr := database.UnwrapPayload[github.WorkflowJobEvent](queuedJob)
+				if err != nil {
+					logger.ErrorContext(pluginCtx, "error unmarshalling job", "err", err)
+					return
+				}
+				if typeErr != nil { // not the type we want
+					continue
+				}
+				if wrappedPayload.WorkflowJob.ID == nil {
+					continue
+				}
+				if workflowJobEvent.WorkflowJob.ID == nil {
+					continue
+				}
+				if *wrappedPayload.WorkflowJob.ID == *workflowJobEvent.WorkflowJob.ID {
+					inQueued = true
+					// inQueuedListKey = key
+					// inQueuedListIndex = index
+					break
+				}
 			}
+		}
 
-			// Queued deliveries
-			// // always get queued jobs so that completed cleanup (when there is no queued but there is a completed) works
-			for _, queuedJobs := range allQueuedJobs {
-				for _, queuedJob := range queuedJobs {
-					if queuedJob == "" {
-						continue
-					}
-					wrappedPayload, err, typeErr := database.UnwrapPayload[github.WorkflowJobEvent](queuedJob)
+		// Completed deliveries
+		if *hookDelivery.Action == "completed" {
+			for key, completedJobs := range allCompletedJobs {
+				for index, completedJob := range completedJobs {
+					wrappedPayload, err, typeErr := database.UnwrapPayload[github.WorkflowJobEvent](completedJob)
 					if err != nil {
 						logger.ErrorContext(pluginCtx, "error unmarshalling job", "err", err)
 						return
@@ -521,110 +666,114 @@ func Run(
 					if typeErr != nil { // not the type we want
 						continue
 					}
-					if wrappedPayload.WorkflowJob.ID == nil {
-						continue
-					}
-					if workflowJobEvent.WorkflowJob.ID == nil {
-						continue
-					}
 					if *wrappedPayload.WorkflowJob.ID == *workflowJobEvent.WorkflowJob.ID {
-						inQueued = true
-						// inQueuedListKey = key
-						// inQueuedListIndex = index
+						inCompleted = true
+						inCompletedListKey = key
+						inCompletedIndex = index
 						break
 					}
 				}
 			}
+		}
 
-			// Completed deliveries
-			if *hookDelivery.Action == "completed" {
-				for key, completedJobs := range allCompletedJobs {
-					for index, completedJob := range completedJobs {
-						wrappedPayload, err, typeErr := database.UnwrapPayload[github.WorkflowJobEvent](completedJob)
-						if err != nil {
-							logger.ErrorContext(pluginCtx, "error unmarshalling job", "err", err)
-							return
-						}
-						if typeErr != nil { // not the type we want
-							continue
-						}
-						if *wrappedPayload.WorkflowJob.ID == *workflowJobEvent.WorkflowJob.ID {
-							inCompleted = true
-							inCompletedListKey = key
-							inCompletedIndex = index
-							break
-						}
+		// if in queued, but also has completed; continue and do nothing
+		if inQueued && inCompleted {
+			continue
+		}
+
+		// if in completed, but has no queued; remove from completed db
+		if inCompleted && !inQueued {
+			_, err = databaseContainer.Client.LRem(pluginCtx, inCompletedListKey, 1, allCompletedJobs[inCompletedListKey][inCompletedIndex]).Result()
+			if err != nil {
+				logger.ErrorContext(pluginCtx, "error removing completedJob from anklet/jobs/github/completed/"+ctxPlugin.Owner, "err", err, "completedJob", allCompletedJobs[inCompletedListKey][inCompletedIndex])
+				return
+			}
+			continue
+		}
+
+		// handle queued that have already been successfully delivered before.
+		if *hookDelivery.Action == "queued" {
+			// check if a completed hook exists, so we don't re-queue something already finished
+			for _, otherHookDelivery := range *hookDeliveries {
+				if *otherHookDelivery.Action == "completed" &&
+					otherHookDelivery.DeliveredAt != nil && otherHookDelivery.DeliveredAt.Time.After(hookDelivery.DeliveredAt.Time) &&
+					otherHookDelivery.RepositoryID != nil && *otherHookDelivery.RepositoryID == *hookDelivery.RepositoryID {
+					var otherGottenHookDelivery *github.HookDelivery
+					var err error
+					if isRepoSet {
+						pluginCtx, otherGottenHookDelivery, _, err = ExecuteGitHubClientFunction(pluginCtx, logger, func() (*github.HookDelivery, *github.Response, error) {
+							otherGottenHookDelivery, response, err := githubClient.Repositories.GetHookDelivery(pluginCtx, ctxPlugin.Owner, ctxPlugin.Repo, ctxPlugin.HookID, *hookDelivery.ID)
+							if err != nil {
+								return nil, nil, err
+							}
+							return otherGottenHookDelivery, response, nil
+						})
+					} else {
+						pluginCtx, otherGottenHookDelivery, _, err = ExecuteGitHubClientFunction(pluginCtx, logger, func() (*github.HookDelivery, *github.Response, error) {
+							otherGottenHookDelivery, response, err := githubClient.Organizations.GetHookDelivery(pluginCtx, ctxPlugin.Owner, ctxPlugin.HookID, *hookDelivery.ID)
+							if err != nil {
+								return nil, nil, err
+							}
+							return otherGottenHookDelivery, response, nil
+						})
 					}
-				}
-			}
-
-			// if in queued, but also has completed; continue and do nothing
-			if inQueued && inCompleted {
-				continue
-			}
-
-			// if in completed, but has no queued; remove from completed db
-			if inCompleted && !inQueued {
-				_, err = databaseContainer.Client.LRem(pluginCtx, inCompletedListKey, 1, allCompletedJobs[inCompletedListKey][inCompletedIndex]).Result()
-				if err != nil {
-					logger.ErrorContext(pluginCtx, "error removing completedJob from anklet/jobs/github/completed/"+ctxPlugin.Owner, "err", err, "completedJob", allCompletedJobs[inCompletedListKey][inCompletedIndex])
-					return
-				}
-				continue
-			}
-
-			// handle queued that have already been successfully delivered before.
-			if *hookDelivery.Action == "queued" {
-				// check if a completed hook exists, so we don't re-queue something already finished
-				for _, job := range allHooks {
-					otherHookDelivery := job["hookDelivery"].(*github.HookDelivery)
-					otherWorkflowJobEvent := job["workflowJobEvent"].(github.WorkflowJobEvent)
-					if *otherHookDelivery.Action == "completed" && *workflowJobEvent.WorkflowJob.ID == *otherWorkflowJobEvent.WorkflowJob.ID {
+					if err != nil {
+						logger.ErrorContext(pluginCtx, "error listing hooks", "err", err)
+						return
+					}
+					var otherWorkflowJobEvent github.WorkflowJobEvent
+					err = json.Unmarshal(*otherGottenHookDelivery.Request.RawPayload, &otherWorkflowJobEvent)
+					if err != nil {
+						logger.ErrorContext(pluginCtx, "error unmarshalling hook request raw payload to HookResponse", "err", err)
+						return
+					}
+					if *workflowJobEvent.WorkflowJob.ID == *otherWorkflowJobEvent.WorkflowJob.ID {
 						continue MainLoop
 					}
 				}
 			}
-
-			// if in queued, and also has a successful completed, something is wrong and we need to re-deliver it.
-			if *hookDelivery.Action == "completed" && inQueued && *hookDelivery.StatusCode == 200 && !inCompleted {
-				logger.InfoContext(pluginCtx, "hook delivery has completed but is still in queued; redelivering")
-			} else if *hookDelivery.StatusCode == 200 || inCompleted { // all other cases (like when it's queued); continue
-				continue
-			}
-
-			// Note; We cannot (and probably should not) stop completed from being redelivered.
-
-			// Redeliver the hook
-			var redelivery *github.HookDelivery
-			if isRepoSet {
-				pluginCtx, redelivery, _, _ = ExecuteGitHubClientFunction(pluginCtx, logger, func() (*github.HookDelivery, *github.Response, error) {
-					redelivery, response, err := githubClient.Repositories.RedeliverHookDelivery(pluginCtx, ctxPlugin.Owner, ctxPlugin.Repo, ctxPlugin.HookID, *hookDelivery.ID)
-					if err != nil {
-						return nil, nil, err
-					}
-					return redelivery, response, nil
-				})
-			} else {
-				pluginCtx, redelivery, _, _ = ExecuteGitHubClientFunction(pluginCtx, logger, func() (*github.HookDelivery, *github.Response, error) {
-					redelivery, response, err := githubClient.Organizations.RedeliverHookDelivery(pluginCtx, ctxPlugin.Owner, ctxPlugin.HookID, *hookDelivery.ID)
-					if err != nil {
-						return nil, nil, err
-					}
-					return redelivery, response, nil
-				})
-			}
-			// err doesn't matter here and it will always throw "job scheduled on GitHub side; try again later"
-			logger.InfoContext(pluginCtx, "hook redelivered",
-				"redelivery", redelivery,
-				"hookDelivery.GUID", *hookDelivery.GUID,
-				"workflowJobEvent.WorkflowJob.ID", *workflowJobEvent.WorkflowJob.ID,
-				"hookDelivery.Action", *hookDelivery.Action,
-				"hookDelivery.StatusCode", *hookDelivery.StatusCode,
-				"hookDelivery.Redelivery", *hookDelivery.Redelivery,
-				"inCompleted", inCompleted,
-			)
 		}
+
+		// if in queued, and also has a successful completed, something is wrong and we need to re-deliver it.
+		if *hookDelivery.Action == "completed" && inQueued && *hookDelivery.StatusCode == 200 && !inCompleted {
+			logger.InfoContext(pluginCtx, "hook delivery has completed but is still in queued; redelivering")
+		} else if *hookDelivery.StatusCode == 200 || inCompleted { // all other cases (like when it's queued); continue
+			continue
+		}
+
+		// Note; We cannot (and probably should not) stop completed from being redelivered.
+
+		// Redeliver the hook
+		var redelivery *github.HookDelivery
+		if isRepoSet {
+			pluginCtx, redelivery, _, _ = ExecuteGitHubClientFunction(pluginCtx, logger, func() (*github.HookDelivery, *github.Response, error) {
+				redelivery, response, err := githubClient.Repositories.RedeliverHookDelivery(pluginCtx, ctxPlugin.Owner, ctxPlugin.Repo, ctxPlugin.HookID, *hookDelivery.ID)
+				if err != nil {
+					return nil, nil, err
+				}
+				return redelivery, response, nil
+			})
+		} else {
+			pluginCtx, redelivery, _, _ = ExecuteGitHubClientFunction(pluginCtx, logger, func() (*github.HookDelivery, *github.Response, error) {
+				redelivery, response, err := githubClient.Organizations.RedeliverHookDelivery(pluginCtx, ctxPlugin.Owner, ctxPlugin.HookID, *hookDelivery.ID)
+				if err != nil {
+					return nil, nil, err
+				}
+				return redelivery, response, nil
+			})
+		}
+		// err doesn't matter here and it will always throw "job scheduled on GitHub side; try again later"
+		logger.InfoContext(pluginCtx, "hook redelivered",
+			"redelivery", redelivery,
+			"hookDelivery.GUID", *hookDelivery.GUID,
+			"workflowJobEvent.WorkflowJob.ID", *workflowJobEvent.WorkflowJob.ID,
+			"hookDelivery.Action", *hookDelivery.Action,
+			"hookDelivery.StatusCode", *hookDelivery.StatusCode,
+			"hookDelivery.Redelivery", *hookDelivery.Redelivery,
+			"inCompleted", inCompleted,
+		)
 	}
+
 	// notify the main thread that the service has started
 	select {
 	case <-firstPluginStarted:
