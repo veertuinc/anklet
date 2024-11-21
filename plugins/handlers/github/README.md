@@ -84,4 +84,4 @@ The following logic consumes [API limits](https://docs.github.com/en/rest/using-
   2. Should the job request a template or tag that doesn't exist, we need to forcefully cancel the job in github or else other anklets will attempt processing indefinitely. (one call to check if already cancelled, one to cancel)
   3. Should the runner be orphaned and not have been shut down cleanly so it unregistred itself, we will send a removal request. It can not happen with #2. (one to check if already removed, one to remove)
 
-This means in the worst case scenario it could make a total of 3 api calls total.
+This means in the worst case scenario it could make a total of 3 api calls total. Otherwise only one should happen on job success.
