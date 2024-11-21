@@ -161,7 +161,7 @@ func sendCancelWorkflowRun(pluginCtx context.Context, logger *slog.Logger, workf
 
 // https://github.com/gofri/go-github-ratelimit has yet to support primary rate limits, so we have to do it ourselves.
 func executeGitHubClientFunction[T any](pluginCtx context.Context, logger *slog.Logger, executeFunc func() (*T, *github.Response, error)) (context.Context, *T, *github.Response, error) {
-	// logger.InfoContext(pluginCtx, "executeGitHubClientFunction")
+	logger.DebugContext(pluginCtx, "executeGitHubClientFunction")
 	result, response, err := executeFunc()
 	if response != nil {
 		pluginCtx = logging.AppendCtx(pluginCtx, slog.Int("api_limit_remaining", response.Rate.Remaining))
