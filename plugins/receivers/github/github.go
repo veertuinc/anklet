@@ -369,7 +369,6 @@ func Run(
 		// Redeliver queued jobs
 		githubWrapperClient := internalGithub.NewGitHubClientWrapper(githubClient)
 		pluginCtx = context.WithValue(pluginCtx, config.ContextKey("githubwrapperclient"), githubWrapperClient)
-		fmt.Println("ctxPlugin.RedeliverHours", ctxPlugin.RedeliverHours)
 		limitForHooks := time.Now().Add(-time.Hour * time.Duration(ctxPlugin.RedeliverHours)) // the time we want the stop search for redeliveries
 		opts := &github.ListCursorOptions{PerPage: 10}
 		doneWithHooks := false

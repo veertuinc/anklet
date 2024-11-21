@@ -225,7 +225,9 @@ func worker(parentCtx context.Context, logger *slog.Logger, loadedConfig config.
 	suffix := parentCtx.Value(config.ContextKey("suffix")).(string)
 	logger.InfoContext(workerCtx, "starting anklet"+suffix)
 	returnToMainQueue := make(chan bool, 1)
+	jobFailureChannel := make(chan bool, 1)
 	workerCtx = context.WithValue(workerCtx, config.ContextKey("returnToMainQueue"), returnToMainQueue)
+	workerCtx = context.WithValue(workerCtx, config.ContextKey("jobFailureChannel"), jobFailureChannel)
 	var wg sync.WaitGroup
 	go func() {
 		defer signal.Stop(sigChan)

@@ -31,8 +31,9 @@ type WorkflowRunJobDetail struct {
 	AnkaTemplateTag string
 	RunID           int64
 	// UniqueID        string
-	Labels []string
-	Repo   string
+	Labels     []string
+	Repo       string
+	Conclusion string
 }
 
 // func exists_in_array_exact(array_to_search_in []string, desired []string) bool {
@@ -160,6 +161,7 @@ func sendCancelWorkflowRun(pluginCtx context.Context, logger *slog.Logger, workf
 
 // https://github.com/gofri/go-github-ratelimit has yet to support primary rate limits, so we have to do it ourselves.
 func executeGitHubClientFunction[T any](pluginCtx context.Context, logger *slog.Logger, executeFunc func() (*T, *github.Response, error)) (context.Context, *T, *github.Response, error) {
+	fmt.Println("executeGitHubClientFunction")
 	result, response, err := executeFunc()
 	if response != nil {
 		pluginCtx = logging.AppendCtx(pluginCtx, slog.Int("api_limit_remaining", response.Rate.Remaining))
@@ -567,7 +569,16 @@ func Run(
 	// check constantly for a cancelled webhook to be received for our job
 	ranOnce := make(chan struct{})
 	go func() {
-		CheckForCompletedJobs(workerCtx, pluginCtx, logger, checkForCompletedJobsMu, completedJobChannel, ranOnce, false, failureChannel)
+		CheckForCompletedJobs(
+			workerCtx,
+			pluginCtx,
+			logger,
+			checkForCompletedJobsMu,
+			completedJobChannel,
+			ranOnce,
+			false,
+			failureChannel,
+		)
 		wg.Done()
 	}()
 	<-ranOnce // wait for the goroutine to run at least once
@@ -840,7 +851,7 @@ func Run(
 			failureChannel <- true
 			return
 		}
-		defer removeSelfHostedRunner(pluginCtx, *vm, workflowJob)
+		defer removeSelfHostedRunner(pluginCtx, *vm, &workflowJob)
 		// Install and Start runner
 		select {
 		case <-completedJobChannel:
@@ -905,6 +916,7 @@ func Run(
 						LastFailedRun:       time.Now(),
 						LastFailedRunJobUrl: *completedJobEvent.WorkflowJob.URL,
 					})
+					workflowJob.Conclusion = "failure" // support removeSelfHostedRunner
 				}
 			} else if logCounter%2 == 0 {
 				if pluginCtx.Err() != nil {
@@ -966,7 +978,11 @@ func Run(
 
 // removeSelfHostedRunner handles removing a registered runner if the registered runner was orphaned somehow
 // it's extra safety should the runner not be registered with --ephemeral
-func removeSelfHostedRunner(pluginCtx context.Context, vm anka.VM, workflow WorkflowRunJobDetail) {
+func removeSelfHostedRunner(
+	pluginCtx context.Context,
+	vm anka.VM,
+	workflow *WorkflowRunJobDetail,
+) {
 	logger := logging.GetLoggerFromContext(pluginCtx)
 	ctxPlugin := config.GetPluginFromContext(pluginCtx)
 	githubClient := internalGithub.GetGitHubClientFromContext(pluginCtx)
@@ -974,62 +990,64 @@ func removeSelfHostedRunner(pluginCtx context.Context, vm anka.VM, workflow Work
 	var runnersList *github.Runners
 	var response *github.Response
 	var err error
-	if isRepoSet {
-		pluginCtx, runnersList, response, err = executeGitHubClientFunction[github.Runners](pluginCtx, logger, func() (*github.Runners, *github.Response, error) {
-			runnersList, resp, err := githubClient.Actions.ListRunners(context.Background(), ctxPlugin.Owner, ctxPlugin.Repo, &github.ListRunnersOptions{})
-			return runnersList, resp, err
-		})
-	} else {
-		pluginCtx, runnersList, response, err = executeGitHubClientFunction[github.Runners](pluginCtx, logger, func() (*github.Runners, *github.Response, error) {
-			runnersList, resp, err := githubClient.Actions.ListOrganizationRunners(context.Background(), ctxPlugin.Owner, &github.ListRunnersOptions{})
-			return runnersList, resp, err
-		})
-	}
-	if err != nil {
-		logger.ErrorContext(pluginCtx, "error executing githubClient.Actions.ListRunners", "err", err, "response", response)
-		return
-	}
-	if len(runnersList.Runners) == 0 {
-		logger.DebugContext(pluginCtx, "no runners found to delete (not an error)")
-	} else {
-		// found := false
-		for _, runner := range runnersList.Runners {
-			if *runner.Name == vm.Name {
-				// found = true
-				/*
-					We have to cancel the workflow run before we can remove the runner.
-					[11:12:53.736] ERROR: error executing githubClient.Actions.RemoveRunner {
-					"ankaTemplate": "d792c6f6-198c-470f-9526-9c998efe7ab4",
-					"ankaTemplateTag": "(using latest)",
-					"err": "DELETE https://api.github.com/repos/veertuinc/anklet/actions/runners/142: 422 Bad request - Runner \"anklet-vm-\u003cuuid\u003e\" is still running a job\" []",
-				*/
-				err := sendCancelWorkflowRun(pluginCtx, logger, workflow)
-				if err != nil {
-					logger.ErrorContext(pluginCtx, "error sending cancel workflow run", "err", err)
-					return
-				}
-				if isRepoSet {
-					pluginCtx, _, _, err = executeGitHubClientFunction[github.Response](pluginCtx, logger, func() (*github.Response, *github.Response, error) {
-						response, err := githubClient.Actions.RemoveRunner(context.Background(), ctxPlugin.Owner, ctxPlugin.Repo, *runner.ID)
-						return response, nil, err
-					})
-				} else {
-					pluginCtx, _, _, err = executeGitHubClientFunction[github.Response](pluginCtx, logger, func() (*github.Response, *github.Response, error) {
-						response, err := githubClient.Actions.RemoveOrganizationRunner(context.Background(), ctxPlugin.Owner, *runner.ID)
-						return response, nil, err
-					})
-				}
-				if err != nil {
-					logger.ErrorContext(pluginCtx, "error executing githubClient.Actions.RemoveRunner", "err", err)
-					return
-				} else {
-					logger.InfoContext(pluginCtx, "successfully removed runner")
-				}
-				break
-			}
+	if workflow.Conclusion == "failure" {
+		if isRepoSet {
+			pluginCtx, runnersList, response, err = executeGitHubClientFunction[github.Runners](pluginCtx, logger, func() (*github.Runners, *github.Response, error) {
+				runnersList, resp, err := githubClient.Actions.ListRunners(context.Background(), ctxPlugin.Owner, ctxPlugin.Repo, &github.ListRunnersOptions{})
+				return runnersList, resp, err
+			})
+		} else {
+			pluginCtx, runnersList, response, err = executeGitHubClientFunction[github.Runners](pluginCtx, logger, func() (*github.Runners, *github.Response, error) {
+				runnersList, resp, err := githubClient.Actions.ListOrganizationRunners(context.Background(), ctxPlugin.Owner, &github.ListRunnersOptions{})
+				return runnersList, resp, err
+			})
 		}
-		// if !found {
-		// 	logger.InfoContext(pluginCtx, "no matching runner found")
-		// }
+		if err != nil {
+			logger.ErrorContext(pluginCtx, "error executing githubClient.Actions.ListRunners", "err", err, "response", response)
+			return
+		}
+		if len(runnersList.Runners) == 0 {
+			logger.DebugContext(pluginCtx, "no runners found to delete (not an error)")
+		} else {
+			// found := false
+			for _, runner := range runnersList.Runners {
+				if *runner.Name == vm.Name {
+					// found = true
+					/*
+						We have to cancel the workflow run before we can remove the runner.
+						[11:12:53.736] ERROR: error executing githubClient.Actions.RemoveRunner {
+						"ankaTemplate": "d792c6f6-198c-470f-9526-9c998efe7ab4",
+						"ankaTemplateTag": "(using latest)",
+						"err": "DELETE https://api.github.com/repos/veertuinc/anklet/actions/runners/142: 422 Bad request - Runner \"anklet-vm-\u003cuuid\u003e\" is still running a job\" []",
+					*/
+					err := sendCancelWorkflowRun(pluginCtx, logger, *workflow)
+					if err != nil {
+						logger.ErrorContext(pluginCtx, "error sending cancel workflow run", "err", err)
+						return
+					}
+					if isRepoSet {
+						pluginCtx, _, _, err = executeGitHubClientFunction[github.Response](pluginCtx, logger, func() (*github.Response, *github.Response, error) {
+							response, err := githubClient.Actions.RemoveRunner(context.Background(), ctxPlugin.Owner, ctxPlugin.Repo, *runner.ID)
+							return response, nil, err
+						})
+					} else {
+						pluginCtx, _, _, err = executeGitHubClientFunction[github.Response](pluginCtx, logger, func() (*github.Response, *github.Response, error) {
+							response, err := githubClient.Actions.RemoveOrganizationRunner(context.Background(), ctxPlugin.Owner, *runner.ID)
+							return response, nil, err
+						})
+					}
+					if err != nil {
+						logger.ErrorContext(pluginCtx, "error executing githubClient.Actions.RemoveRunner", "err", err)
+						return
+					} else {
+						logger.InfoContext(pluginCtx, "successfully removed runner")
+					}
+					break
+				}
+			}
+			// if !found {
+			// 	logger.InfoContext(pluginCtx, "no matching runner found")
+			// }
+		}
 	}
 }
