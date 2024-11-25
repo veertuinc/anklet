@@ -16,7 +16,7 @@ jobs:
           echo "123"
   testJob2:
     runs-on: [ 
-      "anka-template:6abae54f-025d-4a27-b5eb-b985d5eddac9",
+      "anka-template:fa990c7f-d540-4c5b-bf72-b886c4692c3a",
     ]
     steps:
       - uses: actions/checkout@v3

@@ -11,7 +11,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/bradleyfalzon/ghinstallation/v2"
 	"github.com/google/go-github/v66/github"
 	"github.com/redis/go-redis/v9"
 	"github.com/veertuinc/anklet/internal/anka"
@@ -126,7 +125,7 @@ func sendCancelWorkflowRun(pluginCtx context.Context, logger *slog.Logger, workf
 	ctxPlugin := config.GetPluginFromContext(pluginCtx)
 	cancelSent := false
 	for {
-		pluginCtx, workflowRun, _, err := executeGitHubClientFunction[github.WorkflowRun](pluginCtx, logger, func() (*github.WorkflowRun, *github.Response, error) {
+		pluginCtx, workflowRun, _, err := internalGithub.ExecuteGitHubClientFunction(pluginCtx, logger, func() (*github.WorkflowRun, *github.Response, error) {
 			workflowRun, resp, err := githubClient.Actions.GetWorkflowRunByID(context.Background(), ctxPlugin.Owner, workflow.Repo, workflow.RunID)
 			return workflowRun, resp, err
 		})
@@ -141,7 +140,7 @@ func sendCancelWorkflowRun(pluginCtx context.Context, logger *slog.Logger, workf
 		} else {
 			logger.WarnContext(pluginCtx, "workflow run is still active... waiting for cancellation so we can clean up...", "workflow_run_id", workflow.RunID)
 			if !cancelSent { // this has to happen here so that it doesn't error with "409 Cannot cancel a workflow run that is completed. " if the job is already cancelled
-				pluginCtx, cancelResponse, _, cancelErr := executeGitHubClientFunction[github.Response](pluginCtx, logger, func() (*github.Response, *github.Response, error) {
+				pluginCtx, cancelResponse, _, cancelErr := internalGithub.ExecuteGitHubClientFunction(pluginCtx, logger, func() (*github.Response, *github.Response, error) {
 					resp, err := githubClient.Actions.CancelWorkflowRunByID(context.Background(), ctxPlugin.Owner, workflow.Repo, workflow.RunID)
 					return resp, nil, err
 				})
@@ -157,38 +156,6 @@ func sendCancelWorkflowRun(pluginCtx context.Context, logger *slog.Logger, workf
 		}
 	}
 	return nil
-}
-
-// https://github.com/gofri/go-github-ratelimit has yet to support primary rate limits, so we have to do it ourselves.
-func executeGitHubClientFunction[T any](pluginCtx context.Context, logger *slog.Logger, executeFunc func() (*T, *github.Response, error)) (context.Context, *T, *github.Response, error) {
-	result, response, err := executeFunc()
-	if response != nil {
-		pluginCtx = logging.AppendCtx(pluginCtx, slog.Int("api_limit_remaining", response.Rate.Remaining))
-		pluginCtx = logging.AppendCtx(pluginCtx, slog.String("api_limit_reset_time", response.Rate.Reset.Time.Format(time.RFC3339)))
-		pluginCtx = logging.AppendCtx(pluginCtx, slog.Int("api_limit", response.Rate.Limit))
-		if response.Rate.Remaining <= 10 { // handle primary rate limiting
-			sleepDuration := time.Until(response.Rate.Reset.Time) + time.Second // Adding a second to ensure we're past the reset time
-			logger.WarnContext(pluginCtx, "GitHub API rate limit exceeded, sleeping until reset")
-			metricsData := metrics.GetMetricsDataFromContext(pluginCtx)
-			metricsData.SetStatus(pluginCtx, logger, "limit_paused")
-			select {
-			case <-time.After(sleepDuration):
-				metricsData.SetStatus(pluginCtx, logger, "running")
-				return executeGitHubClientFunction(pluginCtx, logger, executeFunc) // Retry the function after waiting
-			case <-pluginCtx.Done():
-				return pluginCtx, nil, nil, pluginCtx.Err()
-			}
-		}
-	}
-	if err != nil {
-		if err.Error() != "context canceled" {
-			if !strings.Contains(err.Error(), "try again later") {
-				logger.Error("error executing GitHub client function: " + err.Error())
-			}
-		}
-		return pluginCtx, nil, nil, err
-	}
-	return pluginCtx, result, response, nil
 }
 
 func CheckForCompletedJobs(
@@ -508,30 +475,19 @@ func Run(
 		return
 	}
 
-	rateLimiter := internalGithub.GetRateLimitWaiterClientFromContext(pluginCtx)
-	httpTransport := config.GetHttpTransportFromContext(pluginCtx)
 	var githubClient *github.Client
-	if ctxPlugin.PrivateKey != "" {
-		// support private key in a file or as text
-		var privateKey []byte
-		privateKeyData, err := os.ReadFile(ctxPlugin.PrivateKey)
-		if err == nil {
-			privateKey = privateKeyData
-		} else {
-			privateKey = []byte(ctxPlugin.PrivateKey)
-		}
-		itr, err := ghinstallation.New(httpTransport, int64(ctxPlugin.AppID), int64(ctxPlugin.InstallationID), privateKey)
-		if err != nil {
-			metricsData.IncrementTotalFailedRunsSinceStart()
-			logger.ErrorContext(pluginCtx, "error creating github app installation token", "err", err)
-			return
-		}
-		rateLimiter.Transport = itr
-		githubClient = github.NewClient(rateLimiter)
-	} else {
-		githubClient = github.NewClient(rateLimiter).WithAuthToken(ctxPlugin.Token)
+	githubClient, err := internalGithub.AuthenticateAndReturnGitHubClient(
+		pluginCtx,
+		logger,
+		ctxPlugin.PrivateKey,
+		ctxPlugin.AppID,
+		ctxPlugin.InstallationID,
+		ctxPlugin.Token,
+	)
+	if err != nil {
+		logger.ErrorContext(pluginCtx, "error authenticating github client", "err", err)
+		return
 	}
-
 	githubWrapperClient := internalGithub.NewGitHubClientWrapper(githubClient)
 	pluginCtx = context.WithValue(pluginCtx, config.ContextKey("githubwrapperclient"), githubWrapperClient)
 	var repositoryURL string
@@ -609,8 +565,8 @@ func Run(
 			return
 		}
 		if err != nil {
-			metricsData.IncrementTotalFailedRunsSinceStart()
 			logger.ErrorContext(pluginCtx, "error getting queued jobs", "err", err)
+			metricsData.IncrementTotalFailedRunsSinceStart()
 			return
 		}
 		databaseContainer.Client.RPush(pluginCtx, "anklet/jobs/github/queued/"+ctxPlugin.Owner+"/"+ctxPlugin.Name, eldestQueuedJob)
@@ -701,7 +657,6 @@ func Run(
 		metricsData.IncrementTotalFailedRunsSinceStart()
 		err := sendCancelWorkflowRun(pluginCtx, logger, workflowJob)
 		if err != nil {
-			metricsData.IncrementTotalFailedRunsSinceStart()
 			logger.ErrorContext(pluginCtx, "error sending cancel workflow run", "err", err)
 		}
 		skipPrep = true
@@ -720,19 +675,19 @@ func Run(
 		var response *github.Response
 		var err error
 		if isRepoSet {
-			pluginCtx, runnerRegistration, response, err = executeGitHubClientFunction[github.RegistrationToken](pluginCtx, logger, func() (*github.RegistrationToken, *github.Response, error) {
+			pluginCtx, runnerRegistration, response, err = internalGithub.ExecuteGitHubClientFunction(pluginCtx, logger, func() (*github.RegistrationToken, *github.Response, error) {
 				runnerRegistration, resp, err := githubClient.Actions.CreateRegistrationToken(context.Background(), ctxPlugin.Owner, ctxPlugin.Repo)
 				return runnerRegistration, resp, err
 			})
 		} else {
-			pluginCtx, runnerRegistration, response, err = executeGitHubClientFunction[github.RegistrationToken](pluginCtx, logger, func() (*github.RegistrationToken, *github.Response, error) {
+			pluginCtx, runnerRegistration, response, err = internalGithub.ExecuteGitHubClientFunction(pluginCtx, logger, func() (*github.RegistrationToken, *github.Response, error) {
 				runnerRegistration, resp, err := githubClient.Actions.CreateOrganizationRegistrationToken(context.Background(), ctxPlugin.Owner)
 				return runnerRegistration, resp, err
 			})
 		}
 		if err != nil {
-			metricsData.IncrementTotalFailedRunsSinceStart()
 			logger.ErrorContext(pluginCtx, "error creating registration token", "err", err, "response", response)
+			metricsData.IncrementTotalFailedRunsSinceStart()
 			failureChannel <- true
 			return
 		}
@@ -761,6 +716,8 @@ func Run(
 			failureChannel <- true
 			return
 		}
+		pluginCtx = logging.AppendCtx(pluginCtx, slog.String("vmName", vm.Name)) // TODO: THIS ISN"T WORKING
+
 		dbErr := databaseContainer.Client.RPush(pluginCtx, "anklet/jobs/github/queued/"+ctxPlugin.Owner+"/"+ctxPlugin.Name, wrappedVmJSON).Err()
 		if dbErr != nil {
 			logger.ErrorContext(pluginCtx, "error pushing vm data to database", "err", dbErr)
@@ -790,14 +747,16 @@ func Run(
 		_, registerRunnerErr := os.Stat(registerRunnerPath)
 		_, startRunnerErr := os.Stat(startRunnerPath)
 		if installRunnerErr != nil || registerRunnerErr != nil || startRunnerErr != nil {
-			metricsData.IncrementTotalFailedRunsSinceStart()
 			logger.ErrorContext(pluginCtx, "must include install-runner.bash, register-runner.bash, and start-runner.bash in "+globals.PluginsPath+"/handlers/github/", "err", err)
 			err := sendCancelWorkflowRun(pluginCtx, logger, workflowJob)
 			if err != nil {
 				logger.ErrorContext(pluginCtx, "error sending cancel workflow run", "err", err)
 			}
+			metricsData.IncrementTotalFailedRunsSinceStart()
 			return
 		}
+
+		// Copy runner scripts to VM
 		logger.DebugContext(pluginCtx, "copying install-runner.bash, register-runner.bash, and start-runner.bash to vm")
 		err = ankaCLI.AnkaCopy(pluginCtx,
 			installRunnerPath,
@@ -805,12 +764,11 @@ func Run(
 			startRunnerPath,
 		)
 		if err != nil {
-			metricsData.IncrementTotalFailedRunsSinceStart()
 			logger.ErrorContext(pluginCtx, "error executing anka copy", "err", err)
+			metricsData.IncrementTotalFailedRunsSinceStart()
 			failureChannel <- true
 			return
 		}
-
 		select {
 		case <-completedJobChannel:
 			logger.InfoContext(pluginCtx, "completed job found before installing runner")
@@ -822,6 +780,7 @@ func Run(
 		default:
 		}
 
+		// Install runner
 		logger.DebugContext(pluginCtx, "installing github runner inside of vm")
 		installRunnerErr = ankaCLI.AnkaRun(pluginCtx, "./install-runner.bash")
 		if installRunnerErr != nil {
@@ -851,7 +810,7 @@ func Run(
 			return
 		}
 		defer removeSelfHostedRunner(pluginCtx, *vm, &workflowJob)
-		// Install and Start runner
+		// Start runner
 		select {
 		case <-completedJobChannel:
 			logger.InfoContext(pluginCtx, "completed job found before starting runner")
@@ -991,12 +950,12 @@ func removeSelfHostedRunner(
 	var err error
 	if workflow.Conclusion == "failure" {
 		if isRepoSet {
-			pluginCtx, runnersList, response, err = executeGitHubClientFunction[github.Runners](pluginCtx, logger, func() (*github.Runners, *github.Response, error) {
+			pluginCtx, runnersList, response, err = internalGithub.ExecuteGitHubClientFunction(pluginCtx, logger, func() (*github.Runners, *github.Response, error) {
 				runnersList, resp, err := githubClient.Actions.ListRunners(context.Background(), ctxPlugin.Owner, ctxPlugin.Repo, &github.ListRunnersOptions{})
 				return runnersList, resp, err
 			})
 		} else {
-			pluginCtx, runnersList, response, err = executeGitHubClientFunction[github.Runners](pluginCtx, logger, func() (*github.Runners, *github.Response, error) {
+			pluginCtx, runnersList, response, err = internalGithub.ExecuteGitHubClientFunction(pluginCtx, logger, func() (*github.Runners, *github.Response, error) {
 				runnersList, resp, err := githubClient.Actions.ListOrganizationRunners(context.Background(), ctxPlugin.Owner, &github.ListRunnersOptions{})
 				return runnersList, resp, err
 			})
@@ -1025,12 +984,12 @@ func removeSelfHostedRunner(
 						return
 					}
 					if isRepoSet {
-						pluginCtx, _, _, err = executeGitHubClientFunction[github.Response](pluginCtx, logger, func() (*github.Response, *github.Response, error) {
+						pluginCtx, _, _, err = internalGithub.ExecuteGitHubClientFunction(pluginCtx, logger, func() (*github.Response, *github.Response, error) {
 							response, err := githubClient.Actions.RemoveRunner(context.Background(), ctxPlugin.Owner, ctxPlugin.Repo, *runner.ID)
 							return response, nil, err
 						})
 					} else {
-						pluginCtx, _, _, err = executeGitHubClientFunction[github.Response](pluginCtx, logger, func() (*github.Response, *github.Response, error) {
+						pluginCtx, _, _, err = internalGithub.ExecuteGitHubClientFunction(pluginCtx, logger, func() (*github.Response, *github.Response, error) {
 							response, err := githubClient.Actions.RemoveOrganizationRunner(context.Background(), ctxPlugin.Owner, *runner.ID)
 							return response, nil, err
 						})

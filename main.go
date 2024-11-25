@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -266,11 +267,22 @@ func worker(parentCtx context.Context, logger *slog.Logger, loadedConfig config.
 	metricsPort := "8080"
 	if loadedConfig.Metrics.Port != "" {
 		metricsPort = loadedConfig.Metrics.Port
+	} else {
+		for {
+			ln, err := net.Listen("tcp", ":"+metricsPort)
+			if err == nil {
+				ln.Close()
+				break
+			}
+			port, _ := strconv.Atoi(metricsPort)
+			port++
+			metricsPort = strconv.Itoa(port)
+		}
 	}
 	ln, err := net.Listen("tcp", ":"+metricsPort)
 	if err != nil {
-		logger.ErrorContext(workerCtx, "port already in use", "port", metricsPort, "error", err)
-		panic(fmt.Sprintf("port %s is already in use", metricsPort))
+		logger.ErrorContext(workerCtx, "metrics port already in use", "port", metricsPort, "error", err)
+		panic(fmt.Sprintf("metrics port %s is already in use", metricsPort))
 	}
 	ln.Close()
 	metricsService := metrics.NewServer(metricsPort)

@@ -164,7 +164,9 @@ You can control the location plugins are stored on the host by setting the `plug
 
 ### Metrics
 
-Metrics for monitoring are available at `http://127.0.0.1:8080/metrics?format=json` or `http://127.0.0.1:8080/metrics?format=prometheus`. These instructions apply to handler and receiver plugins, but receivers can differ slightly in what metrics are available. Be sure to check the specific plugin documentation for more information and examples.
+Metrics for monitoring are available at `http://127.0.0.1:8080/metrics?format=json` or `http://127.0.0.1:8080/metrics?format=prometheus`. This applies to both handler and receiver plugins, but receivers can differ slightly in what metrics are available. Be sure to check the specific plugin documentation for more information and examples.
+
+Note: If port 8080 is already in use, Anklet will automatically increment the port by 1 until it finds an open port.
 
 - You can change the port in the `config.yml` under `metrics`, like so:
 

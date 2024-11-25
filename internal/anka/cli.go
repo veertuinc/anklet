@@ -304,7 +304,8 @@ func (cli *Cli) AnkaCopy(pluginCtx context.Context, filesToCopyIn ...string) err
 		if copyOutput.Status != "OK" {
 			return fmt.Errorf("error copying into vm: %s", copyOutput.Message)
 		}
-		logger.DebugContext(pluginCtx, "successfully copied file into vm", "file", hostLevelFile)
+		logger.DebugContext(pluginCtx, "copy output", "std", copyOutput)
+		logger.InfoContext(pluginCtx, "successfully copied file into vm", "file", hostLevelFile, "stdout", copyOutput.Message)
 	}
 
 	return nil

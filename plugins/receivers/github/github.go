@@ -6,12 +6,10 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"os"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/bradleyfalzon/ghinstallation/v2"
 	"github.com/google/go-github/v66/github"
 	"github.com/veertuinc/anklet/internal/config"
 	"github.com/veertuinc/anklet/internal/database"
@@ -76,47 +74,6 @@ func InQueue(pluginCtx context.Context, logger *slog.Logger, jobID int64, queue 
 	return false, nil
 }
 
-// https://github.com/gofri/go-github-ratelimit has yet to support primary rate limits, so we have to do it ourselves.
-func ExecuteGitHubClientFunction[T any](pluginCtx context.Context, logger *slog.Logger, executeFunc func() (*T, *github.Response, error)) (context.Context, *T, *github.Response, error) {
-	innerPluginCtx, cancel := context.WithCancel(pluginCtx) // Inherit from parent context
-	defer cancel()
-	result, response, err := executeFunc()
-	if response != nil {
-		innerPluginCtx = logging.AppendCtx(innerPluginCtx, slog.Int("api_limit_remaining", response.Rate.Remaining))
-		innerPluginCtx = logging.AppendCtx(innerPluginCtx, slog.String("api_limit_reset_time", response.Rate.Reset.Time.Format(time.RFC3339)))
-		innerPluginCtx = logging.AppendCtx(innerPluginCtx, slog.Int("api_limit", response.Rate.Limit))
-		if response.Rate.Remaining <= 10 { // handle primary rate limiting
-			sleepDuration := time.Until(response.Rate.Reset.Time) + time.Second // Adding a second to ensure we're past the reset time
-			logger.WarnContext(innerPluginCtx, "GitHub API rate limit exceeded, sleeping until reset")
-			metricsData := metrics.GetMetricsDataFromContext(pluginCtx)
-			ctxPlugin := config.GetPluginFromContext(pluginCtx)
-			metricsData.UpdatePlugin(pluginCtx, logger, metrics.PluginBase{
-				Name:   ctxPlugin.Name,
-				Status: "limit_paused",
-			})
-			select {
-			case <-time.After(sleepDuration):
-				metricsData.UpdatePlugin(pluginCtx, logger, metrics.PluginBase{
-					Name:   ctxPlugin.Name,
-					Status: "running",
-				})
-				return ExecuteGitHubClientFunction(pluginCtx, logger, executeFunc) // Retry the function after waiting
-			case <-pluginCtx.Done():
-				return pluginCtx, nil, nil, pluginCtx.Err()
-			}
-		}
-	}
-	if err != nil {
-		if err.Error() != "context canceled" {
-			if !strings.Contains(err.Error(), "try again later") {
-				logger.Error("error executing GitHub client function: " + err.Error())
-			}
-		}
-		return pluginCtx, nil, nil, err
-	}
-	return pluginCtx, result, response, nil
-}
-
 // Start runs the HTTP server
 func Run(
 	workerCtx context.Context,
@@ -154,30 +111,19 @@ func Run(
 	if err != nil {
 		logging.Panic(pluginCtx, pluginCtx, "error getting database client from context: "+err.Error())
 	}
-	rateLimiter := internalGithub.GetRateLimitWaiterClientFromContext(pluginCtx)
-	httpTransport := config.GetHttpTransportFromContext(pluginCtx)
+
 	var githubClient *github.Client
-	if ctxPlugin.PrivateKey != "" {
-		// support private key in a file or as text
-		var privateKey []byte
-		privateKeyData, err := os.ReadFile(ctxPlugin.PrivateKey)
-		if err == nil {
-			privateKey = privateKeyData
-		} else {
-			privateKey = []byte(ctxPlugin.PrivateKey)
-		}
-		itr, err := ghinstallation.New(httpTransport, int64(ctxPlugin.AppID), int64(ctxPlugin.InstallationID), privateKey)
-		if err != nil {
-			if strings.Contains(err.Error(), "invalid key") {
-				logging.Panic(pluginCtx, pluginCtx, "error creating github app installation token: "+err.Error()+" (does the key exist on the filesystem?)")
-			} else {
-				logging.Panic(pluginCtx, pluginCtx, "error creating github app installation token: "+err.Error())
-			}
-		}
-		rateLimiter.Transport = itr
-		githubClient = github.NewClient(rateLimiter)
-	} else {
-		githubClient = github.NewClient(rateLimiter).WithAuthToken(ctxPlugin.Token)
+	githubClient, err = internalGithub.AuthenticateAndReturnGitHubClient(
+		pluginCtx,
+		logger,
+		ctxPlugin.PrivateKey,
+		ctxPlugin.AppID,
+		ctxPlugin.InstallationID,
+		ctxPlugin.Token,
+	)
+	if err != nil {
+		logger.ErrorContext(pluginCtx, "error authenticating github client", "err", err)
+		return
 	}
 
 	server := &http.Server{Addr: ":" + ctxPlugin.Port}
@@ -490,7 +436,7 @@ func Run(
 		// var response *github.Response
 		var err error
 		if isRepoSet {
-			pluginCtx, hookDeliveries, _, err = ExecuteGitHubClientFunction(pluginCtx, logger, func() (*[]*github.HookDelivery, *github.Response, error) {
+			pluginCtx, hookDeliveries, _, err = internalGithub.ExecuteGitHubClientFunction(pluginCtx, logger, func() (*[]*github.HookDelivery, *github.Response, error) {
 				hookDeliveries, response, err := githubClient.Repositories.ListHookDeliveries(pluginCtx, ctxPlugin.Owner, ctxPlugin.Repo, ctxPlugin.HookID, opts)
 				if err != nil {
 					return nil, nil, err
@@ -498,7 +444,7 @@ func Run(
 				return &hookDeliveries, response, nil
 			})
 		} else {
-			pluginCtx, hookDeliveries, _, err = ExecuteGitHubClientFunction(pluginCtx, logger, func() (*[]*github.HookDelivery, *github.Response, error) {
+			pluginCtx, hookDeliveries, _, err = internalGithub.ExecuteGitHubClientFunction(pluginCtx, logger, func() (*[]*github.HookDelivery, *github.Response, error) {
 				hookDeliveries, response, err := githubClient.Organizations.ListHookDeliveries(pluginCtx, ctxPlugin.Owner, ctxPlugin.HookID, opts)
 				if err != nil {
 					return nil, nil, err
@@ -526,6 +472,7 @@ func Run(
 					if hookDelivery.ID != nil && otherHookDelivery.ID != nil && *hookDelivery.ID != *otherHookDelivery.ID &&
 						otherHookDelivery.GUID != nil && hookDelivery.GUID != nil && *otherHookDelivery.GUID == *hookDelivery.GUID &&
 						otherHookDelivery.Redelivery != nil && *otherHookDelivery.Redelivery &&
+						otherHookDelivery.StatusCode != nil && *otherHookDelivery.StatusCode == 200 &&
 						otherHookDelivery.DeliveredAt.Time.After(hookDelivery.DeliveredAt.Time) {
 						found = otherHookDelivery
 						break
@@ -581,7 +528,7 @@ MainLoop:
 		var gottenHookDelivery *github.HookDelivery
 		var err error
 		if isRepoSet {
-			pluginCtx, gottenHookDelivery, _, err = ExecuteGitHubClientFunction(pluginCtx, logger, func() (*github.HookDelivery, *github.Response, error) {
+			pluginCtx, gottenHookDelivery, _, err = internalGithub.ExecuteGitHubClientFunction(pluginCtx, logger, func() (*github.HookDelivery, *github.Response, error) {
 				gottenHookDelivery, response, err := githubClient.Repositories.GetHookDelivery(pluginCtx, ctxPlugin.Owner, ctxPlugin.Repo, ctxPlugin.HookID, *hookDelivery.ID)
 				if err != nil {
 					return nil, nil, err
@@ -589,7 +536,7 @@ MainLoop:
 				return gottenHookDelivery, response, nil
 			})
 		} else {
-			pluginCtx, gottenHookDelivery, _, err = ExecuteGitHubClientFunction(pluginCtx, logger, func() (*github.HookDelivery, *github.Response, error) {
+			pluginCtx, gottenHookDelivery, _, err = internalGithub.ExecuteGitHubClientFunction(pluginCtx, logger, func() (*github.HookDelivery, *github.Response, error) {
 				gottenHookDelivery, response, err := githubClient.Organizations.GetHookDelivery(pluginCtx, ctxPlugin.Owner, ctxPlugin.HookID, *hookDelivery.ID)
 				if err != nil {
 					return nil, nil, err
@@ -701,7 +648,7 @@ MainLoop:
 					var otherGottenHookDelivery *github.HookDelivery
 					var err error
 					if isRepoSet {
-						pluginCtx, otherGottenHookDelivery, _, err = ExecuteGitHubClientFunction(pluginCtx, logger, func() (*github.HookDelivery, *github.Response, error) {
+						pluginCtx, otherGottenHookDelivery, _, err = internalGithub.ExecuteGitHubClientFunction(pluginCtx, logger, func() (*github.HookDelivery, *github.Response, error) {
 							otherGottenHookDelivery, response, err := githubClient.Repositories.GetHookDelivery(pluginCtx, ctxPlugin.Owner, ctxPlugin.Repo, ctxPlugin.HookID, *hookDelivery.ID)
 							if err != nil {
 								return nil, nil, err
@@ -709,7 +656,7 @@ MainLoop:
 							return otherGottenHookDelivery, response, nil
 						})
 					} else {
-						pluginCtx, otherGottenHookDelivery, _, err = ExecuteGitHubClientFunction(pluginCtx, logger, func() (*github.HookDelivery, *github.Response, error) {
+						pluginCtx, otherGottenHookDelivery, _, err = internalGithub.ExecuteGitHubClientFunction(pluginCtx, logger, func() (*github.HookDelivery, *github.Response, error) {
 							otherGottenHookDelivery, response, err := githubClient.Organizations.GetHookDelivery(pluginCtx, ctxPlugin.Owner, ctxPlugin.HookID, *hookDelivery.ID)
 							if err != nil {
 								return nil, nil, err
@@ -746,7 +693,7 @@ MainLoop:
 		// Redeliver the hook
 		var redelivery *github.HookDelivery
 		if isRepoSet {
-			pluginCtx, redelivery, _, _ = ExecuteGitHubClientFunction(pluginCtx, logger, func() (*github.HookDelivery, *github.Response, error) {
+			pluginCtx, redelivery, _, _ = internalGithub.ExecuteGitHubClientFunction(pluginCtx, logger, func() (*github.HookDelivery, *github.Response, error) {
 				redelivery, response, err := githubClient.Repositories.RedeliverHookDelivery(pluginCtx, ctxPlugin.Owner, ctxPlugin.Repo, ctxPlugin.HookID, *hookDelivery.ID)
 				if err != nil {
 					return nil, nil, err
@@ -754,7 +701,7 @@ MainLoop:
 				return redelivery, response, nil
 			})
 		} else {
-			pluginCtx, redelivery, _, _ = ExecuteGitHubClientFunction(pluginCtx, logger, func() (*github.HookDelivery, *github.Response, error) {
+			pluginCtx, redelivery, _, _ = internalGithub.ExecuteGitHubClientFunction(pluginCtx, logger, func() (*github.HookDelivery, *github.Response, error) {
 				redelivery, response, err := githubClient.Organizations.RedeliverHookDelivery(pluginCtx, ctxPlugin.Owner, ctxPlugin.HookID, *hookDelivery.ID)
 				if err != nil {
 					return nil, nil, err

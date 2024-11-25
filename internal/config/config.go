@@ -1,7 +1,6 @@
 package config
 
 import (
-	"net/http"
 	"os"
 	"strconv"
 	"strings"
@@ -66,7 +65,7 @@ type Plugin struct {
 	Database       Database `yaml:"database"`
 	RegistryURL    string   `yaml:"registry_url"`
 	PrivateKey     string   `yaml:"private_key"`
-	AppID          int      `yaml:"app_id"`
+	AppID          int64    `yaml:"app_id"`
 	InstallationID int64    `yaml:"installation_id"`
 	Workflows      Workflow `yaml:"workflows"`
 	Port           string   `yaml:"port"`
@@ -213,14 +212,6 @@ func GetGlobalsFromContext(ctx context.Context) Globals {
 		panic("GetGlobalsFromContext failed")
 	}
 	return globals
-}
-
-func GetHttpTransportFromContext(ctx context.Context) *http.Transport {
-	httpTransport, ok := ctx.Value(ContextKey("httpTransport")).(*http.Transport)
-	if !ok {
-		panic("GetHttpTransportFromContext failed")
-	}
-	return httpTransport
 }
 
 func GetLoadedConfigFromContext(ctx context.Context) *Config {
