@@ -441,6 +441,10 @@ host_disk_usage_percentage{metricsUrl=http://192.168.1.183:8080/metrics} 63.3229
 
 Docker images are available at [veertu/anklet](https://hub.docker.com/r/veertu/anklet). [You can find the example docker-compose file in the `docker` directory.](https://github.com/veertuinc/anklet/blob/main/docker/docker-compose.yml)
 
+## MacOS Daemon
+
+You can find how to automate the installation of Anklet and run a PLIST [here](https://github.com/veertuinc/aws-ec2-mac-amis/blob/main/scripts/anklet-install.bash).
+
 ---
 
 ## Development
