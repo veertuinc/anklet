@@ -160,6 +160,14 @@ You can control the location plugins are stored on the host by setting the `plug
 - [**`Webhook Receiver Plugin`**](./plugins/receivers/github/README.md)
 - [**`Anka VM Handler Plugin`**](./plugins/handlers/github/README.md)
 
+#### Docker / Containers
+
+Docker images are available at [veertu/anklet](https://hub.docker.com/r/veertu/anklet). [You can find the example docker-compose file in the `docker` directory.](https://github.com/veertuinc/anklet/blob/main/docker/docker-compose.yml)
+
+#### MacOS Daemon
+
+You can find how to automate the installation of Anklet and run a PLIST [here](https://github.com/veertuinc/aws-ec2-mac-amis/blob/main/scripts/anklet-install.bash).
+
 ---
 
 ### Metrics
@@ -436,14 +444,6 @@ host_disk_used_bytes{metricsUrl=http://192.168.1.183:8080/metrics} 629849382912
 host_disk_available_bytes{metricsUrl=http://192.168.1.183:8080/metrics} 364813201408
 host_disk_usage_percentage{metricsUrl=http://192.168.1.183:8080/metrics} 63.322919
 ```
-
-## Docker / Containers
-
-Docker images are available at [veertu/anklet](https://hub.docker.com/r/veertu/anklet). [You can find the example docker-compose file in the `docker` directory.](https://github.com/veertuinc/anklet/blob/main/docker/docker-compose.yml)
-
-## MacOS Daemon
-
-You can find how to automate the installation of Anklet and run a PLIST [here](https://github.com/veertuinc/aws-ec2-mac-amis/blob/main/scripts/anklet-install.bash).
 
 ---
 
