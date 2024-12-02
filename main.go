@@ -55,6 +55,7 @@ func main() {
 
 	logger := logging.New()
 	parentCtx := context.Background()
+	parentCtx = context.WithValue(parentCtx, config.ContextKey("logger"), logger)
 
 	if version == "" {
 		version = "dev" // Default version if not set by go build
@@ -373,7 +374,6 @@ func worker(parentCtx context.Context, logger *slog.Logger, loadedConfig config.
 			go func(plugin config.Plugin) {
 				defer wg.Done()
 				pluginCtx, pluginCancel := context.WithCancel(workerCtx) // Inherit from parent context
-				pluginCtx = context.WithValue(pluginCtx, config.ContextKey("logger"), logger)
 
 				if plugin.Name == "" {
 					panic("name is required for plugins")
