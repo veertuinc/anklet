@@ -9,10 +9,11 @@ Inspired by our customer requirements, **Anklet** is a solution created to meet 
 - Depending on the plugins, it can run on both linux containers/instances and macOS hosts.
 
 ## Why Anklet?
+
 Here are a few needs our customers expressed so you can understand the motivation for Anklet:
 
-1. Each team and repository should not have knowledge of the Controller URL, potential auth methods, Anka Node Groups, etc. These are all things that had to be set in the job yaml for [the existing solution for github actions](https://docs.veertu.com/anka/plugins-and-integrations/controller-+-registry/github-actions/). This should be abstracted away for security and simplicity of use.
-2. Their workflow files cannot have multiple stages (start -> the actual job that runs in the VM -> a cleanup step) just to run a single Anka VM
+1. Each team and repository should not have knowledge of the Anka Build Cloud Controller URL, potential auth methods, Anka Node Groups, etc. These are all things that had to be set in the job yaml for [the existing solution for github actions](https://docs.veertu.com/anka/plugins-and-integrations/controller-+-registry/github-actions/). This should be abstracted away for security and simplicity of use.
+2. Their CI workflow files cannot have multiple stages (start -> the actual job that runs in the VM -> a cleanup step) just to run a single Anka VM... that's just too much overhead to ask developers to manage.
 3. They don't want the job to be responsible for cleaning up the VM + registered runner either.
 
 While these reasons are specific to Github Actions, they apply to many other CI platforms too.
