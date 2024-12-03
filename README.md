@@ -1,18 +1,25 @@
 # ANKLET
 
-Inspired by our customer requirements, **Anklet** is a solution created to meet the specific needs of our users who cannot use [the existing solution for github actions](https://docs.veertu.com/anka/plugins-and-integrations/controller-+-registry/github-actions/) to run on-demand and ephemeral [Anka macOS VMs](https://docs.veertu.com/anka/what-is-anka/). It does not rely on the [Anka Build Cloud Controller](https://docs.veertu.com/anka/what-is-anka/#controller-less-registry-only).
+Inspired by our customer requirements, **Anklet** is a solution created to meet the specific needs of our users.
 
-Here are the requirements:
+## At a glance
+
+- Veertu's Anklet is a service that runs custom and specific [plugins](./plugins) to communicate with your CI platform or other tools, and the Anka CLI.
+- It can run multiple plugins at once, in parallel, on the same host.
+- Depending on the plugins, it can run on both linux containers/instances and macOS hosts.
+
+## Why Anklet?
+Here are a few needs our customers expressed so you can understand the motivation for Anklet:
 
 1. Each team and repository should not have knowledge of the Controller URL, potential auth methods, Anka Node Groups, etc. These are all things that had to be set in the job yaml for [the existing solution for github actions](https://docs.veertu.com/anka/plugins-and-integrations/controller-+-registry/github-actions/). This should be abstracted away for security and simplicity of use.
 2. Their workflow files cannot have multiple stages (start -> the actual job that runs in the VM -> a cleanup step) just to run a single Anka VM
 3. They don't want the job to be responsible for cleaning up the VM + registered runner either.
 
-While these reasons are specific to Github Actions, they apply to many other CI platforms too. 
+While these reasons are specific to Github Actions, they apply to many other CI platforms too.
 
-Anklet will have a configuration and run custom plugins (written by us or the community) which handle all of the logic necessary to watch/listen for jobs in the specific CI platform. The plugins determine what logic happens host-side to prepare a macOS VM and optionally register it to the CI platform for use. We'll talk more about that below. At the time of writing this, plugins are not independent, but will eventually be separated.
+Anklet will have a configuration and run custom plugins (written by us and/or the community) which handle all of the logic necessary to watch/listen for jobs in the specific CI platform. The plugins determine what logic happens host-side to prepare a macOS VM and optionally register it to the CI platform for use. We'll talk more about that below. At the time of writing this, plugins are not independent, but will eventually be separated.
 
-### How does it really work?
+## How does it really work?
 
 1. Anklet loads the configuration from the `~/.config/anklet/config.yml` file on the same host. The configuration defines the plugins that will be started. [Example below.](#anklet-setup)
     - Each `plugins:` list item in the config specifies a plugin to load and use, the database (if there is one;optional), and any other specific configuration for that plugin.
