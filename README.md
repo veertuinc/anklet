@@ -535,6 +535,10 @@ For example, the `github` plugin will update the metrics for the plugin it is ru
 
 But metrics.UpdateService can also update things like `LastSuccess`, and `LastFailure`. See `metrics.UpdateService` for more information.
 
+## FAQs
+
+- Can I guarantee that the logs for Anklet will contain the `anklet (and all plugins) shut down` message?
+  - No, there is no guarantee an error, not thrown from inside of a plugin, will do a graceful shutdown.
 
 ## Copyright
 

@@ -2,6 +2,7 @@ package github
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -26,28 +27,28 @@ func NewGitHubClientWrapper(client *github.Client) *GitHubClientWrapper {
 	}
 }
 
-func GetGitHubClientFromContext(ctx context.Context) *github.Client {
+func GetGitHubClientFromContext(ctx context.Context) (*github.Client, error) {
 	wrapper, ok := ctx.Value(config.ContextKey("githubwrapperclient")).(*GitHubClientWrapper)
 	if !ok {
-		panic("GetGitHubClientFromContext failed")
+		return nil, fmt.Errorf("GetGitHubClientFromContext failed")
 	}
-	return wrapper.client
+	return wrapper.client, nil
 }
 
-func GetRateLimitWaiterClientFromContext(ctx context.Context) *http.Client {
+func GetRateLimitWaiterClientFromContext(ctx context.Context) (*http.Client, error) {
 	rateLimiter, ok := ctx.Value(config.ContextKey("rateLimiter")).(*http.Client)
 	if rateLimiter != nil && !ok {
-		panic("GetRateLimitWaiterClientFromContext failed")
+		return nil, fmt.Errorf("GetRateLimitWaiterClientFromContext failed")
 	}
-	return rateLimiter
+	return rateLimiter, nil
 }
 
-func GetHttpTransportFromContext(ctx context.Context) *http.Transport {
+func GetHttpTransportFromContext(ctx context.Context) (*http.Transport, error) {
 	httpTransport, ok := ctx.Value(config.ContextKey("httpTransport")).(*http.Transport)
 	if httpTransport != nil && !ok {
-		panic("GetHttpTransportFromContext failed")
+		return nil, fmt.Errorf("GetHttpTransportFromContext failed")
 	}
-	return httpTransport
+	return httpTransport, nil
 }
 
 func AuthenticateAndReturnGitHubClient(
@@ -62,9 +63,15 @@ func AuthenticateAndReturnGitHubClient(
 	var client *github.Client
 	var err error
 	var rateLimiter *http.Client
-	rateLimiter = GetRateLimitWaiterClientFromContext(ctx)
+	rateLimiter, err = GetRateLimitWaiterClientFromContext(ctx)
+	if err != nil {
+		return nil, err
+	}
 	var httpTransport *http.Transport
-	httpTransport = GetHttpTransportFromContext(ctx)
+	httpTransport, err = GetHttpTransportFromContext(ctx)
+	if err != nil {
+		return nil, err
+	}
 	if httpTransport == nil {
 		httpTransport = http.DefaultTransport.(*http.Transport)
 	}
@@ -85,9 +92,9 @@ func AuthenticateAndReturnGitHubClient(
 		itr, err := ghinstallation.New(httpTransport, appID, installationID, privateKeyBytes)
 		if err != nil {
 			if strings.Contains(err.Error(), "invalid key") {
-				panic("error creating github app installation token: " + err.Error() + " (does the key exist on the filesystem?)")
+				return nil, fmt.Errorf("error creating github app installation token: %s (does the key exist on the filesystem?)", err.Error())
 			} else {
-				panic("error creating github app installation token: " + err.Error())
+				return nil, fmt.Errorf("error creating github app installation token: %s", err.Error())
 			}
 		}
 		rateLimiter.Transport = itr
@@ -111,8 +118,14 @@ func ExecuteGitHubClientFunction[T any](pluginCtx context.Context, logger *slog.
 		if response.Rate.Remaining <= 10 { // handle primary rate limiting
 			sleepDuration := time.Until(response.Rate.Reset.Time) + time.Second // Adding a second to ensure we're past the reset time
 			logger.WarnContext(innerPluginCtx, "GitHub API rate limit exceeded, sleeping until reset")
-			metricsData := metrics.GetMetricsDataFromContext(pluginCtx)
-			ctxPlugin := config.GetPluginFromContext(pluginCtx)
+			metricsData, err := metrics.GetMetricsDataFromContext(pluginCtx)
+			if err != nil {
+				return innerPluginCtx, nil, nil, err
+			}
+			ctxPlugin, err := config.GetPluginFromContext(pluginCtx)
+			if err != nil {
+				return innerPluginCtx, nil, nil, err
+			}
 			metricsData.UpdatePlugin(pluginCtx, logger, metrics.PluginBase{
 				Name:   ctxPlugin.Name,
 				Status: "limit_paused",

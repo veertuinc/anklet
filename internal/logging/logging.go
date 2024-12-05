@@ -2,6 +2,7 @@ package logging
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"strings"
@@ -100,22 +101,28 @@ func AppendCtx(parent context.Context, attr slog.Attr) context.Context {
 }
 
 func Panic(workerCtx context.Context, pluginCtx context.Context, errorMessage string) {
-	logger := GetLoggerFromContext(pluginCtx)
+	logger, err := GetLoggerFromContext(pluginCtx)
+	if err != nil {
+		panic(err)
+	}
 	logger.ErrorContext(pluginCtx, errorMessage)
 	panic(errorMessage)
 }
 
 func DevContext(pluginCtx context.Context, errorMessage string) {
 	if strings.ToUpper(os.Getenv("LOG_LEVEL")) == "DEV" {
-		logger := GetLoggerFromContext(pluginCtx)
+		logger, err := GetLoggerFromContext(pluginCtx)
+		if err != nil {
+			panic(err)
+		}
 		logger.DebugContext(pluginCtx, errorMessage)
 	}
 }
 
-func GetLoggerFromContext(ctx context.Context) *slog.Logger {
+func GetLoggerFromContext(ctx context.Context) (*slog.Logger, error) {
 	logger, ok := ctx.Value(config.ContextKey("logger")).(*slog.Logger)
 	if !ok {
-		panic("GetLoggerFromContext failed")
+		return nil, fmt.Errorf("GetLoggerFromContext failed")
 	}
-	return logger
+	return logger, nil
 }

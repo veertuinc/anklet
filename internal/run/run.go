@@ -2,6 +2,7 @@ package run
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 
 	"github.com/veertuinc/anklet/internal/config"
@@ -18,19 +19,22 @@ func Plugin(
 	logger *slog.Logger,
 	firstPluginStarted chan bool,
 	metricsData *metrics.MetricsDataLock,
-) {
-	ctxPlugin := config.GetPluginFromContext(pluginCtx)
+) (context.Context, error) {
+	ctxPlugin, err := config.GetPluginFromContext(pluginCtx)
+	if err != nil {
+		return pluginCtx, err
+	}
 	// fmt.Printf("%+v\n", service)
 	pluginCtx = logging.AppendCtx(pluginCtx, slog.String("plugin", ctxPlugin.Plugin))
 	if ctxPlugin.Plugin == "" {
-		panic("plugin is not set in yaml:plugins:" + ctxPlugin.Name + ":plugin")
+		return pluginCtx, fmt.Errorf("plugin is not set in yaml:plugins:" + ctxPlugin.Name + ":plugin")
 	}
 	if ctxPlugin.Plugin == "github" {
 		// for {
 		select {
 		case <-pluginCtx.Done():
 			pluginCancel()
-			return
+			return pluginCtx, nil
 		default:
 			// notify the main thread that the service has started
 			select {
@@ -38,14 +42,19 @@ func Plugin(
 			default:
 				close(firstPluginStarted)
 			}
-			github.Run(workerCtx, pluginCtx, pluginCancel, logger, metricsData)
+			var updatedPluginCtx context.Context
+			updatedPluginCtx, err = github.Run(workerCtx, pluginCtx, pluginCancel, logger, metricsData)
+			if err != nil {
+				return updatedPluginCtx, err
+			}
 			// metricsData.SetStatus(pluginCtx, logger, "idle")
-			return // pass back to the main thread/loop
+			return updatedPluginCtx, nil // pass back to the main thread/loop
 		}
 		// }
 	} else if ctxPlugin.Plugin == "github_receiver" {
 		github_receiver.Run(workerCtx, pluginCtx, pluginCancel, logger, firstPluginStarted, metricsData)
 	} else {
-		panic("plugin not found: " + ctxPlugin.Plugin)
+		return pluginCtx, fmt.Errorf("plugin not found")
 	}
+	return pluginCtx, nil
 }

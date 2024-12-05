@@ -57,28 +57,32 @@ func GetDatabaseFromContext(ctx context.Context) (*Database, error) {
 	return database, nil
 }
 
-func UpdateUniqueRunKey(ctx context.Context, key string) context.Context {
+func UpdateUniqueRunKey(ctx context.Context, key string) (context.Context, error) {
 	database, ok := ctx.Value(config.ContextKey("database")).(Database)
 	if !ok {
-		panic("database not found in context")
+		return ctx, fmt.Errorf("database not found in context")
 	}
 	database.UniqueRunKey = key
 	ctx = logging.AppendCtx(ctx, slog.String("uniqueRunKey", key))
-	return context.WithValue(ctx, config.ContextKey("database"), database)
+	return context.WithValue(ctx, config.ContextKey("database"), database), nil
 }
 
-func RemoveUniqueKeyFromDB(ctx context.Context) {
+func RemoveUniqueKeyFromDB(ctx context.Context) (context.Context, error) {
 	database, ok := ctx.Value(config.ContextKey("database")).(Database)
 	if !ok {
-		panic("database not found in context")
+		return ctx, fmt.Errorf("database not found in context")
 	}
-	logging := logging.GetLoggerFromContext(ctx)
+	logging, err := logging.GetLoggerFromContext(ctx)
+	if err != nil {
+		return ctx, err
+	}
 	// we don't use ctx for the database deletion so we avoid getting the cancelled context state, which fails when Del runs
 	deletion, err := database.Client.Del(context.Background(), database.UniqueRunKey).Result()
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 	logging.DebugContext(ctx, fmt.Sprintf("removal of unique key %s from database returned %d (1 is success, 0 failed)", database.UniqueRunKey, deletion))
+	return ctx, nil
 }
 
 func CheckIfKeyExists(ctx context.Context, key string) (bool, error) {

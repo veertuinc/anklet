@@ -121,18 +121,25 @@ func extractLabelValue(labels []string, prefix string) string {
 }
 
 func sendCancelWorkflowRun(pluginCtx context.Context, logger *slog.Logger, workflow WorkflowRunJobDetail) error {
-	githubClient := internalGithub.GetGitHubClientFromContext(pluginCtx)
-	ctxPlugin := config.GetPluginFromContext(pluginCtx)
+	githubClient, err := internalGithub.GetGitHubClientFromContext(pluginCtx)
+	if err != nil {
+		return err
+	}
+	ctxPlugin, err := config.GetPluginFromContext(pluginCtx)
+	if err != nil {
+		return err
+	}
 	cancelSent := false
 	for {
-		pluginCtx, workflowRun, _, err := internalGithub.ExecuteGitHubClientFunction(pluginCtx, logger, func() (*github.WorkflowRun, *github.Response, error) {
+		newPluginCtx, workflowRun, _, err := internalGithub.ExecuteGitHubClientFunction(pluginCtx, logger, func() (*github.WorkflowRun, *github.Response, error) {
 			workflowRun, resp, err := githubClient.Actions.GetWorkflowRunByID(context.Background(), ctxPlugin.Owner, workflow.Repo, workflow.RunID)
 			return workflowRun, resp, err
 		})
 		if err != nil {
-			logger.ErrorContext(pluginCtx, "error getting workflow run by ID", "err", err)
+			logger.ErrorContext(newPluginCtx, "error getting workflow run by ID", "err", err)
 			return err
 		}
+		pluginCtx = newPluginCtx
 		if *workflowRun.Status == "completed" ||
 			(workflowRun.Conclusion != nil && *workflowRun.Conclusion == "cancelled") ||
 			cancelSent {
@@ -140,15 +147,16 @@ func sendCancelWorkflowRun(pluginCtx context.Context, logger *slog.Logger, workf
 		} else {
 			logger.WarnContext(pluginCtx, "workflow run is still active... waiting for cancellation so we can clean up...", "workflow_run_id", workflow.RunID)
 			if !cancelSent { // this has to happen here so that it doesn't error with "409 Cannot cancel a workflow run that is completed. " if the job is already cancelled
-				pluginCtx, cancelResponse, _, cancelErr := internalGithub.ExecuteGitHubClientFunction(pluginCtx, logger, func() (*github.Response, *github.Response, error) {
+				newPluginCtx, cancelResponse, _, cancelErr := internalGithub.ExecuteGitHubClientFunction(pluginCtx, logger, func() (*github.Response, *github.Response, error) {
 					resp, err := githubClient.Actions.CancelWorkflowRunByID(context.Background(), ctxPlugin.Owner, workflow.Repo, workflow.RunID)
 					return resp, nil, err
 				})
 				// don't use cancelResponse.Response.StatusCode or else it'll error with SIGSEV
 				if cancelErr != nil && !strings.Contains(cancelErr.Error(), "try again later") {
-					logger.ErrorContext(pluginCtx, "error executing githubClient.Actions.CancelWorkflowRunByID", "err", cancelErr, "response", cancelResponse)
+					logger.ErrorContext(newPluginCtx, "error executing githubClient.Actions.CancelWorkflowRunByID", "err", cancelErr, "response", cancelResponse)
 					return cancelErr
 				}
+				pluginCtx = newPluginCtx
 				cancelSent = true
 				logger.WarnContext(pluginCtx, "sent cancel workflow run", "workflow_run_id", workflow.RunID)
 			}
@@ -168,11 +176,15 @@ func CheckForCompletedJobs(
 	runOnce bool,
 	failureChannel chan bool,
 ) {
-	ctxPlugin := config.GetPluginFromContext(pluginCtx)
+	ctxPlugin, err := config.GetPluginFromContext(pluginCtx)
+	if err != nil {
+		logger.ErrorContext(pluginCtx, "error getting plugin from context", "err", err)
+		os.Exit(1)
+	}
 	databaseContainer, err := database.GetDatabaseFromContext(pluginCtx)
 	if err != nil {
 		logger.ErrorContext(pluginCtx, "error getting database from context", "err", err)
-		logging.Panic(workerCtx, pluginCtx, "error getting database from context")
+		os.Exit(1)
 	}
 	defer func() {
 		if checkForCompletedJobsMu != nil {
@@ -204,7 +216,7 @@ func CheckForCompletedJobs(
 		case <-completedJobChannel:
 			return
 		case <-pluginCtx.Done():
-			logger.WarnContext(pluginCtx, "CheckForCompletedJobs"+ctxPlugin.Name+" pluginCtx.Done()")
+			logging.DevContext(pluginCtx, "CheckForCompletedJobs"+ctxPlugin.Name+" pluginCtx.Done()")
 			return
 		default:
 		}
@@ -309,7 +321,11 @@ func cleanup(
 	cleanupMu.Lock()
 	// create an idependent copy of the pluginCtx so we can do cleanup even if pluginCtx got "context canceled"
 	cleanupContext := context.Background()
-	ctxPlugin := config.GetPluginFromContext(pluginCtx)
+	ctxPlugin, err := config.GetPluginFromContext(pluginCtx)
+	if err != nil {
+		logger.ErrorContext(pluginCtx, "error getting plugin from context", "err", err)
+		return
+	}
 	returnToMainQueue, ok := workerCtx.Value(config.ContextKey("returnToMainQueue")).(chan bool)
 	if !ok {
 		logger.ErrorContext(pluginCtx, "error getting returnToMainQueue from context")
@@ -385,7 +401,11 @@ func cleanup(
 				logger.ErrorContext(pluginCtx, "error unmarshalling payload to webhook.WorkflowJobPayload", "err", err)
 				return
 			}
-			ankaCLI := anka.GetAnkaCLIFromContext(pluginCtx)
+			ankaCLI, err := anka.GetAnkaCLIFromContext(pluginCtx)
+			if err != nil {
+				logger.ErrorContext(pluginCtx, "error getting ankaCLI from context", "err", err)
+				return
+			}
 			ankaCLI.AnkaDelete(workerCtx, pluginCtx, &vm)
 			databaseContainer.Client.Del(cleanupContext, "anklet/jobs/github/queued/"+ctxPlugin.Owner+"/"+ctxPlugin.Name+"/cleaning")
 			continue // required to keep processing tasks in the db list
@@ -437,9 +457,15 @@ func Run(
 	pluginCancel context.CancelFunc,
 	logger *slog.Logger,
 	metricsData *metrics.MetricsDataLock,
-) {
-	ctxPlugin := config.GetPluginFromContext(pluginCtx)
-	isRepoSet := config.GetIsRepoSetFromContext(pluginCtx)
+) (context.Context, error) {
+	ctxPlugin, err := config.GetPluginFromContext(pluginCtx)
+	if err != nil {
+		return pluginCtx, err
+	}
+	isRepoSet, err := config.GetIsRepoSetFromContext(pluginCtx)
+	if err != nil {
+		return pluginCtx, err
+	}
 
 	metricsData.AddPlugin(metrics.Plugin{
 		PluginBase: &metrics.PluginBase{
@@ -452,18 +478,26 @@ func Run(
 		},
 	})
 
-	logger.InfoContext(pluginCtx, "checking for jobs....")
-
-	configFileName := config.GetConfigFileNameFromContext(pluginCtx)
+	configFileName, err := config.GetConfigFileNameFromContext(pluginCtx)
+	if err != nil {
+		return pluginCtx, err
+	}
 
 	if ctxPlugin.Token == "" && ctxPlugin.PrivateKey == "" {
-		logging.Panic(workerCtx, pluginCtx, "token or private_key are not set at global level or in "+configFileName+":plugins:"+ctxPlugin.Name+"<token/private_key>")
+		return pluginCtx, fmt.Errorf("token or private_key are not set at global level or in " + configFileName + ":plugins:" + ctxPlugin.Name + "<token/private_key>")
 	}
 	if ctxPlugin.PrivateKey != "" && (ctxPlugin.AppID == 0 || ctxPlugin.InstallationID == 0) {
-		logging.Panic(workerCtx, pluginCtx, "private_key, app_id, and installation_id must all be set in "+configFileName+":plugins:"+ctxPlugin.Name+"<token/private_key>")
+		return pluginCtx, fmt.Errorf("private_key, app_id, and installation_id must all be set in " + configFileName + ":plugins:" + ctxPlugin.Name + "<token/private_key>")
+	}
+	if strings.HasPrefix(ctxPlugin.PrivateKey, "~/") {
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			return pluginCtx, fmt.Errorf("unable to get user home directory: " + err.Error())
+		}
+		ctxPlugin.PrivateKey = filepath.Join(homeDir, ctxPlugin.PrivateKey[2:])
 	}
 	if ctxPlugin.Owner == "" {
-		logging.Panic(workerCtx, pluginCtx, "owner is not set in "+configFileName+":plugins:"+ctxPlugin.Name+"<owner>")
+		return pluginCtx, fmt.Errorf("owner is not set in " + configFileName + ":plugins:" + ctxPlugin.Name + "<owner>")
 	}
 	// if ctxPlugin.Repo == "" {
 	// 	logging.Panic(workerCtx, pluginCtx, "repo is not set in anklet.yaml:plugins:"+ctxPlugin.Name+":repo")
@@ -471,12 +505,12 @@ func Run(
 
 	hostHasVmCapacity := anka.HostHasVmCapacity(pluginCtx)
 	if !hostHasVmCapacity {
-		logger.DebugContext(pluginCtx, "host does not have vm capacity")
-		return
+		// logger.DebugContext(pluginCtx, "host does not have vm capacity")
+		return pluginCtx, fmt.Errorf("host does not have vm capacity")
 	}
 
 	var githubClient *github.Client
-	githubClient, err := internalGithub.AuthenticateAndReturnGitHubClient(
+	githubClient, err = internalGithub.AuthenticateAndReturnGitHubClient(
 		pluginCtx,
 		logger,
 		ctxPlugin.PrivateKey,
@@ -485,8 +519,8 @@ func Run(
 		ctxPlugin.Token,
 	)
 	if err != nil {
-		logger.ErrorContext(pluginCtx, "error authenticating github client", "err", err)
-		return
+		// logger.ErrorContext(pluginCtx, "error authenticating github client", "err", err)
+		return pluginCtx, fmt.Errorf("error authenticating github client")
 	}
 	githubWrapperClient := internalGithub.NewGitHubClientWrapper(githubClient)
 	pluginCtx = context.WithValue(pluginCtx, config.ContextKey("githubwrapperclient"), githubWrapperClient)
@@ -511,8 +545,8 @@ func Run(
 
 	databaseContainer, err := database.GetDatabaseFromContext(pluginCtx)
 	if err != nil {
-		logger.ErrorContext(pluginCtx, "error getting database from context", "err", err)
-		return
+		// logger.ErrorContext(pluginCtx, "error getting database from context", "err", err)
+		return pluginCtx, fmt.Errorf("error getting database from context: %s", err.Error())
 	}
 
 	defer func() {
@@ -543,31 +577,33 @@ func Run(
 	case <-completedJobChannel:
 		logger.InfoContext(pluginCtx, "completed job found at start")
 		completedJobChannel <- github.WorkflowJobEvent{}
-		return
+		return pluginCtx, nil
 	case <-pluginCtx.Done():
 		logger.WarnContext(pluginCtx, "context canceled before completed job found")
-		return
+		return pluginCtx, nil
 	default:
 	}
+
+	logger.InfoContext(pluginCtx, "checking for jobs....")
 
 	var wrappedPayloadJSON string
 	// allow picking up where we left off
 	wrappedPayloadJSON, err = databaseContainer.Client.LIndex(pluginCtx, "anklet/jobs/github/queued/"+ctxPlugin.Owner+"/"+ctxPlugin.Name, -1).Result()
 	if err != nil && err != redis.Nil {
-		logger.ErrorContext(pluginCtx, "error getting last object from anklet/jobs/github/queued/"+ctxPlugin.Owner+"/"+ctxPlugin.Name, "err", err)
-		return
+		// logger.ErrorContext(pluginCtx, "error getting last object from anklet/jobs/github/queued/"+ctxPlugin.Owner+"/"+ctxPlugin.Name, "err", err)
+		return pluginCtx, fmt.Errorf("error getting last object from anklet/jobs/github/queued/" + ctxPlugin.Owner + "/" + ctxPlugin.Name)
 	}
 	if wrappedPayloadJSON == "" { // if we haven't done anything before, get something from the main queue
 		eldestQueuedJob, err := databaseContainer.Client.LPop(pluginCtx, "anklet/jobs/github/queued/"+ctxPlugin.Owner).Result()
 		if err == redis.Nil {
 			logger.DebugContext(pluginCtx, "no queued jobs found")
 			completedJobChannel <- github.WorkflowJobEvent{} // send true to the channel to stop the check for completed jobs goroutine
-			return
+			return pluginCtx, nil
 		}
 		if err != nil {
 			logger.ErrorContext(pluginCtx, "error getting queued jobs", "err", err)
 			metricsData.IncrementTotalFailedRunsSinceStart()
-			return
+			return pluginCtx, fmt.Errorf("error getting queued jobs: %s", err.Error())
 		}
 		databaseContainer.Client.RPush(pluginCtx, "anklet/jobs/github/queued/"+ctxPlugin.Owner+"/"+ctxPlugin.Name, eldestQueuedJob)
 		wrappedPayloadJSON = eldestQueuedJob
@@ -575,8 +611,8 @@ func Run(
 
 	queuedJob, err, typeErr := database.UnwrapPayload[github.WorkflowJobEvent](wrappedPayloadJSON)
 	if err != nil || typeErr != nil {
-		logger.ErrorContext(pluginCtx, "error unmarshalling job", "err", err)
-		return
+		// logger.ErrorContext(pluginCtx, "error unmarshalling job", "err", err)
+		return pluginCtx, fmt.Errorf("error unmarshalling job: %s", err.Error())
 	}
 	if !isRepoSet {
 		pluginCtx = logging.AppendCtx(pluginCtx, slog.String("repo", *queuedJob.Repo.Name))
@@ -586,7 +622,6 @@ func Run(
 	pluginCtx = logging.AppendCtx(pluginCtx, slog.Int64("workflowJobRunID", *queuedJob.WorkflowJob.RunID))
 	pluginCtx = logging.AppendCtx(pluginCtx, slog.String("workflowName", *queuedJob.WorkflowJob.WorkflowName))
 	pluginCtx = logging.AppendCtx(pluginCtx, slog.String("jobURL", *queuedJob.WorkflowJob.HTMLURL))
-
 	logger.DebugContext(pluginCtx, "queued job found", "queuedJob", queuedJob.Action)
 
 	// check if the job is already completed, so we don't orphan if there is
@@ -596,10 +631,10 @@ func Run(
 	case <-completedJobChannel:
 		logger.InfoContext(pluginCtx, "completed job found by CheckForCompletedJobs")
 		completedJobChannel <- github.WorkflowJobEvent{} // send true to the channel to stop the check for completed jobs goroutine
-		return
+		return pluginCtx, nil
 	case <-pluginCtx.Done():
 		logger.WarnContext(pluginCtx, "context canceled before completed job found")
-		return
+		return pluginCtx, nil
 	default:
 	}
 
@@ -613,8 +648,8 @@ func Run(
 	// pluginCtx = logging.AppendCtx(pluginCtx, slog.String("uniqueID", uniqueID))
 	ankaTemplate := extractLabelValue(queuedJob.WorkflowJob.Labels, "anka-template:")
 	if ankaTemplate == "" {
-		logger.WarnContext(pluginCtx, "warning: unable to find Anka Template specified in labels - skipping")
-		return
+		// logger.WarnContext(pluginCtx, "warning: unable to find Anka Template specified in labels - skipping")
+		return pluginCtx, fmt.Errorf("warning: unable to find Anka Template specified in labels - skipping")
 	}
 	pluginCtx = logging.AppendCtx(pluginCtx, slog.String("ankaTemplate", ankaTemplate))
 	ankaTemplateTag := extractLabelValue(queuedJob.WorkflowJob.Labels, "anka-template-tag:")
@@ -637,7 +672,10 @@ func Run(
 	}
 
 	// get anka CLI
-	ankaCLI := anka.GetAnkaCLIFromContext(pluginCtx)
+	ankaCLI, err := anka.GetAnkaCLIFromContext(pluginCtx)
+	if err != nil {
+		return pluginCtx, err
+	}
 
 	logger.InfoContext(pluginCtx, "handling anka workflow run job")
 	metricsData.SetStatus(pluginCtx, logger, "running")
@@ -648,9 +686,10 @@ func Run(
 	//TODO: be able to interrupt this
 	noTemplateTagExistsError, returnToQueueError := ankaCLI.EnsureVMTemplateExists(workerCtx, pluginCtx, workflowJob.AnkaTemplate, workflowJob.AnkaTemplateTag)
 	if returnToQueueError != nil {
+		// DO NOT RETURN AN ERROR TO MAIN. It will cause the other job on this node to be cancelled.
 		logger.WarnContext(pluginCtx, "problem ensuring vm template exists on host", "err", returnToQueueError)
 		failureChannel <- true // return to queue so another node can pick it up
-		return
+		return pluginCtx, nil
 	}
 	if noTemplateTagExistsError != nil {
 		logger.ErrorContext(pluginCtx, "error ensuring vm template exists on host", "err", noTemplateTagExistsError)
@@ -663,9 +702,9 @@ func Run(
 	}
 
 	if pluginCtx.Err() != nil {
-		logger.WarnContext(pluginCtx, "context canceled during vm template check")
+		// logger.WarnContext(pluginCtx, "context canceled during vm template check")
 		failureChannel <- true
-		return
+		return pluginCtx, fmt.Errorf("context canceled during vm template check")
 	}
 
 	if !skipPrep {
@@ -686,60 +725,64 @@ func Run(
 			})
 		}
 		if err != nil {
-			logger.ErrorContext(pluginCtx, "error creating registration token", "err", err, "response", response)
+			logger.DebugContext(pluginCtx, "error creating registration token", "err", err, "response", response)
 			metricsData.IncrementTotalFailedRunsSinceStart()
 			failureChannel <- true
-			return
+			return pluginCtx, fmt.Errorf("error creating registration token: %s", err.Error())
 		}
 		if *runnerRegistration.Token == "" {
-			logger.ErrorContext(pluginCtx, "registration token is empty; something wrong with github or your service token", "response", response)
+			logger.DebugContext(pluginCtx, "registration token is empty; something wrong with github or your service token", "response", response)
 			failureChannel <- true
-			return
+			return pluginCtx, fmt.Errorf("registration token is empty; something wrong with github or your service token")
 		}
 
 		if pluginCtx.Err() != nil {
-			logger.WarnContext(pluginCtx, "context canceled before ObtainAnkaVM")
+			// logger.WarnContext(pluginCtx, "context canceled before ObtainAnkaVM")
 			failureChannel <- true
-			return
+			return pluginCtx, fmt.Errorf("context canceled before ObtainAnkaVM")
 		}
 
 		// Obtain Anka VM (and name)
-		pluginCtx, vm, err := ankaCLI.ObtainAnkaVM(workerCtx, pluginCtx, workflowJob.AnkaTemplate)
+		newPluginCtx, vm, err := ankaCLI.ObtainAnkaVM(workerCtx, pluginCtx, workflowJob.AnkaTemplate)
 		wrappedVM := map[string]interface{}{
 			"type":    "anka.VM",
 			"payload": vm,
 		}
 		wrappedVmJSON, wrappedVmErr := json.Marshal(wrappedVM)
 		if wrappedVmErr != nil {
-			logger.ErrorContext(pluginCtx, "error marshalling vm to json", "err", wrappedVmErr)
+			// logger.ErrorContext(pluginCtx, "error marshalling vm to json", "err", wrappedVmErr)
 			ankaCLI.AnkaDelete(workerCtx, pluginCtx, vm)
 			failureChannel <- true
-			return
+			return newPluginCtx, fmt.Errorf("error marshalling vm to json: %s", wrappedVmErr.Error())
 		}
-		pluginCtx = logging.AppendCtx(pluginCtx, slog.String("vmName", vm.Name)) // TODO: THIS ISN"T WORKING
+		newPluginCtx = logging.AppendCtx(newPluginCtx, slog.String("vmName", vm.Name)) // TODO: THIS ISN"T WORKING
+		pluginCtx = newPluginCtx
 
 		dbErr := databaseContainer.Client.RPush(pluginCtx, "anklet/jobs/github/queued/"+ctxPlugin.Owner+"/"+ctxPlugin.Name, wrappedVmJSON).Err()
 		if dbErr != nil {
-			logger.ErrorContext(pluginCtx, "error pushing vm data to database", "err", dbErr)
+			// logger.ErrorContext(pluginCtx, "error pushing vm data to database", "err", dbErr)
 			failureChannel <- true
-			return
+			return newPluginCtx, fmt.Errorf("error pushing vm data to database: %s", dbErr.Error())
 		}
 		if err != nil {
 			// this is thrown, for example, when there is no capacity on the host
 			// we must be sure to create the DB entry so cleanup happens properly
-			logger.ErrorContext(pluginCtx, "error obtaining anka vm", "err", err)
+			// logger.ErrorContext(pluginCtx, "error obtaining anka vm", "err", err)
 			failureChannel <- true
-			return
+			return pluginCtx, fmt.Errorf("error obtaining anka vm: %s", err.Error())
 		}
 
 		if pluginCtx.Err() != nil {
-			logger.WarnContext(pluginCtx, "context canceled after ObtainAnkaVM")
+			// logger.WarnContext(pluginCtx, "context canceled after ObtainAnkaVM")
 			failureChannel <- true
-			return
+			return pluginCtx, fmt.Errorf("context canceled after ObtainAnkaVM")
 		}
 
 		// Install runner
-		globals := config.GetGlobalsFromContext(pluginCtx)
+		globals, err := config.GetGlobalsFromContext(pluginCtx)
+		if err != nil {
+			return pluginCtx, err
+		}
 		installRunnerPath := filepath.Join(globals.PluginsPath, "handlers", "github", "install-runner.bash")
 		registerRunnerPath := filepath.Join(globals.PluginsPath, "handlers", "github", "register-runner.bash")
 		startRunnerPath := filepath.Join(globals.PluginsPath, "handlers", "github", "start-runner.bash")
@@ -747,13 +790,13 @@ func Run(
 		_, registerRunnerErr := os.Stat(registerRunnerPath)
 		_, startRunnerErr := os.Stat(startRunnerPath)
 		if installRunnerErr != nil || registerRunnerErr != nil || startRunnerErr != nil {
-			logger.ErrorContext(pluginCtx, "must include install-runner.bash, register-runner.bash, and start-runner.bash in "+globals.PluginsPath+"/handlers/github/", "err", err)
+			// logger.ErrorContext(pluginCtx, "must include install-runner.bash, register-runner.bash, and start-runner.bash in "+globals.PluginsPath+"/handlers/github/", "err", err)
 			err := sendCancelWorkflowRun(pluginCtx, logger, workflowJob)
 			if err != nil {
 				logger.ErrorContext(pluginCtx, "error sending cancel workflow run", "err", err)
 			}
 			metricsData.IncrementTotalFailedRunsSinceStart()
-			return
+			return pluginCtx, fmt.Errorf("must include install-runner.bash, register-runner.bash, and start-runner.bash in " + globals.PluginsPath + "/handlers/github/")
 		}
 
 		// Copy runner scripts to VM
@@ -764,19 +807,19 @@ func Run(
 			startRunnerPath,
 		)
 		if err != nil {
-			logger.ErrorContext(pluginCtx, "error executing anka copy", "err", err)
+			// logger.ErrorContext(pluginCtx, "error executing anka copy", "err", err)
 			metricsData.IncrementTotalFailedRunsSinceStart()
 			failureChannel <- true
-			return
+			return pluginCtx, fmt.Errorf("error executing anka copy: %s", err.Error())
 		}
 		select {
 		case <-completedJobChannel:
-			logger.InfoContext(pluginCtx, "completed job found before installing runner")
+			logger.WarnContext(pluginCtx, "completed job found before installing runner")
 			completedJobChannel <- github.WorkflowJobEvent{} // send true to the channel to stop the check for completed jobs goroutine
-			return
+			return pluginCtx, nil
 		case <-pluginCtx.Done():
 			logger.WarnContext(pluginCtx, "context canceled before install runner")
-			return
+			return pluginCtx, nil
 		default:
 		}
 
@@ -784,19 +827,19 @@ func Run(
 		logger.DebugContext(pluginCtx, "installing github runner inside of vm")
 		installRunnerErr = ankaCLI.AnkaRun(pluginCtx, "./install-runner.bash")
 		if installRunnerErr != nil {
-			logger.ErrorContext(pluginCtx, "error executing install-runner.bash", "err", installRunnerErr)
+			// logger.ErrorContext(pluginCtx, "error executing install-runner.bash", "err", installRunnerErr)
 			failureChannel <- true
-			return
+			return pluginCtx, fmt.Errorf("error executing install-runner.bash: %s", installRunnerErr.Error())
 		}
 		// Register runner
 		select {
 		case <-completedJobChannel:
 			logger.InfoContext(pluginCtx, "completed job found before registering runner")
 			completedJobChannel <- github.WorkflowJobEvent{} // send true to the channel to stop the check for completed jobs goroutine
-			return
+			return pluginCtx, nil
 		case <-pluginCtx.Done():
 			logger.WarnContext(pluginCtx, "context canceled before register runner")
-			return
+			return pluginCtx, nil
 		default:
 		}
 		logger.DebugContext(pluginCtx, "registering github runner inside of vm")
@@ -805,9 +848,9 @@ func Run(
 			vm.Name, *runnerRegistration.Token, repositoryURL, strings.Join(workflowJob.Labels, ","), ctxPlugin.RunnerGroup,
 		)
 		if registerRunnerErr != nil {
-			logger.ErrorContext(pluginCtx, "error executing register-runner.bash", "err", registerRunnerErr)
+			// logger.ErrorContext(pluginCtx, "error executing register-runner.bash", "err", registerRunnerErr)
 			failureChannel <- true
-			return
+			return pluginCtx, fmt.Errorf("error executing register-runner.bash: %s", registerRunnerErr.Error())
 		}
 		defer removeSelfHostedRunner(pluginCtx, *vm, &workflowJob)
 		// Start runner
@@ -815,30 +858,30 @@ func Run(
 		case <-completedJobChannel:
 			logger.InfoContext(pluginCtx, "completed job found before starting runner")
 			completedJobChannel <- github.WorkflowJobEvent{} // send true to the channel to stop the check for completed jobs goroutine
-			return
+			return pluginCtx, nil
 		case <-pluginCtx.Done():
 			logger.WarnContext(pluginCtx, "context canceled before start runner")
-			return
+			return pluginCtx, nil
 		default:
 		}
 		logger.DebugContext(pluginCtx, "starting github runner inside of vm")
 		startRunnerErr = ankaCLI.AnkaRun(pluginCtx, "./start-runner.bash")
 		if startRunnerErr != nil {
-			logger.ErrorContext(pluginCtx, "error executing start-runner.bash", "err", startRunnerErr)
+			// logger.ErrorContext(pluginCtx, "error executing start-runner.bash", "err", startRunnerErr)
 			failureChannel <- true
-			return
+			return pluginCtx, fmt.Errorf("error executing start-runner.bash: %s", startRunnerErr.Error())
 		}
+
 		select {
 		case <-completedJobChannel:
 			logger.InfoContext(pluginCtx, "completed job found before jobCompleted checks")
 			completedJobChannel <- github.WorkflowJobEvent{} // send true to the channel to stop the check for completed jobs goroutine
-			return
+			return pluginCtx, nil
 		case <-pluginCtx.Done():
 			logger.WarnContext(pluginCtx, "context canceled before jobCompleted checks")
-			return
+			return pluginCtx, nil
 		default:
 		}
-
 	} // skipPrep
 
 	logger.InfoContext(pluginCtx, "watching for job completion")
@@ -855,7 +898,10 @@ func Run(
 					"conclusion", *completedJobEvent.WorkflowJob.Conclusion,
 				)
 				if *completedJobEvent.WorkflowJob.Conclusion == "success" {
-					metricsData := metrics.GetMetricsDataFromContext(workerCtx)
+					metricsData, err := metrics.GetMetricsDataFromContext(workerCtx)
+					if err != nil {
+						return pluginCtx, err
+					}
 					metricsData.IncrementTotalSuccessfulRunsSinceStart()
 					metricsData.UpdatePlugin(pluginCtx, logger, metrics.Plugin{
 						PluginBase: &metrics.PluginBase{
@@ -865,7 +911,10 @@ func Run(
 						LastSuccessfulRunJobUrl: *completedJobEvent.WorkflowJob.URL,
 					})
 				} else if *completedJobEvent.WorkflowJob.Conclusion == "failure" {
-					metricsData := metrics.GetMetricsDataFromContext(workerCtx)
+					metricsData, err := metrics.GetMetricsDataFromContext(workerCtx)
+					if err != nil {
+						return pluginCtx, err
+					}
 					metricsData.IncrementTotalFailedRunsSinceStart()
 					metricsData.UpdatePlugin(pluginCtx, logger, metrics.Plugin{
 						PluginBase: &metrics.PluginBase{
@@ -879,14 +928,14 @@ func Run(
 			} else if logCounter%2 == 0 {
 				if pluginCtx.Err() != nil {
 					logger.WarnContext(pluginCtx, "context canceled during job status check")
-					return
+					return pluginCtx, nil
 				}
 			}
 			completedJobChannel <- github.WorkflowJobEvent{} // so cleanup can also see it as completed
-			return
+			return pluginCtx, nil
 		case <-pluginCtx.Done():
 			logger.WarnContext(pluginCtx, "context canceled while watching for job completion")
-			return
+			return pluginCtx, nil
 		default:
 			time.Sleep(10 * time.Second)
 			if logCounter%2 == 0 {
@@ -941,13 +990,25 @@ func removeSelfHostedRunner(
 	vm anka.VM,
 	workflow *WorkflowRunJobDetail,
 ) {
-	logger := logging.GetLoggerFromContext(pluginCtx)
-	ctxPlugin := config.GetPluginFromContext(pluginCtx)
-	githubClient := internalGithub.GetGitHubClientFromContext(pluginCtx)
-	isRepoSet := config.GetIsRepoSetFromContext(pluginCtx)
+	var err error
 	var runnersList *github.Runners
 	var response *github.Response
-	var err error
+	logger, err := logging.GetLoggerFromContext(pluginCtx)
+	if err != nil {
+		fmt.Printf("{\"time\": \"%s\", \"function\": \"removeSelfHostedRunner\", \"error\": \"%s\"}\n", time.Now().Format(time.RFC3339), err.Error())
+	}
+	ctxPlugin, err := config.GetPluginFromContext(pluginCtx)
+	if err != nil {
+		logger.ErrorContext(pluginCtx, "error getting plugin from context", "err", err)
+	}
+	githubClient, err := internalGithub.GetGitHubClientFromContext(pluginCtx)
+	if err != nil {
+		logger.ErrorContext(pluginCtx, "error getting github client from context", "err", err)
+	}
+	isRepoSet, err := config.GetIsRepoSetFromContext(pluginCtx)
+	if err != nil {
+		logger.ErrorContext(pluginCtx, "error getting isRepoSet from context", "err", err)
+	}
 	if workflow.Conclusion == "failure" {
 		if isRepoSet {
 			pluginCtx, runnersList, response, err = internalGithub.ExecuteGitHubClientFunction(pluginCtx, logger, func() (*github.Runners, *github.Response, error) {

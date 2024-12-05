@@ -61,7 +61,7 @@ type MetricsDataLock struct {
 	MetricsData
 }
 
-func (m *MetricsDataLock) AddPlugin(plugin interface{}) {
+func (m *MetricsDataLock) AddPlugin(plugin interface{}) error {
 	m.Lock()
 	defer m.Unlock()
 	var pluginName string
@@ -71,7 +71,7 @@ func (m *MetricsDataLock) AddPlugin(plugin interface{}) {
 	case Plugin:
 		pluginName = pluginTyped.PluginBase.Name
 	default:
-		panic("unable to get plugin name")
+		return fmt.Errorf("unable to get plugin name")
 	}
 	for _, plugin := range m.Plugins {
 		var name string
@@ -81,13 +81,14 @@ func (m *MetricsDataLock) AddPlugin(plugin interface{}) {
 		case Plugin:
 			name = pluginTyped.PluginBase.Name
 		default:
-			panic("unable to get plugin name")
+			return fmt.Errorf("unable to get plugin name")
 		}
 		if name == pluginName { // already exists, don't do anything
-			return
+			return nil
 		}
 	}
 	m.Plugins = append(m.Plugins, plugin)
+	return nil
 }
 
 func (m *MetricsDataLock) IncrementTotalRunningVMs() {
@@ -116,12 +117,12 @@ func (m *MetricsDataLock) IncrementTotalFailedRunsSinceStart() {
 	m.TotalFailedRunsSinceStart++
 }
 
-func CompareAndUpdateMetrics(currentService interface{}, updatedPlugin interface{}) interface{} {
+func CompareAndUpdateMetrics(currentService interface{}, updatedPlugin interface{}) (interface{}, error) {
 	switch currentServiceTyped := currentService.(type) {
 	case Plugin:
 		updated, ok := updatedPlugin.(Plugin)
 		if !ok {
-			panic("unable to convert updatedPlugin to Plugin")
+			return nil, fmt.Errorf("unable to convert updatedPlugin to Plugin")
 		}
 		if updated.PluginName != "" {
 			currentServiceTyped.PluginName = updated.PluginName
@@ -144,11 +145,11 @@ func CompareAndUpdateMetrics(currentService interface{}, updatedPlugin interface
 		if updated.LastFailedRunJobUrl != "" {
 			currentServiceTyped.LastFailedRunJobUrl = updated.LastFailedRunJobUrl
 		}
-		return currentServiceTyped
+		return currentServiceTyped, nil
 	case PluginBase:
 		updated, ok := updatedPlugin.(PluginBase)
 		if !ok {
-			panic("unable to convert updatedPlugin to PluginBase")
+			return nil, fmt.Errorf("unable to convert updatedPlugin to PluginBase")
 		}
 		if updated.PluginName != "" {
 			currentServiceTyped.PluginName = updated.PluginName
@@ -159,9 +160,9 @@ func CompareAndUpdateMetrics(currentService interface{}, updatedPlugin interface
 			}
 			currentServiceTyped.Status = updated.Status
 		}
-		return currentServiceTyped
+		return currentServiceTyped, nil
 	default:
-		panic("unable to convert currentService to Plugin or PluginBase")
+		return nil, fmt.Errorf("unable to convert currentService to Plugin or PluginBase")
 	}
 }
 
@@ -201,16 +202,25 @@ func UpdateSystemMetrics(pluginCtx context.Context, logger *slog.Logger, metrics
 	metricsData.HostDiskUsedBytes = uint64(diskStat.Used)
 }
 
-func UpdatePlugin(workerCtx context.Context, pluginCtx context.Context, logger *slog.Logger, updatedPlugin interface{}) {
-	ctxPlugin := config.GetPluginFromContext(pluginCtx)
-	metricsData := GetMetricsDataFromContext(workerCtx)
+func UpdatePlugin(workerCtx context.Context, pluginCtx context.Context, logger *slog.Logger, updatedPlugin interface{}) error {
+	ctxPlugin, err := config.GetPluginFromContext(pluginCtx)
+	if err != nil {
+		return err
+	}
+	metricsData, err := GetMetricsDataFromContext(workerCtx)
+	if err != nil {
+		return err
+	}
 	switch updatedPlugin.(type) {
 	case Plugin:
 		for i, currentPluginMetrics := range metricsData.Plugins {
 			switch fullCurrentPluginMetrics := currentPluginMetrics.(type) {
 			case Plugin:
 				if fullCurrentPluginMetrics.PluginBase.Name == ctxPlugin.Name {
-					newPlugin := CompareAndUpdateMetrics(currentPluginMetrics, updatedPlugin)
+					newPlugin, err := CompareAndUpdateMetrics(currentPluginMetrics, updatedPlugin)
+					if err != nil {
+						return err
+					}
 					metricsData.Plugins[i] = newPlugin
 				}
 			}
@@ -220,28 +230,36 @@ func UpdatePlugin(workerCtx context.Context, pluginCtx context.Context, logger *
 			switch fullCurrentPluginMetrics := currentPluginMetrics.(type) {
 			case PluginBase:
 				if fullCurrentPluginMetrics.Name == ctxPlugin.Name {
-					newPlugin := CompareAndUpdateMetrics(currentPluginMetrics, updatedPlugin)
+					newPlugin, err := CompareAndUpdateMetrics(currentPluginMetrics, updatedPlugin)
+					if err != nil {
+						return err
+					}
 					metricsData.Plugins[i] = newPlugin
 				}
 			}
 		}
 	}
+	return nil
 }
 
-func (m *MetricsDataLock) UpdatePlugin(pluginCtx context.Context, logger *slog.Logger, updatedPlugin interface{}) {
+func (m *MetricsDataLock) UpdatePlugin(pluginCtx context.Context, logger *slog.Logger, updatedPlugin interface{}) error {
 	m.Lock()
 	defer m.Unlock()
 	var name string
 	switch fullUpdatedPlugin := updatedPlugin.(type) {
 	case Plugin:
 		if fullUpdatedPlugin.Name == "" {
-			panic("updatePlugin.Name is required")
+			return fmt.Errorf("updatePlugin.Name is required")
 		}
 		for i, plugin := range m.Plugins {
 			switch typedPlugin := plugin.(type) {
 			case Plugin:
 				if fullUpdatedPlugin.Name == typedPlugin.Name {
-					m.Plugins[i] = CompareAndUpdateMetrics(typedPlugin, updatedPlugin)
+					newPlugin, err := CompareAndUpdateMetrics(typedPlugin, updatedPlugin)
+					if err != nil {
+						return err
+					}
+					m.Plugins[i] = newPlugin
 				}
 			}
 		}
@@ -251,17 +269,25 @@ func (m *MetricsDataLock) UpdatePlugin(pluginCtx context.Context, logger *slog.L
 			switch typedPlugin := plugin.(type) {
 			case PluginBase:
 				if name == typedPlugin.Name {
-					m.Plugins[i] = CompareAndUpdateMetrics(typedPlugin, updatedPlugin)
+					newPlugin, err := CompareAndUpdateMetrics(typedPlugin, updatedPlugin)
+					if err != nil {
+						return err
+					}
+					m.Plugins[i] = newPlugin
 				}
 			}
 		}
 	}
+	return nil
 }
 
-func (m *MetricsDataLock) SetStatus(pluginCtx context.Context, logger *slog.Logger, status string) {
+func (m *MetricsDataLock) SetStatus(pluginCtx context.Context, logger *slog.Logger, status string) error {
 	m.Lock()
 	defer m.Unlock()
-	ctxPlugin := config.GetPluginFromContext(pluginCtx)
+	ctxPlugin, err := config.GetPluginFromContext(pluginCtx)
+	if err != nil {
+		return err
+	}
 	for i, plugin := range m.Plugins {
 		switch typedPlugin := plugin.(type) {
 		case Plugin:
@@ -276,6 +302,7 @@ func (m *MetricsDataLock) SetStatus(pluginCtx context.Context, logger *slog.Logg
 			}
 		}
 	}
+	return nil
 }
 
 // NewServer creates a new instance of Server
@@ -289,7 +316,11 @@ func NewServer(port string) *Server {
 func (s *Server) Start(parentCtx context.Context, logger *slog.Logger, soloReceiver bool) {
 	http.HandleFunc("/metrics/v1", func(w http.ResponseWriter, r *http.Request) {
 		// update system metrics each call
-		metricsData := GetMetricsDataFromContext(parentCtx)
+		metricsData, err := GetMetricsDataFromContext(parentCtx)
+		if err != nil {
+			http.Error(w, "failed to get metrics data", http.StatusInternalServerError)
+			return
+		}
 		UpdateSystemMetrics(parentCtx, logger, metricsData)
 		//
 		if r.URL.Query().Get("format") == "json" {
@@ -523,10 +554,10 @@ func (s *Server) handlePrometheusMetrics(ctx context.Context, soloReceiver bool)
 	}
 }
 
-func GetMetricsDataFromContext(ctx context.Context) *MetricsDataLock {
+func GetMetricsDataFromContext(ctx context.Context) (*MetricsDataLock, error) {
 	metricsData, ok := ctx.Value(config.ContextKey("metrics")).(*MetricsDataLock)
 	if !ok {
-		panic("GetHttpTransportFromContext failed")
+		return nil, fmt.Errorf("GetMetricsDataFromContext failed")
 	}
-	return metricsData
+	return metricsData, nil
 }

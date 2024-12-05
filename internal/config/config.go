@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"strconv"
 	"strings"
@@ -191,12 +192,12 @@ func LoadInEnvs(config Config) (Config, error) {
 	return config, nil
 }
 
-func GetPluginFromContext(ctx context.Context) Plugin {
+func GetPluginFromContext(ctx context.Context) (Plugin, error) {
 	plugin, ok := ctx.Value(ContextKey("plugin")).(Plugin)
 	if !ok {
-		panic("GetPluginFromContext failed")
+		return Plugin{}, fmt.Errorf("GetPluginFromContext failed")
 	}
-	return plugin
+	return plugin, nil
 }
 
 type Globals struct {
@@ -206,34 +207,34 @@ type Globals struct {
 	DebugEnabled bool
 }
 
-func GetGlobalsFromContext(ctx context.Context) Globals {
+func GetGlobalsFromContext(ctx context.Context) (Globals, error) {
 	globals, ok := ctx.Value(ContextKey("globals")).(Globals)
 	if !ok {
-		panic("GetGlobalsFromContext failed")
+		return Globals{}, fmt.Errorf("GetGlobalsFromContext failed")
 	}
-	return globals
+	return globals, nil
 }
 
-func GetLoadedConfigFromContext(ctx context.Context) *Config {
+func GetLoadedConfigFromContext(ctx context.Context) (*Config, error) {
 	config, ok := ctx.Value(ContextKey("config")).(*Config)
 	if !ok {
-		panic("GetLoadedConfigFromContext failed")
+		return nil, fmt.Errorf("GetLoadedConfigFromContext failed")
 	}
-	return config
+	return config, nil
 }
 
-func GetIsRepoSetFromContext(ctx context.Context) bool {
+func GetIsRepoSetFromContext(ctx context.Context) (bool, error) {
 	isRepoSet, ok := ctx.Value(ContextKey("isRepoSet")).(bool)
 	if !ok {
-		panic("GetIsRepoSetFromContext failed")
+		return false, fmt.Errorf("GetIsRepoSetFromContext failed")
 	}
-	return isRepoSet
+	return isRepoSet, nil
 }
 
-func GetConfigFileNameFromContext(ctx context.Context) string {
+func GetConfigFileNameFromContext(ctx context.Context) (string, error) {
 	configFileName, ok := ctx.Value(ContextKey("configFileName")).(string)
 	if !ok {
-		panic("GetConfigFileNameFromContext failed")
+		return "", fmt.Errorf("GetConfigFileNameFromContext failed")
 	}
-	return configFileName
+	return configFileName, nil
 }

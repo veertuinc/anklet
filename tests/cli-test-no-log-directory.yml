@@ -1,0 +1,7 @@
+---
+work_dir: /tmp/
+pid_file_dir: /tmp/
+log:
+  # if file_dir is not set, it will be set to current directory you execute anklet in
+  file_dir: /tmp/doesntexist
+plugins:

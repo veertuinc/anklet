@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -82,9 +84,15 @@ func Run(
 	logger *slog.Logger,
 	firstPluginStarted chan bool,
 	metricsData *metrics.MetricsDataLock,
-) {
-	ctxPlugin := config.GetPluginFromContext(pluginCtx)
-	isRepoSet := config.GetIsRepoSetFromContext(pluginCtx)
+) (context.Context, error) {
+	ctxPlugin, err := config.GetPluginFromContext(pluginCtx)
+	if err != nil {
+		return pluginCtx, err
+	}
+	isRepoSet, err := config.GetIsRepoSetFromContext(pluginCtx)
+	if err != nil {
+		return pluginCtx, err
+	}
 	metricsData.AddPlugin(
 		metrics.PluginBase{
 			Name:        ctxPlugin.Name,
@@ -96,20 +104,30 @@ func Run(
 		},
 	)
 
-	configFileName := config.GetConfigFileNameFromContext(pluginCtx)
+	configFileName, err := config.GetConfigFileNameFromContext(pluginCtx)
+	if err != nil {
+		return pluginCtx, err
+	}
 	if ctxPlugin.Token == "" && ctxPlugin.PrivateKey == "" {
-		logging.Panic(workerCtx, pluginCtx, "token or private_key are not set at global level or in "+configFileName+":plugins:"+ctxPlugin.Name)
+		return pluginCtx, fmt.Errorf("token or private_key are not set at global level or in " + configFileName + ":plugins:" + ctxPlugin.Name)
+	}
+	if strings.HasPrefix(ctxPlugin.PrivateKey, "~/") {
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			return pluginCtx, fmt.Errorf("unable to get user home directory: " + err.Error())
+		}
+		ctxPlugin.PrivateKey = filepath.Join(homeDir, ctxPlugin.PrivateKey[2:])
 	}
 	if ctxPlugin.Owner == "" {
-		logging.Panic(workerCtx, pluginCtx, "owner is not set in "+configFileName+":plugins:"+ctxPlugin.Name)
+		return pluginCtx, fmt.Errorf("owner is not set in " + configFileName + ":plugins:" + ctxPlugin.Name)
 	}
 	if ctxPlugin.Secret == "" {
-		logging.Panic(workerCtx, pluginCtx, "secret is not set in "+configFileName+":plugins:"+ctxPlugin.Name)
+		return pluginCtx, fmt.Errorf("secret is not set in " + configFileName + ":plugins:" + ctxPlugin.Name)
 	}
 
 	databaseContainer, err := database.GetDatabaseFromContext(pluginCtx)
 	if err != nil {
-		logging.Panic(pluginCtx, pluginCtx, "error getting database client from context: "+err.Error())
+		return pluginCtx, fmt.Errorf("error getting database client from context: " + err.Error())
 	}
 
 	var githubClient *github.Client
@@ -122,8 +140,8 @@ func Run(
 		ctxPlugin.Token,
 	)
 	if err != nil {
-		logger.ErrorContext(pluginCtx, "error authenticating github client", "err", err)
-		return
+		// logger.ErrorContext(pluginCtx, "error authenticating github client", "err", err)
+		return pluginCtx, fmt.Errorf("error authenticating github client: " + err.Error())
 	}
 
 	server := &http.Server{Addr: ":" + ctxPlugin.Port}
@@ -134,7 +152,8 @@ func Run(
 	http.HandleFunc("/jobs/v1/receiver", func(w http.ResponseWriter, r *http.Request) {
 		databaseContainer, err := database.GetDatabaseFromContext(pluginCtx)
 		if err != nil {
-			logging.Panic(pluginCtx, pluginCtx, "error getting database client from context: "+err.Error())
+			logger.ErrorContext(pluginCtx, "error getting database client from context", "error", err)
+			return
 		}
 		payload, err := github.ValidatePayload(r, []byte(ctxPlugin.Secret))
 		if err != nil {
@@ -453,8 +472,8 @@ func Run(
 			})
 		}
 		if err != nil {
-			logger.ErrorContext(pluginCtx, "error listing hooks", "err", err)
-			return
+			// logger.ErrorContext(pluginCtx, "error listing hooks", "err", err)
+			return pluginCtx, fmt.Errorf("error listing hooks: %s", err.Error())
 		}
 
 		for _, hookDelivery := range *hookDeliveries {
@@ -494,29 +513,29 @@ func Run(
 	// 	// get all keys from database for the main queue and service queues as well as completed
 	queuedKeys, err := databaseContainer.Client.Keys(pluginCtx, "anklet/jobs/github/queued/"+ctxPlugin.Owner+"*").Result()
 	if err != nil {
-		logger.ErrorContext(pluginCtx, "error getting list of keys", "err", err)
-		return
+		// logger.ErrorContext(pluginCtx, "error getting list of keys", "err", err)
+		return pluginCtx, fmt.Errorf("error getting list of keys: %s", err.Error())
 	}
 	var allQueuedJobs = make(map[string][]string)
 	for _, key := range queuedKeys {
 		queuedJobs, err := databaseContainer.Client.LRange(pluginCtx, key, 0, -1).Result()
 		if err != nil {
-			logger.ErrorContext(pluginCtx, "error getting list of queued jobs for key: "+key, "err", err)
-			return
+			// logger.ErrorContext(pluginCtx, "error getting list of queued jobs for key: "+key, "err", err)
+			return pluginCtx, fmt.Errorf("error getting list of queued jobs for key: %s", err.Error())
 		}
 		allQueuedJobs[key] = queuedJobs
 	}
 	completedKeys, err := databaseContainer.Client.Keys(pluginCtx, "anklet/jobs/github/completed"+ctxPlugin.Owner+"*").Result()
 	if err != nil {
-		logger.ErrorContext(pluginCtx, "error getting list of keys", "err", err)
-		return
+		// logger.ErrorContext(pluginCtx, "error getting list of keys", "err", err)
+		return pluginCtx, fmt.Errorf("error getting list of keys: %s", err.Error())
 	}
 	var allCompletedJobs = make(map[string][]string)
 	for _, key := range completedKeys {
 		completedJobs, err := databaseContainer.Client.LRange(pluginCtx, key, 0, -1).Result()
 		if err != nil {
-			logger.ErrorContext(pluginCtx, "error getting list of queued jobs for key: "+key, "err", err)
-			return
+			// logger.ErrorContext(pluginCtx, "error getting list of queued jobs for key: "+key, "err", err)
+			return pluginCtx, fmt.Errorf("error getting list of queued jobs for key: %s", err.Error())
 		}
 		allCompletedJobs[key] = completedJobs
 	}
@@ -545,14 +564,14 @@ MainLoop:
 			})
 		}
 		if err != nil {
-			logger.ErrorContext(pluginCtx, "error listing hooks", "err", err)
-			return
+			// logger.ErrorContext(pluginCtx, "error listing hooks", "err", err)
+			return pluginCtx, fmt.Errorf("error listing hooks: %s", err.Error())
 		}
 		var workflowJobEvent github.WorkflowJobEvent
 		err = json.Unmarshal(*gottenHookDelivery.Request.RawPayload, &workflowJobEvent)
 		if err != nil {
-			logger.ErrorContext(pluginCtx, "error unmarshalling hook request raw payload to HookResponse", "err", err)
-			return
+			// logger.ErrorContext(pluginCtx, "error unmarshalling hook request raw payload to HookResponse", "err", err)
+			return pluginCtx, fmt.Errorf("error unmarshalling hook request raw payload to HookResponse: %s", err.Error())
 		}
 
 		inQueued := false
@@ -580,8 +599,8 @@ MainLoop:
 				}
 				wrappedPayload, err, typeErr := database.UnwrapPayload[github.WorkflowJobEvent](queuedJob)
 				if err != nil {
-					logger.ErrorContext(pluginCtx, "error unmarshalling job", "err", err)
-					return
+					// logger.ErrorContext(pluginCtx, "error unmarshalling job", "err", err)
+					return pluginCtx, fmt.Errorf("error unmarshalling job: %s", err.Error())
 				}
 				if typeErr != nil { // not the type we want
 					continue
@@ -607,8 +626,8 @@ MainLoop:
 				for index, completedJob := range completedJobs {
 					wrappedPayload, err, typeErr := database.UnwrapPayload[github.WorkflowJobEvent](completedJob)
 					if err != nil {
-						logger.ErrorContext(pluginCtx, "error unmarshalling job", "err", err)
-						return
+						// logger.ErrorContext(pluginCtx, "error unmarshalling job", "err", err)
+						return pluginCtx, fmt.Errorf("error unmarshalling job: %s", err.Error())
 					}
 					if typeErr != nil { // not the type we want
 						continue
@@ -632,8 +651,8 @@ MainLoop:
 		if inCompleted && !inQueued {
 			_, err = databaseContainer.Client.LRem(pluginCtx, inCompletedListKey, 1, allCompletedJobs[inCompletedListKey][inCompletedIndex]).Result()
 			if err != nil {
-				logger.ErrorContext(pluginCtx, "error removing completedJob from anklet/jobs/github/completed/"+ctxPlugin.Owner, "err", err, "completedJob", allCompletedJobs[inCompletedListKey][inCompletedIndex])
-				return
+				// logger.ErrorContext(pluginCtx, "error removing completedJob from anklet/jobs/github/completed/"+ctxPlugin.Owner, "err", err, "completedJob", allCompletedJobs[inCompletedListKey][inCompletedIndex])
+				return pluginCtx, fmt.Errorf("error removing completedJob from anklet/jobs/github/completed/"+ctxPlugin.Owner+": %s", err.Error())
 			}
 			continue
 		}
@@ -665,14 +684,14 @@ MainLoop:
 						})
 					}
 					if err != nil {
-						logger.ErrorContext(pluginCtx, "error listing hooks", "err", err)
-						return
+						// logger.ErrorContext(pluginCtx, "error listing hooks", "err", err)
+						return pluginCtx, fmt.Errorf("error listing hooks: %s", err.Error())
 					}
 					var otherWorkflowJobEvent github.WorkflowJobEvent
 					err = json.Unmarshal(*otherGottenHookDelivery.Request.RawPayload, &otherWorkflowJobEvent)
 					if err != nil {
-						logger.ErrorContext(pluginCtx, "error unmarshalling hook request raw payload to HookResponse", "err", err)
-						return
+						// logger.ErrorContext(pluginCtx, "error unmarshalling hook request raw payload to HookResponse", "err", err)
+						return pluginCtx, fmt.Errorf("error unmarshalling hook request raw payload to HookResponse: %s", err.Error())
 					}
 					if *workflowJobEvent.WorkflowJob.ID == *otherWorkflowJobEvent.WorkflowJob.ID {
 						continue MainLoop
@@ -735,6 +754,8 @@ MainLoop:
 	<-pluginCtx.Done()
 	logger.InfoContext(pluginCtx, "shutting down receiver")
 	if err := server.Shutdown(pluginCtx); err != nil {
-		logger.ErrorContext(pluginCtx, "receiver shutdown error", "error", err)
+		// logger.ErrorContext(pluginCtx, "receiver shutdown error", "error", err)
+		return pluginCtx, fmt.Errorf("receiver shutdown error: %s", err.Error())
 	}
+	return pluginCtx, nil
 }

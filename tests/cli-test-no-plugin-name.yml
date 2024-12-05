@@ -1,0 +1,16 @@
+---
+global_private_key: ~/anklet-private-key.pem
+plugins:
+  - plugin: plugin1
+    app_id: 949431
+    installation_id: 52970581
+    owner: mycompanyone
+    registry_url: http://anka.registry:8089
+    sleep_interval: 5
+  - name: RUNNER2
+    plugin: plugin2
+    app_id: 949431
+    installation_id: 52970581
+    owner: mycompanytwo
+    registry_url: http://anka.registry:8089
+    sleep_interval: 10

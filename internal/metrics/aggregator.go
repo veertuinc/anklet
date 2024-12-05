@@ -22,7 +22,11 @@ func (s *Server) StartAggregatorServer(workerCtx context.Context, logger *slog.L
 			logger.ErrorContext(workerCtx, "error getting database client from context", "error", err)
 			return
 		}
-		loadedConfig := config.GetLoadedConfigFromContext(workerCtx)
+		loadedConfig, err := config.GetLoadedConfigFromContext(workerCtx)
+		if err != nil {
+			logger.ErrorContext(workerCtx, "error getting loaded config from context", "error", err)
+			return
+		}
 		if r.URL.Query().Get("format") == "json" {
 			s.handleAggregatorJsonMetrics(workerCtx, logger, databaseContainer, loadedConfig)(w, r)
 		} else if r.URL.Query().Get("format") == "prometheus" {
