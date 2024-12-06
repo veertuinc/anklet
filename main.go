@@ -416,8 +416,9 @@ func worker(parentCtx context.Context, logger *slog.Logger, loadedConfig config.
 					logging.DevContext(pluginCtx, "plugin is not a receiver; loading the anka CLI")
 					ankaCLI, err := anka.NewCLI(pluginCtx)
 					if err != nil {
-						pluginCancel()
 						logger.ErrorContext(pluginCtx, "unable to create anka cli", "error", err)
+						pluginCancel()
+						workerCancel()
 						return
 					}
 					pluginCtx = context.WithValue(pluginCtx, config.ContextKey("ankacli"), ankaCLI)
@@ -443,6 +444,7 @@ func worker(parentCtx context.Context, logger *slog.Logger, loadedConfig config.
 					if err != nil {
 						logger.ErrorContext(pluginCtx, "unable to access database", "error", err)
 						pluginCancel()
+						workerCancel()
 						return
 					}
 					pluginCtx = context.WithValue(pluginCtx, config.ContextKey("database"), databaseClient)

@@ -505,8 +505,8 @@ func Run(
 
 	hostHasVmCapacity := anka.HostHasVmCapacity(pluginCtx)
 	if !hostHasVmCapacity {
-		// logger.DebugContext(pluginCtx, "host does not have vm capacity")
-		return pluginCtx, fmt.Errorf("host does not have vm capacity")
+		logger.WarnContext(pluginCtx, "host does not have vm capacity")
+		return pluginCtx, nil
 	}
 
 	var githubClient *github.Client
@@ -767,9 +767,9 @@ func Run(
 		if err != nil {
 			// this is thrown, for example, when there is no capacity on the host
 			// we must be sure to create the DB entry so cleanup happens properly
-			// logger.ErrorContext(pluginCtx, "error obtaining anka vm", "err", err)
+			logger.ErrorContext(pluginCtx, "error obtaining anka vm", "err", err)
 			failureChannel <- true
-			return pluginCtx, fmt.Errorf("error obtaining anka vm: %s", err.Error())
+			return pluginCtx, nil
 		}
 
 		if pluginCtx.Err() != nil {
