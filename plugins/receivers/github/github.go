@@ -25,6 +25,8 @@ type Server struct {
 	Port string
 }
 
+var once sync.Once
+
 // NewServer creates a new instance of Server
 func NewServer(port string) *Server {
 	return &Server{
@@ -104,6 +106,9 @@ func Run(
 		},
 	)
 
+	once.Do(func() {
+		metrics.ExportMetricsToDB(pluginCtx, logger)
+	})
 	configFileName, err := config.GetConfigFileNameFromContext(pluginCtx)
 	if err != nil {
 		return pluginCtx, err

@@ -111,6 +111,8 @@ type WorkflowRunJobDetail struct {
 // 	return true
 // }
 
+var once sync.Once
+
 func extractLabelValue(labels []string, prefix string) string {
 	for _, label := range labels {
 		if strings.HasPrefix(label, prefix) {
@@ -476,6 +478,10 @@ func Run(
 			Status:      "idle",
 			StatusSince: time.Now(),
 		},
+	})
+
+	once.Do(func() {
+		metrics.ExportMetricsToDB(pluginCtx, logger)
 	})
 
 	configFileName, err := config.GetConfigFileNameFromContext(pluginCtx)
