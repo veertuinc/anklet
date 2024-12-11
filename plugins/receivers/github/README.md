@@ -10,6 +10,8 @@ The Github Receiver Plugin is used to receive webhook events from github and sto
 
 In the `config.yml`, you can define the `github_receiver` plugin as follows:
 
+**NOTE: Plugin names MUST be unique across all hosts.**
+
 ```
 global_receiver_secret: 12345 # this can be set using the ANKLET_GLOBAL_RECEIVER_SECRET env var too
 plugins:

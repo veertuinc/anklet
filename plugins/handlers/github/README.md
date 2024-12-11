@@ -10,6 +10,8 @@ For help setting up the database, see [Database Setup](https://github.com/veertu
 
 In the `config.yml`, you can define the `github` plugin as follows:
 
+**NOTE: Plugin names MUST be unique across all hosts.**
+
 ```
 plugins:
   - name: RUNNER1

@@ -144,6 +144,9 @@ func Run(
 		return pluginCtx, fmt.Errorf("error authenticating github client: " + err.Error())
 	}
 
+	// clean up in_progress queue if it exists
+	databaseContainer.Client.Del(pluginCtx, "anklet/jobs/github/in_progress/"+ctxPlugin.Owner)
+
 	server := &http.Server{Addr: ":" + ctxPlugin.Port}
 	http.HandleFunc("/healthcheck", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -199,6 +202,43 @@ func Run(
 							return
 						}
 						logger.InfoContext(pluginCtx, "job pushed to queued queue",
+							"workflowJob.ID", *workflowJob.WorkflowJob.ID,
+							"workflowJob.Name", *workflowJob.WorkflowJob.Name,
+							"workflowJob.RunID", *workflowJob.WorkflowJob.RunID,
+							"html_url", *workflowJob.WorkflowJob.HTMLURL,
+							"status", *workflowJob.WorkflowJob.Status,
+							"conclusion", workflowJob.WorkflowJob.Conclusion,
+							"started_at", workflowJob.WorkflowJob.StartedAt,
+							"completed_at", workflowJob.WorkflowJob.CompletedAt,
+						)
+					}
+				}
+			} else if *workflowJob.Action == "in_progress" {
+				// store in_progress so we can know if the registration failed
+				if exists_in_array_partial(workflowJob.WorkflowJob.Labels, []string{"anka-template"}) {
+					// make sure it doesn't already exist
+					inQueue, err := InQueue(pluginCtx, logger, *workflowJob.WorkflowJob.ID, "anklet/jobs/github/in_progress/"+ctxPlugin.Owner)
+					if err != nil {
+						logger.ErrorContext(pluginCtx, "error searching in queue", "error", err)
+						return
+					}
+					if !inQueue { // if it doesn't exist already
+						// push it to the queue
+						wrappedJobPayload := map[string]interface{}{
+							"type":    "WorkflowJobPayload",
+							"payload": workflowJob,
+						}
+						wrappedPayloadJSON, err := json.Marshal(wrappedJobPayload)
+						if err != nil {
+							logger.ErrorContext(pluginCtx, "error converting job payload to JSON", "error", err)
+							return
+						}
+						push := databaseContainer.Client.RPush(pluginCtx, "anklet/jobs/github/in_progress/"+ctxPlugin.Owner, wrappedPayloadJSON)
+						if push.Err() != nil {
+							logger.ErrorContext(pluginCtx, "error pushing job to queue", "error", push.Err())
+							return
+						}
+						logger.InfoContext(pluginCtx, "job pushed to in_progress queue",
 							"workflowJob.ID", *workflowJob.WorkflowJob.ID,
 							"workflowJob.Name", *workflowJob.WorkflowJob.Name,
 							"workflowJob.RunID", *workflowJob.WorkflowJob.RunID,

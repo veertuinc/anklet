@@ -32,7 +32,8 @@ type Config struct {
 }
 
 type Log struct {
-	FileDir string `yaml:"file_dir"`
+	FileDir       string `yaml:"file_dir"`
+	SplitByPlugin bool   `yaml:"split_by_plugin"`
 }
 
 type Metrics struct {

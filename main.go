@@ -53,9 +53,8 @@ var (
 
 func main() {
 
-	logger := logging.New()
+	parentLogger := logging.New()
 	parentCtx := context.Background()
-	parentCtx = context.WithValue(parentCtx, config.ContextKey("logger"), logger)
 
 	if version == "" {
 		version = "dev" // Default version if not set by go build
@@ -71,7 +70,7 @@ func main() {
 
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
-		logger.ErrorContext(parentCtx, "unable to get user home directory", "error", err)
+		parentLogger.ErrorContext(parentCtx, "unable to get user home directory", "error", err)
 		os.Exit(1)
 	}
 
@@ -93,15 +92,15 @@ func main() {
 	// obtain config
 	loadedConfig, err := config.LoadConfig(configPath)
 	if err != nil {
-		logger.ErrorContext(parentCtx, "unable to load config.yml (is it in the work_dir, or are you using an absolute path?)", "error", err)
+		parentLogger.ErrorContext(parentCtx, "unable to load config.yml (is it in the work_dir, or are you using an absolute path?)", "error", err)
 		os.Exit(1)
 	}
 	loadedConfig, err = config.LoadInEnvs(loadedConfig)
 	if err != nil {
-		logger.ErrorContext(parentCtx, "unable to load config.yml from environment variables", "error", err)
+		parentLogger.ErrorContext(parentCtx, "unable to load config.yml from environment variables", "error", err)
 		os.Exit(1)
 	}
-	logger.InfoContext(parentCtx, "loaded config", slog.Any("config", loadedConfig))
+	parentLogger.InfoContext(parentCtx, "loaded config", slog.Any("config", loadedConfig))
 
 	parentCtx = logging.AppendCtx(parentCtx, slog.String("ankletVersion", version))
 
@@ -115,14 +114,16 @@ func main() {
 		if !strings.HasSuffix(loadedConfig.Log.FileDir, "/") {
 			loadedConfig.Log.FileDir += "/"
 		}
-		logger, fileLocation, err := logging.UpdateLoggerToFile(logger, loadedConfig.Log.FileDir, suffix)
-		if err != nil {
-			fmt.Printf("{\"time\":\"%s\",\"level\":\"ERROR\",\"msg\":\"%s\"}\n", time.Now().Format(time.RFC3339), err)
-			os.Exit(1)
-		}
-		logger.InfoContext(parentCtx, "writing logs to file", slog.String("fileLocation", fileLocation))
-		logger.InfoContext(parentCtx, "loaded config", slog.Any("config", loadedConfig))
+		// logger, fileLocation, err = logging.UpdateLoggerToFile(logger, logFileDir, suffix)
+		// if err != nil {
+		// 	fmt.Printf("{\"time\":\"%s\",\"level\":\"ERROR\",\"msg\":\"%s\"}\n", time.Now().Format(time.RFC3339), err)
+		// 	os.Exit(1)
+		// }
+		// logger.InfoContext(parentCtx, "writing logs to file", slog.String("fileLocation", fileLocation))
 	}
+
+	// must come after the log config is handled
+	parentCtx = context.WithValue(parentCtx, config.ContextKey("logger"), parentLogger)
 
 	// if loadedConfig.PidFileDir == "" {
 	// 	loadedConfig.PidFileDir = "./"
@@ -143,7 +144,7 @@ func main() {
 		}
 	}
 
-	logger.DebugContext(parentCtx, "loaded config", slog.Any("config", loadedConfig))
+	parentLogger.DebugContext(parentCtx, "loaded config", slog.Any("config", loadedConfig))
 	parentCtx = context.WithValue(parentCtx, config.ContextKey("config"), &loadedConfig)
 
 	// daemonContext := &daemon.Context{
@@ -175,7 +176,7 @@ func main() {
 		pluginsPath = filepath.Join(homeDir, ".config", "anklet", "plugins")
 	}
 
-	logger.InfoContext(parentCtx, "plugins path", slog.String("pluginsPath", pluginsPath))
+	parentLogger.InfoContext(parentCtx, "plugins path", slog.String("pluginsPath", pluginsPath))
 
 	parentCtx = context.WithValue(parentCtx, config.ContextKey("globals"), config.Globals{
 		RunOnce:      runOnce,
@@ -196,7 +197,7 @@ func main() {
 	if githubPluginExists {
 		rateLimiter, err := github_ratelimit.NewRateLimitWaiterClient(httpTransport)
 		if err != nil {
-			logger.ErrorContext(parentCtx, "error creating github_ratelimit.NewRateLimitWaiterClient", "err", err)
+			parentLogger.ErrorContext(parentCtx, "error creating github_ratelimit.NewRateLimitWaiterClient", "err", err)
 			os.Exit(1)
 		}
 		parentCtx = context.WithValue(parentCtx, config.ContextKey("rateLimiter"), rateLimiter)
@@ -218,7 +219,7 @@ func main() {
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
 
 	//go
-	worker(parentCtx, logger, loadedConfig, sigChan)
+	worker(parentCtx, parentLogger, loadedConfig, sigChan)
 
 	// err = daemon.ServeSignals()
 	// if err != nil {
@@ -226,16 +227,21 @@ func main() {
 	// }
 }
 
-func worker(parentCtx context.Context, logger *slog.Logger, loadedConfig config.Config, sigChan chan os.Signal) {
+func worker(
+	parentCtx context.Context,
+	parentLogger *slog.Logger,
+	loadedConfig config.Config,
+	sigChan chan os.Signal,
+) {
 	globals, err := config.GetGlobalsFromContext(parentCtx)
 	if err != nil {
-		logger.ErrorContext(parentCtx, "unable to get globals from context", "error", err)
+		parentLogger.ErrorContext(parentCtx, "unable to get globals from context", "error", err)
 		os.Exit(1)
 	}
 	toRunOnce := globals.RunOnce
 	workerCtx, workerCancel := context.WithCancel(parentCtx)
 	suffix := parentCtx.Value(config.ContextKey("suffix")).(string)
-	logger.InfoContext(workerCtx, "starting anklet"+suffix)
+	parentLogger.InfoContext(workerCtx, "starting anklet"+suffix)
 	returnToMainQueue := make(chan bool, 1)
 	jobFailureChannel := make(chan bool, 1)
 	workerCtx = context.WithValue(workerCtx, config.ContextKey("returnToMainQueue"), returnToMainQueue)
@@ -250,10 +256,10 @@ func worker(parentCtx context.Context, logger *slog.Logger, loadedConfig config.
 			// 	logger.WarnContext(workerCtx, "best effort graceful shutdown, interrupting the job as soon as possible...")
 			// 	workerCancel()
 			case syscall.SIGQUIT: // doesn't work for receivers since they don't loop
-				logger.WarnContext(workerCtx, "graceful shutdown, waiting for jobs to finish...")
+				parentLogger.WarnContext(workerCtx, "graceful shutdown, waiting for jobs to finish...")
 				toRunOnce = "true"
 			default:
-				logger.WarnContext(workerCtx, "best effort graceful shutdown, interrupting the job as soon as possible...")
+				parentLogger.WarnContext(workerCtx, "best effort graceful shutdown, interrupting the job as soon as possible...")
 				workerCancel()
 				returnToMainQueue <- true
 			}
@@ -292,7 +298,7 @@ func worker(parentCtx context.Context, logger *slog.Logger, loadedConfig config.
 	}
 	ln, err := net.Listen("tcp", ":"+metricsPort)
 	if err != nil {
-		logger.ErrorContext(workerCtx, "metrics port already in use", "port", metricsPort, "error", err)
+		parentLogger.ErrorContext(workerCtx, "metrics port already in use", "port", metricsPort, "error", err)
 		os.Exit(1)
 	}
 	ln.Close()
@@ -314,12 +320,12 @@ func worker(parentCtx context.Context, logger *slog.Logger, loadedConfig config.
 			Database: databaseDatabase,
 		})
 		if err != nil {
-			logger.ErrorContext(workerCtx, "unable to access database", "error", err)
+			parentLogger.ErrorContext(workerCtx, "unable to access database", "error", err)
 			os.Exit(1)
 		}
 		workerCtx = context.WithValue(workerCtx, config.ContextKey("database"), databaseContainer)
-		go metricsService.StartAggregatorServer(workerCtx, logger, false)
-		logger.InfoContext(workerCtx, "metrics aggregator started on port "+metricsPort)
+		go metricsService.StartAggregatorServer(workerCtx, parentLogger, false)
+		parentLogger.InfoContext(workerCtx, "metrics aggregator started on port "+metricsPort)
 		for _, metricsURL := range loadedConfig.Metrics.MetricsURLs {
 			wg.Add(1)
 			go func(metricsURL string) {
@@ -329,7 +335,7 @@ func worker(parentCtx context.Context, logger *slog.Logger, loadedConfig config.
 				// check if valid URL
 				_, err = url.Parse(metricsURL)
 				if err != nil {
-					logger.ErrorContext(pluginCtx, "invalid URL", "error", err)
+					parentLogger.ErrorContext(pluginCtx, "invalid URL", "error", err)
 					pluginCancel()
 					return
 				}
@@ -337,11 +343,11 @@ func worker(parentCtx context.Context, logger *slog.Logger, loadedConfig config.
 					select {
 					case <-workerCtx.Done():
 						pluginCancel()
-						logger.WarnContext(pluginCtx, shutDownMessage)
+						parentLogger.WarnContext(pluginCtx, shutDownMessage)
 						return
 					default:
 						// get metrics from endpoint and update the main list
-						metrics.UpdatemetricsURLDBEntry(pluginCtx, logger, metricsURL)
+						metrics.UpdatemetricsURLDBEntry(pluginCtx, parentLogger, metricsURL)
 						if workerCtx.Err() != nil || toRunOnce == "true" {
 							pluginCancel()
 							break
@@ -362,8 +368,8 @@ func worker(parentCtx context.Context, logger *slog.Logger, loadedConfig config.
 		firstPluginStarted := make(chan bool, 1)
 		metricsData := &metrics.MetricsDataLock{}
 		workerCtx = context.WithValue(workerCtx, config.ContextKey("metrics"), metricsData)
-		logger.InfoContext(workerCtx, "metrics server started on port "+metricsPort)
-		metrics.UpdateSystemMetrics(workerCtx, logger, metricsData)
+		parentLogger.InfoContext(workerCtx, "metrics server started on port "+metricsPort)
+		metrics.UpdateSystemMetrics(workerCtx, parentLogger, metricsData)
 		/////////////
 		// Plugins
 		soloReceiver := false
@@ -387,16 +393,39 @@ func worker(parentCtx context.Context, logger *slog.Logger, loadedConfig config.
 				pluginCtx, pluginCancel := context.WithCancel(workerCtx) // Inherit from parent context
 
 				if plugin.Name == "" {
-					logger.ErrorContext(pluginCtx, "name is required for plugins")
+					parentLogger.ErrorContext(pluginCtx, "name is required for plugins")
 					pluginCancel()
 					workerCancel()
 					return
 				}
 
+				if strings.Contains(plugin.Name, " ") {
+					parentLogger.ErrorContext(pluginCtx, "plugin name cannot contain spaces")
+					pluginCancel()
+					workerCancel()
+					return
+				}
+
+				// support plugin specific log files
+				var pluginLogger = parentLogger
+				if loadedConfig.Log.SplitByPlugin {
+					parentLogger.InfoContext(parentCtx, "writing "+plugin.Name+" logs to "+loadedConfig.Log.FileDir+"anklet"+"-"+plugin.Name+".log")
+					pluginLogger, _, err = logging.UpdateLoggerToFile(parentLogger, loadedConfig.Log.FileDir, "-"+plugin.Name)
+					if err != nil {
+						parentLogger.ErrorContext(pluginCtx, "unable to update logger to file", "error", err)
+						pluginCancel()
+						workerCancel()
+						return
+					}
+				}
+
+				// must come after the log config is handled
+				pluginCtx = context.WithValue(pluginCtx, config.ContextKey("logger"), pluginLogger)
+
 				pluginCtx = logging.AppendCtx(pluginCtx, slog.String("pluginName", plugin.Name))
 
 				if plugin.Repo == "" {
-					logger.InfoContext(pluginCtx, "no repo set for plugin; assuming it's an organization level plugin")
+					pluginLogger.InfoContext(pluginCtx, "no repo set for plugin; assuming it's an organization level plugin")
 					pluginCtx = context.WithValue(pluginCtx, config.ContextKey("isRepoSet"), false)
 					logging.DevContext(pluginCtx, "set isRepoSet to false")
 				} else {
@@ -416,7 +445,7 @@ func worker(parentCtx context.Context, logger *slog.Logger, loadedConfig config.
 					logging.DevContext(pluginCtx, "plugin is not a receiver; loading the anka CLI")
 					ankaCLI, err := anka.NewCLI(pluginCtx)
 					if err != nil {
-						logger.ErrorContext(pluginCtx, "unable to create anka cli", "error", err)
+						pluginLogger.ErrorContext(pluginCtx, "unable to create anka cli", "error", err)
 						pluginCancel()
 						workerCancel()
 						return
@@ -442,7 +471,7 @@ func worker(parentCtx context.Context, logger *slog.Logger, loadedConfig config.
 						Database: databaseDatabase,
 					})
 					if err != nil {
-						logger.ErrorContext(pluginCtx, "unable to access database", "error", err)
+						pluginLogger.ErrorContext(pluginCtx, "unable to access database", "error", err)
 						pluginCancel()
 						workerCancel()
 						return
@@ -451,14 +480,14 @@ func worker(parentCtx context.Context, logger *slog.Logger, loadedConfig config.
 					logging.DevContext(pluginCtx, "connected to database")
 				}
 
-				logger.InfoContext(pluginCtx, "starting plugin")
+				pluginLogger.InfoContext(pluginCtx, "starting plugin")
 
 				for {
 					select {
 					case <-pluginCtx.Done():
 						logging.DevContext(pluginCtx, "plugin for loop::pluginCtx.Done()")
-						metricsData.SetStatus(pluginCtx, logger, "stopped")
-						logger.WarnContext(pluginCtx, shutDownMessage)
+						metricsData.SetStatus(pluginCtx, pluginLogger, "stopped")
+						pluginLogger.WarnContext(pluginCtx, shutDownMessage)
 						pluginCancel()
 						return
 					default:
@@ -467,31 +496,31 @@ func worker(parentCtx context.Context, logger *slog.Logger, loadedConfig config.
 							workerCtx,
 							pluginCtx,
 							pluginCancel,
-							logger,
+							pluginLogger,
 							firstPluginStarted,
 							metricsData,
 						)
 						if err != nil {
-							logger.ErrorContext(updatedPluginCtx, "error running plugin", "error", err)
+							pluginLogger.ErrorContext(updatedPluginCtx, "error running plugin", "error", err)
 							pluginCancel()
 							// Send SIGQUIT to the main pid
 							p, err := os.FindProcess(os.Getpid())
 							if err != nil {
-								logger.ErrorContext(updatedPluginCtx, "error finding process", "error", err)
+								pluginLogger.ErrorContext(updatedPluginCtx, "error finding process", "error", err)
 							} else {
 								err = p.Signal(syscall.SIGQUIT)
 								if err != nil {
-									logger.ErrorContext(updatedPluginCtx, "error sending SIGQUIT signal", "error", err)
+									pluginLogger.ErrorContext(updatedPluginCtx, "error sending SIGQUIT signal", "error", err)
 								}
 							}
 							return
 						}
 						if workerCtx.Err() != nil || toRunOnce == "true" {
 							pluginCancel()
-							logger.WarnContext(updatedPluginCtx, shutDownMessage)
+							pluginLogger.WarnContext(updatedPluginCtx, shutDownMessage)
 							return
 						}
-						metricsData.SetStatus(updatedPluginCtx, logger, "idle")
+						metricsData.SetStatus(updatedPluginCtx, pluginLogger, "idle")
 						select {
 						case <-time.After(time.Duration(plugin.SleepInterval) * time.Second):
 						case <-pluginCtx.Done():
@@ -508,10 +537,10 @@ func worker(parentCtx context.Context, logger *slog.Logger, loadedConfig config.
 				soloReceiver = false
 			}
 		}
-		go metricsService.Start(workerCtx, logger, soloReceiver)
+		go metricsService.Start(workerCtx, parentLogger, soloReceiver)
 	}
 	wg.Wait()
 	time.Sleep(time.Second) // prevents exiting before the logger has a chance to write the final log entry (from panics)
-	logger.WarnContext(workerCtx, "anklet (and all plugins) shut down")
+	parentLogger.WarnContext(parentCtx, "anklet (and all plugins) shut down")
 	os.Exit(0)
 }

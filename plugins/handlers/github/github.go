@@ -111,6 +111,68 @@ type WorkflowRunJobDetail struct {
 // 	return true
 // }
 
+func DeleteFromQueue(pluginCtx context.Context, logger *slog.Logger, jobID int64, queue string) error {
+	databaseContainer, err := database.GetDatabaseFromContext(pluginCtx)
+	if err != nil {
+		logging.Panic(pluginCtx, pluginCtx, "error getting database client from context: "+err.Error())
+	}
+	queued, err := databaseContainer.Client.LRange(pluginCtx, queue, 0, -1).Result()
+	if err != nil {
+		logger.ErrorContext(pluginCtx, "error getting list of queued jobs", "err", err)
+		return err
+	}
+	for _, queueItem := range queued {
+		workflowJobEvent, err, typeErr := database.UnwrapPayload[github.WorkflowJobEvent](queueItem)
+		if err != nil {
+			logger.ErrorContext(pluginCtx, "error unmarshalling job", "err", err)
+			return err
+		}
+		if typeErr != nil { // not the type we want
+			continue
+		}
+		if *workflowJobEvent.WorkflowJob.ID == jobID {
+			// logger.WarnContext(pluginCtx, "WorkflowJob.ID already in queue", "WorkflowJob.ID", jobID)
+			_, err = databaseContainer.Client.LRem(pluginCtx, queue, 1, queueItem).Result()
+			if err != nil {
+				logger.ErrorContext(pluginCtx, "error removing job from queue", "err", err)
+				return err
+			}
+			return nil
+		}
+	}
+	return nil
+}
+
+// passing the the queue and ID to check for
+func InQueue(pluginCtx context.Context, logger *slog.Logger, jobID int64, queue string) (bool, error) {
+	toReturn := false
+	databaseContainer, err := database.GetDatabaseFromContext(pluginCtx)
+	if err != nil {
+		return toReturn, err
+	}
+	queued, err := databaseContainer.Client.LRange(pluginCtx, queue, 0, -1).Result()
+	if err != nil {
+		logger.ErrorContext(pluginCtx, "error getting list of queued jobs", "err", err)
+		return toReturn, err
+	}
+	for _, queueItem := range queued {
+		workflowJobEvent, err, typeErr := database.UnwrapPayload[github.WorkflowJobEvent](queueItem)
+		if err != nil {
+			logger.ErrorContext(pluginCtx, "error unmarshalling job", "err", err)
+			return toReturn, err
+		}
+		if typeErr != nil { // not the type we want
+			continue
+		}
+		if *workflowJobEvent.WorkflowJob.ID == jobID {
+			// logger.WarnContext(pluginCtx, "WorkflowJob.ID already in queue", "WorkflowJob.ID", jobID)
+			toReturn = true
+			break
+		}
+	}
+	return toReturn, nil
+}
+
 func extractLabelValue(labels []string, prefix string) string {
 	for _, label := range labels {
 		if strings.HasPrefix(label, prefix) {
@@ -406,6 +468,14 @@ func cleanup(
 				logger.ErrorContext(pluginCtx, "error getting ankaCLI from context", "err", err)
 				return
 			}
+			if strings.ToUpper(os.Getenv("LOG_LEVEL")) == "DEBUG" || strings.ToUpper(os.Getenv("LOG_LEVEL")) == "DEV" {
+				err = ankaCLI.AnkaCopyOutOfVM(pluginCtx, "/Users/anka/actions-runner/_diag", "/tmp/"+vm.Name)
+				if err != nil {
+					logger.ErrorContext(pluginCtx, "error copying out of vm", "err", err)
+				} else {
+					logger.DebugContext(pluginCtx, "successfully copied out of vm", "vm", vm.Name)
+				}
+			}
 			ankaCLI.AnkaDelete(workerCtx, pluginCtx, &vm)
 			databaseContainer.Client.Del(cleanupContext, "anklet/jobs/github/queued/"+ctxPlugin.Owner+"/"+ctxPlugin.Name+"/cleaning")
 			continue // required to keep processing tasks in the db list
@@ -415,6 +485,11 @@ func cleanup(
 			if err != nil {
 				logger.ErrorContext(pluginCtx, "error unmarshalling payload to webhook.WorkflowJobPayload", "err", err)
 				return
+			}
+			// delete the in_progress queue's index that matches the wrkflowJobID
+			err = DeleteFromQueue(pluginCtx, logger, *workflowJobEvent.WorkflowJob.ID, "anklet/jobs/github/in_progress/"+ctxPlugin.Owner)
+			if err != nil {
+				logger.ErrorContext(pluginCtx, "error deleting from in_progress queue", "err", err)
 			}
 			// return it to the queue if the job isn't completed yet
 			// if we don't, we could suffer from a situation where a completed job comes in and is orphaned
@@ -801,7 +876,7 @@ func Run(
 
 		// Copy runner scripts to VM
 		logger.DebugContext(pluginCtx, "copying install-runner.bash, register-runner.bash, and start-runner.bash to vm")
-		err = ankaCLI.AnkaCopy(pluginCtx,
+		err = ankaCLI.AnkaCopyIntoVM(pluginCtx,
 			installRunnerPath,
 			registerRunnerPath,
 			startRunnerPath,
@@ -938,6 +1013,19 @@ func Run(
 			return pluginCtx, nil
 		default:
 			time.Sleep(10 * time.Second)
+			if logCounter == 6 {
+				// after one minute, check to see if the job has started in the in_progress queue
+				// if not, then the runner registration failed
+				inQueue, err := InQueue(pluginCtx, logger, workflowJob.JobID, "anklet/jobs/github/in_progress/"+ctxPlugin.Owner)
+				if err != nil {
+					logger.ErrorContext(pluginCtx, "error searching in queue", "error", err)
+				} else {
+					if !inQueue {
+						failureChannel <- true
+						return pluginCtx, fmt.Errorf("runner registration failed")
+					}
+				}
+			}
 			if logCounter%2 == 0 {
 				logger.InfoContext(pluginCtx, "job still in progress", "job_id", workflowJob.JobID)
 			}

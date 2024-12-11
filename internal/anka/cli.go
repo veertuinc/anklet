@@ -326,15 +326,40 @@ func (cli *Cli) AnkaStart(pluginCtx context.Context) error {
 	return nil
 }
 
-func (cli *Cli) AnkaCopy(pluginCtx context.Context, filesToCopyIn ...string) error {
-	if pluginCtx.Err() != nil {
-		return fmt.Errorf("context canceled before AnkaCopy")
+func (cli *Cli) AnkaCopyOutOfVM(ctx context.Context, objectToCopyOut string, hostLevelDestination string) error {
+	if ctx.Err() != nil {
+		return fmt.Errorf("context canceled before AnkaCopyOutOfVM")
 	}
-	logger, err := logging.GetLoggerFromContext(pluginCtx)
+	logger, err := logging.GetLoggerFromContext(ctx)
 	if err != nil {
 		return err
 	}
-	vm, err := GetAnkaVmFromContext(pluginCtx)
+	vm, err := GetAnkaVmFromContext(ctx)
+	if err != nil {
+		return err
+	}
+	copyOutput, err := cli.ExecuteParseJson(ctx, "anka", "-j", "cp", "-a", fmt.Sprintf("%s:%s", vm.Name, objectToCopyOut), hostLevelDestination)
+	if err != nil {
+		return err
+	}
+	if copyOutput.Status != "OK" {
+		return fmt.Errorf("error copying into vm: %s", copyOutput.Message)
+	}
+	logger.DebugContext(ctx, "copy output", "std", copyOutput)
+	logger.InfoContext(ctx, "successfully copied %s out of vm", "object", objectToCopyOut, "stdout", copyOutput.Message)
+
+	return nil
+}
+
+func (cli *Cli) AnkaCopyIntoVM(ctx context.Context, filesToCopyIn ...string) error {
+	if ctx.Err() != nil {
+		return fmt.Errorf("context canceled before AnkaCopyIntoVM")
+	}
+	logger, err := logging.GetLoggerFromContext(ctx)
+	if err != nil {
+		return err
+	}
+	vm, err := GetAnkaVmFromContext(ctx)
 	if err != nil {
 		return err
 	}
@@ -345,15 +370,15 @@ func (cli *Cli) AnkaCopy(pluginCtx context.Context, filesToCopyIn ...string) err
 			return fmt.Errorf("error evaluating symlink for %s: %w", hostLevelFile, err)
 		}
 		hostLevelFile = realPath
-		copyOutput, err := cli.ExecuteParseJson(pluginCtx, "anka", "-j", "cp", "-a", hostLevelFile, fmt.Sprintf("%s:", vm.Name))
+		copyOutput, err := cli.ExecuteParseJson(ctx, "anka", "-j", "cp", "-a", hostLevelFile, fmt.Sprintf("%s:", vm.Name))
 		if err != nil {
 			return err
 		}
 		if copyOutput.Status != "OK" {
 			return fmt.Errorf("error copying into vm: %s", copyOutput.Message)
 		}
-		logger.DebugContext(pluginCtx, "copy output", "std", copyOutput)
-		logger.InfoContext(pluginCtx, "successfully copied file into vm", "file", hostLevelFile, "stdout", copyOutput.Message)
+		logger.DebugContext(ctx, "copy output", "std", copyOutput)
+		logger.InfoContext(ctx, "successfully copied file into vm", "file", hostLevelFile, "stdout", copyOutput.Message)
 	}
 
 	return nil

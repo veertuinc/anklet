@@ -161,7 +161,9 @@ Your config.yml file must define the database in one of the following ways:
 
 ### Plugin Setup and Usage Guides
 
-You can control the location plugins are stored on the host by setting the `plugins_path` in the `config.yml` file. If not set, it will default to `~/.config/anklet/plugins/`.
+You can control the location plugins are stored on the host by setting the `plugins_path` in the `config.yml` file. If not set, it will default to `~/.config/anklet/plugins/`. 
+
+**NOTE: Plugin names MUST be unique across all hosts.**
 
 #### Github Actions
 
