@@ -343,10 +343,10 @@ func (cli *Cli) AnkaCopyOutOfVM(ctx context.Context, objectToCopyOut string, hos
 		return err
 	}
 	if copyOutput.Status != "OK" {
-		return fmt.Errorf("error copying into vm: %s", copyOutput.Message)
+		return fmt.Errorf("error copying out of vm: %s", copyOutput.Message)
 	}
 	logger.DebugContext(ctx, "copy output", "std", copyOutput)
-	logger.InfoContext(ctx, "successfully copied %s out of vm", "object", objectToCopyOut, "stdout", copyOutput.Message)
+	logger.InfoContext(ctx, fmt.Sprintf("successfully copied %s out of vm to %s", objectToCopyOut, hostLevelDestination), "stdout", copyOutput.Message)
 
 	return nil
 }
