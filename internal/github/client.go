@@ -13,7 +13,6 @@ import (
 	"github.com/gofri/go-github-ratelimit/github_ratelimit"
 	"github.com/google/go-github/v66/github"
 	"github.com/veertuinc/anklet/internal/config"
-	"github.com/veertuinc/anklet/internal/logging"
 	"github.com/veertuinc/anklet/internal/metrics"
 )
 
@@ -112,19 +111,22 @@ func ExecuteGitHubClientFunction[T any](pluginCtx context.Context, logger *slog.
 	defer cancel()
 	result, response, err := executeFunc()
 	if response != nil {
-		innerPluginCtx = logging.AppendCtx(innerPluginCtx, slog.Int("api_limit_remaining", response.Rate.Remaining))
-		innerPluginCtx = logging.AppendCtx(innerPluginCtx, slog.String("api_limit_reset_time", response.Rate.Reset.Time.Format(time.RFC3339)))
-		innerPluginCtx = logging.AppendCtx(innerPluginCtx, slog.Int("api_limit", response.Rate.Limit))
+		logger.DebugContext(pluginCtx,
+			"GitHub API rate limit",
+			"remaining", response.Rate.Remaining,
+			"reset", response.Rate.Reset.Time.Format(time.RFC3339),
+			"limit", response.Rate.Limit,
+		)
 		if response.Rate.Remaining <= 10 { // handle primary rate limiting
 			sleepDuration := time.Until(response.Rate.Reset.Time) + time.Second // Adding a second to ensure we're past the reset time
 			logger.WarnContext(innerPluginCtx, "GitHub API rate limit exceeded, sleeping until reset")
 			metricsData, err := metrics.GetMetricsDataFromContext(pluginCtx)
 			if err != nil {
-				return innerPluginCtx, nil, nil, err
+				return pluginCtx, nil, nil, err
 			}
 			ctxPlugin, err := config.GetPluginFromContext(pluginCtx)
 			if err != nil {
-				return innerPluginCtx, nil, nil, err
+				return pluginCtx, nil, nil, err
 			}
 			metricsData.UpdatePlugin(pluginCtx, logger, metrics.PluginBase{
 				Name:   ctxPlugin.Name,

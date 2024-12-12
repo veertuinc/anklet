@@ -1032,6 +1032,7 @@ func Run(
 				// if not, then the runner registration failed
 				if !inProgressQueue {
 					logger.ErrorContext(pluginCtx, "waiting for runner registration timed out, will retry")
+					workflowJob.Conclusion = "failure" // support removeSelfHostedRunner
 					retryChannel <- true
 					return pluginCtx, nil
 				}

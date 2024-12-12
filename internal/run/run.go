@@ -20,6 +20,7 @@ func Plugin(
 	firstPluginStarted chan bool,
 	metricsData *metrics.MetricsDataLock,
 ) (context.Context, error) {
+	var updatedPluginCtx context.Context
 	ctxPlugin, err := config.GetPluginFromContext(pluginCtx)
 	if err != nil {
 		return pluginCtx, err
@@ -42,7 +43,6 @@ func Plugin(
 			default:
 				close(firstPluginStarted)
 			}
-			var updatedPluginCtx context.Context
 			updatedPluginCtx, err = github.Run(workerCtx, pluginCtx, pluginCancel, logger, metricsData)
 			if err != nil {
 				return updatedPluginCtx, err
@@ -52,7 +52,10 @@ func Plugin(
 		}
 		// }
 	} else if ctxPlugin.Plugin == "github_receiver" {
-		github_receiver.Run(workerCtx, pluginCtx, pluginCancel, logger, firstPluginStarted, metricsData)
+		updatedPluginCtx, err = github_receiver.Run(workerCtx, pluginCtx, pluginCancel, logger, firstPluginStarted, metricsData)
+		if err != nil {
+			return updatedPluginCtx, err
+		}
 	} else {
 		return pluginCtx, fmt.Errorf("plugin not found")
 	}

@@ -349,6 +349,7 @@ func worker(
 						// get metrics from endpoint and update the main list
 						metrics.UpdatemetricsURLDBEntry(pluginCtx, parentLogger, metricsURL)
 						if workerCtx.Err() != nil || toRunOnce == "true" {
+							parentLogger.DebugContext(pluginCtx, "workerCtx.Err() != nil || toRunOnce == true")
 							pluginCancel()
 							break
 						}
@@ -491,7 +492,6 @@ func worker(
 						pluginCancel()
 						return
 					default:
-						// logging.DevContext(pluginCtx, "plugin for loop::default")
 						updatedPluginCtx, err := run.Plugin(
 							workerCtx,
 							pluginCtx,
@@ -516,8 +516,8 @@ func worker(
 							return
 						}
 						if workerCtx.Err() != nil || toRunOnce == "true" {
-							pluginCancel()
 							pluginLogger.WarnContext(updatedPluginCtx, shutDownMessage)
+							pluginCancel()
 							return
 						}
 						metricsData.SetStatus(updatedPluginCtx, pluginLogger, "idle")
