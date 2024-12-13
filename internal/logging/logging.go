@@ -51,7 +51,7 @@ func UpdateLoggerToFile(logger *slog.Logger, filePath string, suffix string) (*s
 		return nil, "", err
 	}
 
-	options := &slog.HandlerOptions{Level: slog.LevelInfo}
+	options := &slog.HandlerOptions{Level: slog.LevelDebug}
 	handler := &ContextHandler{Handler: slog.NewJSONHandler(file, options)}
 
 	// Copy existing logger attributes to the new logger
@@ -109,13 +109,13 @@ func Panic(workerCtx context.Context, pluginCtx context.Context, errorMessage st
 	panic(errorMessage)
 }
 
-func DevContext(pluginCtx context.Context, errorMessage string) {
+func DevContext(ctx context.Context, message string) {
 	if strings.ToUpper(os.Getenv("LOG_LEVEL")) == "DEV" {
-		logger, err := GetLoggerFromContext(pluginCtx)
+		logger, err := GetLoggerFromContext(ctx)
 		if err != nil {
 			panic(err)
 		}
-		logger.DebugContext(pluginCtx, errorMessage)
+		logger.DebugContext(ctx, message)
 	}
 }
 

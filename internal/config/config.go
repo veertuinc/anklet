@@ -32,7 +32,8 @@ type Config struct {
 }
 
 type Log struct {
-	FileDir string `yaml:"file_dir"`
+	FileDir       string `yaml:"file_dir"`
+	SplitByPlugin bool   `yaml:"split_by_plugin"`
 }
 
 type Metrics struct {
@@ -57,24 +58,25 @@ type Workflow struct {
 }
 
 type Plugin struct {
-	SleepInterval  int      `yaml:"sleep_interval"`
-	Name           string   `yaml:"name"`
-	Plugin         string   `yaml:"plugin"`
-	Token          string   `yaml:"token"`
-	Repo           string   `yaml:"repo"`
-	Owner          string   `yaml:"owner"`
-	Database       Database `yaml:"database"`
-	RegistryURL    string   `yaml:"registry_url"`
-	PrivateKey     string   `yaml:"private_key"`
-	AppID          int64    `yaml:"app_id"`
-	InstallationID int64    `yaml:"installation_id"`
-	Workflows      Workflow `yaml:"workflows"`
-	Port           string   `yaml:"port"`
-	Secret         string   `yaml:"secret"`
-	HookID         int64    `yaml:"hook_id"`
-	SkipRedeliver  bool     `yaml:"skip_redeliver"`
-	RunnerGroup    string   `yaml:"runner_group"`
-	RedeliverHours int      `yaml:"redeliver_hours"`
+	SleepInterval              int      `yaml:"sleep_interval"`
+	Name                       string   `yaml:"name"`
+	Plugin                     string   `yaml:"plugin"`
+	Token                      string   `yaml:"token"`
+	Repo                       string   `yaml:"repo"`
+	Owner                      string   `yaml:"owner"`
+	Database                   Database `yaml:"database"`
+	RegistryURL                string   `yaml:"registry_url"`
+	PrivateKey                 string   `yaml:"private_key"`
+	AppID                      int64    `yaml:"app_id"`
+	InstallationID             int64    `yaml:"installation_id"`
+	Workflows                  Workflow `yaml:"workflows"`
+	Port                       string   `yaml:"port"`
+	Secret                     string   `yaml:"secret"`
+	HookID                     int64    `yaml:"hook_id"`
+	SkipRedeliver              bool     `yaml:"skip_redeliver"`
+	RunnerGroup                string   `yaml:"runner_group"`
+	RedeliverHours             int      `yaml:"redeliver_hours"`
+	RegistrationTimeoutSeconds int      `yaml:"registration_timeout_seconds"`
 }
 
 func LoadConfig(configPath string) (Config, error) {

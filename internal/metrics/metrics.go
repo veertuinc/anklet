@@ -34,14 +34,17 @@ type Plugin struct {
 	*PluginBase
 	LastSuccessfulRunJobUrl string
 	LastFailedRunJobUrl     string
+	LastCanceledRunJobUrl   string
 	LastSuccessfulRun       time.Time
 	LastFailedRun           time.Time
+	LastCanceledRun         time.Time
 }
 
 type MetricsData struct {
 	TotalRunningVMs               int           `json:"total_running_vms"`
 	TotalSuccessfulRunsSinceStart int           `json:"total_successful_runs_since_start"`
 	TotalFailedRunsSinceStart     int           `json:"total_failed_runs_since_start"`
+	TotalCanceledRunsSinceStart   int           `json:"total_canceled_runs_since_start"`
 	HostCPUCount                  int           `json:"host_cpu_count"`
 	HostCPUUsedCount              int           `json:"host_cpu_used_count"`
 	HostCPUUsagePercentage        float64       `json:"host_cpu_usage_percentage"`
@@ -117,6 +120,12 @@ func (m *MetricsDataLock) IncrementTotalFailedRunsSinceStart() {
 	m.TotalFailedRunsSinceStart++
 }
 
+func (m *MetricsDataLock) IncrementTotalCanceledRunsSinceStart() {
+	m.Lock()
+	defer m.Unlock()
+	m.TotalCanceledRunsSinceStart++
+}
+
 func CompareAndUpdateMetrics(currentService interface{}, updatedPlugin interface{}) (interface{}, error) {
 	switch currentServiceTyped := currentService.(type) {
 	case Plugin:
@@ -144,6 +153,9 @@ func CompareAndUpdateMetrics(currentService interface{}, updatedPlugin interface
 		}
 		if updated.LastFailedRunJobUrl != "" {
 			currentServiceTyped.LastFailedRunJobUrl = updated.LastFailedRunJobUrl
+		}
+		if updated.LastCanceledRunJobUrl != "" {
+			currentServiceTyped.LastCanceledRunJobUrl = updated.LastCanceledRunJobUrl
 		}
 		return currentServiceTyped, nil
 	case PluginBase:
@@ -388,8 +400,10 @@ func (s *Server) handleJsonMetrics(ctx context.Context, soloReceiver bool) http.
 							pluginMap["status_since"] = s.StatusSince
 							pluginMap["last_successful_run_job_url"] = s.LastSuccessfulRunJobUrl
 							pluginMap["last_failed_run_job_url"] = s.LastFailedRunJobUrl
+							pluginMap["last_canceled_run_job_url"] = s.LastCanceledRunJobUrl
 							pluginMap["last_successful_run"] = s.LastSuccessfulRun
 							pluginMap["last_failed_run"] = s.LastFailedRun
+							pluginMap["last_canceled_run"] = s.LastCanceledRun
 						case PluginBase:
 							pluginMap["name"] = s.Name
 							pluginMap["plugin_name"] = s.PluginName
@@ -410,6 +424,7 @@ func (s *Server) handleJsonMetrics(ctx context.Context, soloReceiver bool) http.
 				TotalRunningVMs               int                      `json:"total_running_vms"`
 				TotalSuccessfulRunsSinceStart int                      `json:"total_successful_runs_since_start"`
 				TotalFailedRunsSinceStart     int                      `json:"total_failed_runs_since_start"`
+				TotalCanceledRunsSinceStart   int                      `json:"total_canceled_runs_since_start"`
 				HostCPUCount                  int                      `json:"host_cpu_count"`
 				HostCPUUsedCount              int                      `json:"host_cpu_used_count"`
 				HostCPUUsagePercentage        float64                  `json:"host_cpu_usage_percentage"`
@@ -426,6 +441,7 @@ func (s *Server) handleJsonMetrics(ctx context.Context, soloReceiver bool) http.
 				TotalRunningVMs:               metricsData.TotalRunningVMs,
 				TotalSuccessfulRunsSinceStart: metricsData.TotalSuccessfulRunsSinceStart,
 				TotalFailedRunsSinceStart:     metricsData.TotalFailedRunsSinceStart,
+				TotalCanceledRunsSinceStart:   metricsData.TotalCanceledRunsSinceStart,
 				HostCPUCount:                  metricsData.HostCPUCount,
 				HostCPUUsedCount:              metricsData.HostCPUUsedCount,
 				HostCPUUsagePercentage:        metricsData.HostCPUUsagePercentage,
@@ -455,6 +471,8 @@ func (s *Server) handleJsonMetrics(ctx context.Context, soloReceiver bool) http.
 							pluginMap["last_failed_run_job_url"] = s.LastFailedRunJobUrl
 							pluginMap["last_successful_run"] = s.LastSuccessfulRun
 							pluginMap["last_failed_run"] = s.LastFailedRun
+							pluginMap["last_canceled_run_job_url"] = s.LastCanceledRunJobUrl
+							pluginMap["last_canceled_run"] = s.LastCanceledRun
 						case PluginBase:
 							pluginMap["name"] = s.Name
 							pluginMap["plugin_name"] = s.PluginName
@@ -482,6 +500,7 @@ func (s *Server) handlePrometheusMetrics(ctx context.Context, soloReceiver bool)
 			w.Write([]byte(fmt.Sprintf("total_running_vms %d\n", metricsData.TotalRunningVMs)))
 			w.Write([]byte(fmt.Sprintf("total_successful_runs_since_start %d\n", metricsData.TotalSuccessfulRunsSinceStart)))
 			w.Write([]byte(fmt.Sprintf("total_failed_runs_since_start %d\n", metricsData.TotalFailedRunsSinceStart)))
+			w.Write([]byte(fmt.Sprintf("total_canceled_runs_since_start %d\n", metricsData.TotalCanceledRunsSinceStart)))
 		}
 		for _, service := range metricsData.Plugins {
 			var name string
@@ -492,8 +511,10 @@ func (s *Server) handlePrometheusMetrics(ctx context.Context, soloReceiver bool)
 			var StatusSince time.Time
 			var lastSuccessfulRun time.Time
 			var lastFailedRun time.Time
+			var lastCanceledRun time.Time
 			var lastSuccessfulRunJobUrl string
 			var lastFailedRunJobUrl string
+			var lastCanceledRunJobUrl string
 			switch plugin := service.(type) {
 			case Plugin:
 				name = plugin.Name
@@ -506,8 +527,10 @@ func (s *Server) handlePrometheusMetrics(ctx context.Context, soloReceiver bool)
 				StatusSince = plugin.StatusSince
 				lastSuccessfulRun = plugin.LastSuccessfulRun
 				lastFailedRun = plugin.LastFailedRun
+				lastCanceledRun = plugin.LastCanceledRun
 				lastSuccessfulRunJobUrl = plugin.LastSuccessfulRunJobUrl
 				lastFailedRunJobUrl = plugin.LastFailedRunJobUrl
+				lastCanceledRunJobUrl = plugin.LastCanceledRunJobUrl
 			case PluginBase:
 				name = plugin.Name
 				pluginName = plugin.PluginName
@@ -529,9 +552,11 @@ func (s *Server) handlePrometheusMetrics(ctx context.Context, soloReceiver bool)
 				if repoName == "" {
 					w.Write([]byte(fmt.Sprintf("plugin_last_successful_run{name=%s,plugin=%s,owner=%s,job_url=%s} %s\n", name, pluginName, ownerName, lastSuccessfulRunJobUrl, lastSuccessfulRun.Format(time.RFC3339))))
 					w.Write([]byte(fmt.Sprintf("plugin_last_failed_run{name=%s,plugin=%s,owner=%s,job_url=%s} %s\n", name, pluginName, ownerName, lastFailedRunJobUrl, lastFailedRun.Format(time.RFC3339))))
+					w.Write([]byte(fmt.Sprintf("plugin_last_canceled_run{name=%s,plugin=%s,owner=%s,job_url=%s} %s\n", name, pluginName, ownerName, lastCanceledRunJobUrl, lastCanceledRun.Format(time.RFC3339))))
 				} else {
 					w.Write([]byte(fmt.Sprintf("plugin_last_successful_run{name=%s,plugin=%s,owner=%s,repo=%s,job_url=%s} %s\n", name, pluginName, ownerName, repoName, lastSuccessfulRunJobUrl, lastSuccessfulRun.Format(time.RFC3339))))
 					w.Write([]byte(fmt.Sprintf("plugin_last_failed_run{name=%s,plugin=%s,owner=%s,repo=%s,job_url=%s} %s\n", name, pluginName, ownerName, repoName, lastFailedRunJobUrl, lastFailedRun.Format(time.RFC3339))))
+					w.Write([]byte(fmt.Sprintf("plugin_last_canceled_run{name=%s,plugin=%s,owner=%s,repo=%s,job_url=%s} %s\n", name, pluginName, ownerName, repoName, lastCanceledRunJobUrl, lastCanceledRun.Format(time.RFC3339))))
 				}
 			}
 			if repoName == "" {

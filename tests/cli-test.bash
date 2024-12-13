@@ -81,7 +81,7 @@ TESTS
 
 run_test cli-test-no-log-directory.yml <<TESTS
     log_contains "ERROR"
-    log_contains "open /tmp/doesntexist/anklet.log: no such file or directory"
+    log_contains "log directory does not exist"
     log_does_not_contain "starting anklet"
 TESTS
 
