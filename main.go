@@ -326,8 +326,8 @@ func worker(
 			os.Exit(1)
 		}
 		workerCtx = context.WithValue(workerCtx, config.ContextKey("database"), databaseContainer)
-		go metricsService.StartAggregatorServer(workerCtx, logger, false)
-		logger.InfoContext(workerCtx, "metrics aggregator started on port "+metricsPort)
+		go metricsService.StartAggregatorServer(workerCtx, parentLogger, false)
+		parentLogger.InfoContext(workerCtx, "metrics aggregator started on port "+metricsPort)
 		wg.Add(1)
 		defer wg.Done()
 		pluginCtx, pluginCancel := context.WithCancel(workerCtx) // Inherit from parent context
@@ -335,7 +335,7 @@ func worker(
 			select {
 			case <-workerCtx.Done():
 				pluginCancel()
-				logger.WarnContext(pluginCtx, shutDownMessage)
+				parentLogger.WarnContext(pluginCtx, shutDownMessage)
 				return
 			default:
 				if workerCtx.Err() != nil || toRunOnce == "true" {
