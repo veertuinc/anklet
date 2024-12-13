@@ -26,6 +26,7 @@ plugins:
     owner: veertuinc
     registry_url: http://anka.registry:8089
     runner_group: macOS # requires Enterprise github
+    registration_timeout_seconds: 60
     # sleep_interval: 5 # Optional; defaults to 1 second.
     #database:
     #  enabled: true
