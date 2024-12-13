@@ -114,6 +114,10 @@ func main() {
 		if !strings.HasSuffix(loadedConfig.Log.FileDir, "/") {
 			loadedConfig.Log.FileDir += "/"
 		}
+		if _, err := os.Stat(loadedConfig.Log.FileDir); os.IsNotExist(err) {
+			parentLogger.ErrorContext(parentCtx, "log directory does not exist", "directory", loadedConfig.Log.FileDir)
+			os.Exit(1)
+		}
 		// logger, fileLocation, err = logging.UpdateLoggerToFile(logger, logFileDir, suffix)
 		// if err != nil {
 		// 	fmt.Printf("{\"time\":\"%s\",\"level\":\"ERROR\",\"msg\":\"%s\"}\n", time.Now().Format(time.RFC3339), err)
@@ -503,6 +507,7 @@ func worker(
 						if err != nil {
 							pluginLogger.ErrorContext(updatedPluginCtx, "error running plugin", "error", err)
 							pluginCancel()
+							workerCancel()
 							// Send SIGQUIT to the main pid
 							p, err := os.FindProcess(os.Getpid())
 							if err != nil {
