@@ -78,6 +78,16 @@ Finally, the `github` plugin requires three different bash scripts available on 
 
 ---
 
+## Failure and Retry handling
+
+Anklet does its best to handle failures gracefully. We attempt to retry the entire VM setup/registration process for failures that are transient. This includes connection problems, Anka CLI failures that can be retried, and other transient issues.
+
+If something cannot be safely retried, we have to send an API request to cancel the job in Github. Your users will see a cancelled job if there was an unrecoverable failure. Side note: We've asked Github to allow us to annotate the cancellation with a message so we can better understand why it was cancelled, but it's still pending: https://github.com/orgs/community/discussions/134326 (please up vote it!)
+
+However, there are more complex failures that happen with the registration of the actions runner in the VM itself. At the moment of writing this, Github has a bug that assigns the same internal ID to runners that are registered around the same time. See https://github.com/actions/runner/issues/3621 for more info. This means we need to count the time between when we register and start the runner in the VM and when the webhook/job goes into `in_progress` status, indicating the job in Github is now running inside of the VM properly. IF it doesn't go into `in_progress` within 1 minute, we consider it the github bug and will retry it on a brand new VM.
+
+---
+
 ## API LIMITS
 
 The following logic consumes [API limits](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api?apiVersion=2022-11-28). Should you run out, all processing will pause until the limits are reset after the specific github duration and then resume where it left off.
