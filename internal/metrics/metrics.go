@@ -2,7 +2,6 @@ package metrics
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -477,12 +476,13 @@ func (s *Server) Start(parentCtx context.Context, logger *slog.Logger, soloRecei
 		}
 		UpdateSystemMetrics(parentCtx, logger, metricsData)
 		//
-		if r.URL.Query().Get("format") == "json" {
-			s.handleJsonMetrics(parentCtx, soloReceiver)(w, r)
-		} else if r.URL.Query().Get("format") == "prometheus" {
+		// if r.URL.Query().Get("format") == "json" {
+		// 	s.handleJsonMetrics(parentCtx, soloReceiver)(w, r)
+		// } else
+		if r.URL.Query().Get("format") == "prometheus" {
 			s.handlePrometheusMetrics(parentCtx, soloReceiver)(w, r)
 		} else {
-			http.Error(w, "unsupported format, please use '?format=json' or '?format=prometheus'", http.StatusBadRequest)
+			http.Error(w, "unsupported format, please use '?format=prometheus'", http.StatusBadRequest)
 		}
 	})
 	http.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
@@ -493,154 +493,154 @@ func (s *Server) Start(parentCtx context.Context, logger *slog.Logger, soloRecei
 }
 
 // handleMetrics processes the /metrics endpoint
-func (s *Server) handleJsonMetrics(ctx context.Context, soloReceiver bool) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		metricsData := ctx.Value(config.ContextKey("metrics")).(*MetricsDataLock)
-		w.Header().Set("Content-Type", "application/json")
-		// json.NewEncoder(w).Encode(metricsData)
-		customEncoder := json.NewEncoder(w)
-		customEncoder.SetEscapeHTML(false)
-		if soloReceiver {
-			customEncoder.Encode(struct {
-				HostCPUCount              int                      `json:"host_cpu_count"`
-				HostCPUUsedCount          int                      `json:"host_cpu_used_count"`
-				HostCPUUsagePercentage    float64                  `json:"host_cpu_usage_percentage"`
-				HostMemoryTotalBytes      uint64                   `json:"host_memory_total_bytes"`
-				HostMemoryUsedBytes       uint64                   `json:"host_memory_used_bytes"`
-				HostMemoryAvailableBytes  uint64                   `json:"host_memory_available_bytes"`
-				HostMemoryUsagePercentage float64                  `json:"host_memory_usage_percentage"`
-				HostDiskTotalBytes        uint64                   `json:"host_disk_total_bytes"`
-				HostDiskUsedBytes         uint64                   `json:"host_disk_used_bytes"`
-				HostDiskAvailableBytes    uint64                   `json:"host_disk_available_bytes"`
-				HostDiskUsagePercentage   float64                  `json:"host_disk_usage_percentage"`
-				Plugins                   []map[string]interface{} `json:"plugins"`
-			}{
-				HostCPUCount:              metricsData.HostCPUCount,
-				HostCPUUsedCount:          metricsData.HostCPUUsedCount,
-				HostCPUUsagePercentage:    metricsData.HostCPUUsagePercentage,
-				HostMemoryTotalBytes:      metricsData.HostMemoryTotalBytes,
-				HostMemoryUsedBytes:       metricsData.HostMemoryUsedBytes,
-				HostMemoryAvailableBytes:  metricsData.HostMemoryAvailableBytes,
-				HostMemoryUsagePercentage: metricsData.HostMemoryUsagePercentage,
-				HostDiskTotalBytes:        metricsData.HostDiskTotalBytes,
-				HostDiskUsedBytes:         metricsData.HostDiskUsedBytes,
-				HostDiskAvailableBytes:    metricsData.HostDiskAvailableBytes,
-				HostDiskUsagePercentage:   metricsData.HostDiskUsagePercentage,
-				Plugins: func() []map[string]interface{} {
-					plugins := make([]map[string]interface{}, len(metricsData.Plugins))
-					for i, plugin := range metricsData.Plugins {
-						pluginMap := make(map[string]interface{})
-						switch s := plugin.(type) {
-						case Plugin:
-							pluginMap["name"] = s.Name
-							pluginMap["plugin_name"] = s.PluginName
-							if s.RepoName != "" {
-								pluginMap["repo_name"] = s.RepoName
-							}
-							pluginMap["owner_name"] = s.OwnerName
-							pluginMap["status"] = s.Status
-							pluginMap["status_since"] = s.StatusSince
-							pluginMap["last_successful_run_job_url"] = s.LastSuccessfulRunJobUrl
-							pluginMap["last_failed_run_job_url"] = s.LastFailedRunJobUrl
-							pluginMap["last_canceled_run_job_url"] = s.LastCanceledRunJobUrl
-							pluginMap["last_successful_run"] = s.LastSuccessfulRun
-							pluginMap["last_failed_run"] = s.LastFailedRun
-							pluginMap["last_canceled_run"] = s.LastCanceledRun
-							pluginMap["total_ran_vms"] = s.TotalRanVMs
-							pluginMap["total_successful_runs_since_start"] = s.TotalSuccessfulRunsSinceStart
-							pluginMap["total_failed_runs_since_start"] = s.TotalFailedRunsSinceStart
-							pluginMap["total_canceled_runs_since_start"] = s.TotalCanceledRunsSinceStart
-						case PluginBase:
-							pluginMap["name"] = s.Name
-							pluginMap["plugin_name"] = s.PluginName
-							if s.RepoName != "" {
-								pluginMap["repo_name"] = s.RepoName
-							}
-							pluginMap["owner_name"] = s.OwnerName
-							pluginMap["status"] = s.Status
-							pluginMap["status_since"] = s.StatusSince
-						}
-						plugins[i] = pluginMap
-					}
-					return plugins
-				}(),
-			})
-		} else {
-			customEncoder.Encode(struct {
-				TotalRunningVMs               int                      `json:"total_running_vms"`
-				TotalSuccessfulRunsSinceStart int                      `json:"total_successful_runs_since_start"`
-				TotalFailedRunsSinceStart     int                      `json:"total_failed_runs_since_start"`
-				TotalCanceledRunsSinceStart   int                      `json:"total_canceled_runs_since_start"`
-				HostCPUCount                  int                      `json:"host_cpu_count"`
-				HostCPUUsedCount              int                      `json:"host_cpu_used_count"`
-				HostCPUUsagePercentage        float64                  `json:"host_cpu_usage_percentage"`
-				HostMemoryTotalBytes          uint64                   `json:"host_memory_total_bytes"`
-				HostMemoryUsedBytes           uint64                   `json:"host_memory_used_bytes"`
-				HostMemoryAvailableBytes      uint64                   `json:"host_memory_available_bytes"`
-				HostMemoryUsagePercentage     float64                  `json:"host_memory_usage_percentage"`
-				HostDiskTotalBytes            uint64                   `json:"host_disk_total_bytes"`
-				HostDiskUsedBytes             uint64                   `json:"host_disk_used_bytes"`
-				HostDiskAvailableBytes        uint64                   `json:"host_disk_available_bytes"`
-				HostDiskUsagePercentage       float64                  `json:"host_disk_usage_percentage"`
-				Plugins                       []map[string]interface{} `json:"plugins"`
-			}{
-				TotalRunningVMs:               metricsData.TotalRunningVMs,
-				TotalSuccessfulRunsSinceStart: metricsData.TotalSuccessfulRunsSinceStart,
-				TotalFailedRunsSinceStart:     metricsData.TotalFailedRunsSinceStart,
-				TotalCanceledRunsSinceStart:   metricsData.TotalCanceledRunsSinceStart,
-				HostCPUCount:                  metricsData.HostCPUCount,
-				HostCPUUsedCount:              metricsData.HostCPUUsedCount,
-				HostCPUUsagePercentage:        metricsData.HostCPUUsagePercentage,
-				HostMemoryTotalBytes:          metricsData.HostMemoryTotalBytes,
-				HostMemoryUsedBytes:           metricsData.HostMemoryUsedBytes,
-				HostMemoryAvailableBytes:      metricsData.HostMemoryAvailableBytes,
-				HostMemoryUsagePercentage:     metricsData.HostMemoryUsagePercentage,
-				HostDiskTotalBytes:            metricsData.HostDiskTotalBytes,
-				HostDiskUsedBytes:             metricsData.HostDiskUsedBytes,
-				HostDiskAvailableBytes:        metricsData.HostDiskAvailableBytes,
-				HostDiskUsagePercentage:       metricsData.HostDiskUsagePercentage,
-				Plugins: func() []map[string]interface{} {
-					plugins := make([]map[string]interface{}, len(metricsData.Plugins))
-					for i, plugin := range metricsData.Plugins {
-						pluginMap := make(map[string]interface{})
-						switch s := plugin.(type) {
-						case Plugin:
-							pluginMap["name"] = s.Name
-							pluginMap["plugin_name"] = s.PluginName
-							if s.RepoName != "" {
-								pluginMap["repo_name"] = s.RepoName
-							}
-							pluginMap["owner_name"] = s.OwnerName
-							pluginMap["status"] = s.Status
-							pluginMap["status_since"] = s.StatusSince
-							pluginMap["last_successful_run_job_url"] = s.LastSuccessfulRunJobUrl
-							pluginMap["last_failed_run_job_url"] = s.LastFailedRunJobUrl
-							pluginMap["last_successful_run"] = s.LastSuccessfulRun
-							pluginMap["last_failed_run"] = s.LastFailedRun
-							pluginMap["last_canceled_run_job_url"] = s.LastCanceledRunJobUrl
-							pluginMap["last_canceled_run"] = s.LastCanceledRun
-							pluginMap["total_ran_vms"] = s.TotalRanVMs
-							pluginMap["total_successful_runs_since_start"] = s.TotalSuccessfulRunsSinceStart
-							pluginMap["total_failed_runs_since_start"] = s.TotalFailedRunsSinceStart
-							pluginMap["total_canceled_runs_since_start"] = s.TotalCanceledRunsSinceStart
-						case PluginBase:
-							pluginMap["name"] = s.Name
-							pluginMap["plugin_name"] = s.PluginName
-							if s.RepoName != "" {
-								pluginMap["repo_name"] = s.RepoName
-							}
-							pluginMap["owner_name"] = s.OwnerName
-							pluginMap["status"] = s.Status
-							pluginMap["status_since"] = s.StatusSince
-						}
-						plugins[i] = pluginMap
-					}
-					return plugins
-				}(),
-			})
-		}
-	}
-}
+// func (s *Server) handleJsonMetrics(ctx context.Context, soloReceiver bool) http.HandlerFunc {
+// 	return func(w http.ResponseWriter, r *http.Request) {
+// 		metricsData := ctx.Value(config.ContextKey("metrics")).(*MetricsDataLock)
+// 		w.Header().Set("Content-Type", "application/json")
+// 		// json.NewEncoder(w).Encode(metricsData)
+// 		customEncoder := json.NewEncoder(w)
+// 		customEncoder.SetEscapeHTML(false)
+// 		if soloReceiver {
+// 			customEncoder.Encode(struct {
+// 				HostCPUCount              int                      `json:"host_cpu_count"`
+// 				HostCPUUsedCount          int                      `json:"host_cpu_used_count"`
+// 				HostCPUUsagePercentage    float64                  `json:"host_cpu_usage_percentage"`
+// 				HostMemoryTotalBytes      uint64                   `json:"host_memory_total_bytes"`
+// 				HostMemoryUsedBytes       uint64                   `json:"host_memory_used_bytes"`
+// 				HostMemoryAvailableBytes  uint64                   `json:"host_memory_available_bytes"`
+// 				HostMemoryUsagePercentage float64                  `json:"host_memory_usage_percentage"`
+// 				HostDiskTotalBytes        uint64                   `json:"host_disk_total_bytes"`
+// 				HostDiskUsedBytes         uint64                   `json:"host_disk_used_bytes"`
+// 				HostDiskAvailableBytes    uint64                   `json:"host_disk_available_bytes"`
+// 				HostDiskUsagePercentage   float64                  `json:"host_disk_usage_percentage"`
+// 				Plugins                   []map[string]interface{} `json:"plugins"`
+// 			}{
+// 				HostCPUCount:              metricsData.HostCPUCount,
+// 				HostCPUUsedCount:          metricsData.HostCPUUsedCount,
+// 				HostCPUUsagePercentage:    metricsData.HostCPUUsagePercentage,
+// 				HostMemoryTotalBytes:      metricsData.HostMemoryTotalBytes,
+// 				HostMemoryUsedBytes:       metricsData.HostMemoryUsedBytes,
+// 				HostMemoryAvailableBytes:  metricsData.HostMemoryAvailableBytes,
+// 				HostMemoryUsagePercentage: metricsData.HostMemoryUsagePercentage,
+// 				HostDiskTotalBytes:        metricsData.HostDiskTotalBytes,
+// 				HostDiskUsedBytes:         metricsData.HostDiskUsedBytes,
+// 				HostDiskAvailableBytes:    metricsData.HostDiskAvailableBytes,
+// 				HostDiskUsagePercentage:   metricsData.HostDiskUsagePercentage,
+// 				Plugins: func() []map[string]interface{} {
+// 					plugins := make([]map[string]interface{}, len(metricsData.Plugins))
+// 					for i, plugin := range metricsData.Plugins {
+// 						pluginMap := make(map[string]interface{})
+// 						switch s := plugin.(type) {
+// 						case Plugin:
+// 							pluginMap["name"] = s.Name
+// 							pluginMap["plugin_name"] = s.PluginName
+// 							if s.RepoName != "" {
+// 								pluginMap["repo_name"] = s.RepoName
+// 							}
+// 							pluginMap["owner_name"] = s.OwnerName
+// 							pluginMap["status"] = s.Status
+// 							pluginMap["status_since"] = s.StatusSince
+// 							pluginMap["last_successful_run_job_url"] = s.LastSuccessfulRunJobUrl
+// 							pluginMap["last_failed_run_job_url"] = s.LastFailedRunJobUrl
+// 							pluginMap["last_canceled_run_job_url"] = s.LastCanceledRunJobUrl
+// 							pluginMap["last_successful_run"] = s.LastSuccessfulRun
+// 							pluginMap["last_failed_run"] = s.LastFailedRun
+// 							pluginMap["last_canceled_run"] = s.LastCanceledRun
+// 							pluginMap["total_ran_vms"] = s.TotalRanVMs
+// 							pluginMap["total_successful_runs_since_start"] = s.TotalSuccessfulRunsSinceStart
+// 							pluginMap["total_failed_runs_since_start"] = s.TotalFailedRunsSinceStart
+// 							pluginMap["total_canceled_runs_since_start"] = s.TotalCanceledRunsSinceStart
+// 						case PluginBase:
+// 							pluginMap["name"] = s.Name
+// 							pluginMap["plugin_name"] = s.PluginName
+// 							if s.RepoName != "" {
+// 								pluginMap["repo_name"] = s.RepoName
+// 							}
+// 							pluginMap["owner_name"] = s.OwnerName
+// 							pluginMap["status"] = s.Status
+// 							pluginMap["status_since"] = s.StatusSince
+// 						}
+// 						plugins[i] = pluginMap
+// 					}
+// 					return plugins
+// 				}(),
+// 			})
+// 		} else {
+// 			customEncoder.Encode(struct {
+// 				TotalRunningVMs               int                      `json:"total_running_vms"`
+// 				TotalSuccessfulRunsSinceStart int                      `json:"total_successful_runs_since_start"`
+// 				TotalFailedRunsSinceStart     int                      `json:"total_failed_runs_since_start"`
+// 				TotalCanceledRunsSinceStart   int                      `json:"total_canceled_runs_since_start"`
+// 				HostCPUCount                  int                      `json:"host_cpu_count"`
+// 				HostCPUUsedCount              int                      `json:"host_cpu_used_count"`
+// 				HostCPUUsagePercentage        float64                  `json:"host_cpu_usage_percentage"`
+// 				HostMemoryTotalBytes          uint64                   `json:"host_memory_total_bytes"`
+// 				HostMemoryUsedBytes           uint64                   `json:"host_memory_used_bytes"`
+// 				HostMemoryAvailableBytes      uint64                   `json:"host_memory_available_bytes"`
+// 				HostMemoryUsagePercentage     float64                  `json:"host_memory_usage_percentage"`
+// 				HostDiskTotalBytes            uint64                   `json:"host_disk_total_bytes"`
+// 				HostDiskUsedBytes             uint64                   `json:"host_disk_used_bytes"`
+// 				HostDiskAvailableBytes        uint64                   `json:"host_disk_available_bytes"`
+// 				HostDiskUsagePercentage       float64                  `json:"host_disk_usage_percentage"`
+// 				Plugins                       []map[string]interface{} `json:"plugins"`
+// 			}{
+// 				TotalRunningVMs:               metricsData.TotalRunningVMs,
+// 				TotalSuccessfulRunsSinceStart: metricsData.TotalSuccessfulRunsSinceStart,
+// 				TotalFailedRunsSinceStart:     metricsData.TotalFailedRunsSinceStart,
+// 				TotalCanceledRunsSinceStart:   metricsData.TotalCanceledRunsSinceStart,
+// 				HostCPUCount:                  metricsData.HostCPUCount,
+// 				HostCPUUsedCount:              metricsData.HostCPUUsedCount,
+// 				HostCPUUsagePercentage:        metricsData.HostCPUUsagePercentage,
+// 				HostMemoryTotalBytes:          metricsData.HostMemoryTotalBytes,
+// 				HostMemoryUsedBytes:           metricsData.HostMemoryUsedBytes,
+// 				HostMemoryAvailableBytes:      metricsData.HostMemoryAvailableBytes,
+// 				HostMemoryUsagePercentage:     metricsData.HostMemoryUsagePercentage,
+// 				HostDiskTotalBytes:            metricsData.HostDiskTotalBytes,
+// 				HostDiskUsedBytes:             metricsData.HostDiskUsedBytes,
+// 				HostDiskAvailableBytes:        metricsData.HostDiskAvailableBytes,
+// 				HostDiskUsagePercentage:       metricsData.HostDiskUsagePercentage,
+// 				Plugins: func() []map[string]interface{} {
+// 					plugins := make([]map[string]interface{}, len(metricsData.Plugins))
+// 					for i, plugin := range metricsData.Plugins {
+// 						pluginMap := make(map[string]interface{})
+// 						switch s := plugin.(type) {
+// 						case Plugin:
+// 							pluginMap["name"] = s.Name
+// 							pluginMap["plugin_name"] = s.PluginName
+// 							if s.RepoName != "" {
+// 								pluginMap["repo_name"] = s.RepoName
+// 							}
+// 							pluginMap["owner_name"] = s.OwnerName
+// 							pluginMap["status"] = s.Status
+// 							pluginMap["status_since"] = s.StatusSince
+// 							pluginMap["last_successful_run_job_url"] = s.LastSuccessfulRunJobUrl
+// 							pluginMap["last_failed_run_job_url"] = s.LastFailedRunJobUrl
+// 							pluginMap["last_successful_run"] = s.LastSuccessfulRun
+// 							pluginMap["last_failed_run"] = s.LastFailedRun
+// 							pluginMap["last_canceled_run_job_url"] = s.LastCanceledRunJobUrl
+// 							pluginMap["last_canceled_run"] = s.LastCanceledRun
+// 							pluginMap["total_ran_vms"] = s.TotalRanVMs
+// 							pluginMap["total_successful_runs_since_start"] = s.TotalSuccessfulRunsSinceStart
+// 							pluginMap["total_failed_runs_since_start"] = s.TotalFailedRunsSinceStart
+// 							pluginMap["total_canceled_runs_since_start"] = s.TotalCanceledRunsSinceStart
+// 						case PluginBase:
+// 							pluginMap["name"] = s.Name
+// 							pluginMap["plugin_name"] = s.PluginName
+// 							if s.RepoName != "" {
+// 								pluginMap["repo_name"] = s.RepoName
+// 							}
+// 							pluginMap["owner_name"] = s.OwnerName
+// 							pluginMap["status"] = s.Status
+// 							pluginMap["status_since"] = s.StatusSince
+// 						}
+// 						plugins[i] = pluginMap
+// 					}
+// 					return plugins
+// 				}(),
+// 			})
+// 		}
+// 	}
+// }
 
 func (s *Server) handlePrometheusMetrics(ctx context.Context, soloReceiver bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {

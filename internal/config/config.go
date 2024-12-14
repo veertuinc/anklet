@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"strconv"
-	"strings"
 	"sync"
 
 	"context"
@@ -106,10 +105,10 @@ func LoadInEnvs(config Config) (Config, error) {
 	if envPort != "" {
 		config.Metrics.Port = envPort
 	}
-	envMetricsURLs := os.Getenv("ANKLET_METRICS_URLS")
-	if envMetricsURLs != "" {
-		config.Metrics.MetricsURLs = strings.Split(envMetricsURLs, ",")
-	}
+	// envMetricsURLs := os.Getenv("ANKLET_METRICS_URLS")
+	// if envMetricsURLs != "" {
+	// 	config.Metrics.MetricsURLs = strings.Split(envMetricsURLs, ",")
+	// }
 	envSleepInterval := os.Getenv("ANKLET_METRICS_SLEEP_INTERVAL")
 	if envSleepInterval != "" {
 		value, err := strconv.Atoi(envSleepInterval)

@@ -182,7 +182,7 @@ You can find how to automate the installation of Anklet and run a PLIST [here](h
 
 ### Metrics
 
-Metrics for monitoring are available at `http://127.0.0.1:8080/metrics?format=json` or `http://127.0.0.1:8080/metrics?format=prometheus`. This applies to both handler and receiver plugins, but receivers can differ slightly in what metrics are available. Be sure to check the specific plugin documentation for more information and examples.
+Metrics for monitoring are available at `http://127.0.0.1:8080/metrics?format=prometheus`. This applies to both handler and receiver plugins, but receivers can differ slightly in what metrics are available. Be sure to check the specific plugin documentation for more information and examples.
 
 Note: If port 8080 is already in use, Anklet will automatically increment the port by 1 until it finds an open port.
 
@@ -200,6 +200,7 @@ Note: If port 8080 is already in use, Anklet will automatically increment the po
 | total_running_vms | Total number of running VMs |
 | total_successful_runs_since_start | Total number of successful runs since start |
 | total_failed_runs_since_start | Total number of failed runs since start |
+| total_canceled_runs_since_start | Total number of canceled runs since start |
 | plugin_name | Name of the plugin |
 | plugin_plugin_name | Name of the plugin |
 | plugin_owner_name | Name of the owner |
@@ -210,6 +211,10 @@ Note: If port 8080 is already in use, Anklet will automatically increment the po
 | plugin_last_successful_run | Timestamp of last successful run of the plugin (RFC3339) |
 | plugin_last_failed_run | Timestamp of last failed run of the plugin (RFC3339) |
 | plugin_status_since | Timestamp of when the plugin was last started (RFC3339) |
+| plugin_total_ran_vms | Total number of VMs ran by the plugin |
+| plugin_total_successful_runs_since_start | Total number of successful runs since start |
+| plugin_total_failed_runs_since_start | Total number of failed runs since start |
+| plugin_total_canceled_runs_since_start | Total number of canceled runs since start |
 | host_cpu_count | Total CPU count of the host |
 | host_cpu_used_count | Total in use CPU count of the host |
 | host_cpu_usage_percentage | CPU usage percentage of the host |
@@ -222,7 +227,7 @@ Note: If port 8080 is already in use, Anklet will automatically increment the po
 | host_disk_available_bytes | Available disk space of the host (bytes) |
 | host_disk_usage_percentage | Disk usage percentage of the host |
 
-#### JSON
+<!-- #### JSON
 
 ```json
 {
@@ -267,7 +272,7 @@ Note: If port 8080 is already in use, Anklet will automatically increment the po
     }
   ]
 }
-```
+``` -->
 
 #### Prometheus
 
@@ -275,27 +280,38 @@ Note: If port 8080 is already in use, Anklet will automatically increment the po
 
 ```
 total_running_vms 0
-total_successful_runs_since_start 2
-total_failed_runs_since_start 2
-plugin_status{plugin_name=RUNNER2,plugin=github,owner=veertuinc,repo=anklet} idle
-plugin_last_successful_run{plugin_name=RUNNER2,plugin=github,owner=veertuinc,repo=anklet,job_url=https://github.com/veertuinc/anklet/actions/runs/9180172013/job/25243983121} 2024-05-21T14:16:06-05:00
-plugin_last_failed_run{plugin_name=RUNNER2,plugin=github,owner=veertuinc,repo=anklet,job_url=https://github.com/veertuinc/anklet/actions/runs/9180170811/job/25243979917} 2024-05-21T14:15:10-05:00
-plugin_status_since{plugin_name=RUNNER2,plugin=github,owner=veertuinc,repo=anklet} 2024-05-21T14:16:06-05:00
-plugin_status{plugin_name=RUNNER1,plugin=github,owner=veertuinc,repo=anklet} idle
-plugin_last_successful_run{plugin_name=RUNNER1,plugin=github,owner=veertuinc,repo=anklet,job_url=https://github.com/veertuinc/anklet/actions/runs/9180172546/job/25243984537} 2024-05-21T14:16:35-05:00
-plugin_last_failed_run{plugin_name=RUNNER1,plugin=github,owner=veertuinc,repo=anklet,job_url=https://github.com/veertuinc/anklet/actions/runs/9180171228/job/25243980930} 2024-05-21T14:15:45-05:00
-plugin_status_since{plugin_name=RUNNER1,plugin=github,owner=veertuinc,repo=anklet} 2024-05-21T14:16:35-05:00
+total_successful_runs_since_start 0
+total_failed_runs_since_start 0
+total_canceled_runs_since_start 1
+plugin_status{name=RUNNER1,plugin=github,owner=veertuinc} idle
+plugin_last_successful_run{name=RUNNER1,plugin=github,owner=veertuinc,job_url=} 0001-01-01T00:00:00Z
+plugin_last_failed_run{name=RUNNER1,plugin=github,owner=veertuinc,job_url=} 0001-01-01T00:00:00Z
+plugin_last_canceled_run{name=RUNNER1,plugin=github,owner=veertuinc,job_url=https://github.com/veertuinc/anklet/actions/runs/12325604197/job/34405145636} 0001-01-01T00:00:00Z
+plugin_status_since{name=RUNNER1,plugin=github,owner=veertuinc} 2024-12-13T19:24:47-06:00
+plugin_total_ran_vms{name=RUNNER1,plugin=github,owner=veertuinc} 0
+plugin_total_successful_runs_since_start{name=RUNNER1,plugin=github,owner=veertuinc} 0
+plugin_total_failed_runs_since_start{name=RUNNER1,plugin=github,owner=veertuinc} 0
+plugin_total_canceled_runs_since_start{name=RUNNER1,plugin=github,owner=veertuinc} 1
+plugin_status{name=RUNNER2,plugin=github,owner=veertuinc} idle
+plugin_last_successful_run{name=RUNNER2,plugin=github,owner=veertuinc,job_url=} 0001-01-01T00:00:00Z
+plugin_last_failed_run{name=RUNNER2,plugin=github,owner=veertuinc,job_url=} 0001-01-01T00:00:00Z
+plugin_last_canceled_run{name=RUNNER2,plugin=github,owner=veertuinc,job_url=} 0001-01-01T00:00:00Z
+plugin_status_since{name=RUNNER2,plugin=github,owner=veertuinc} 2024-12-13T19:24:47-06:00
+plugin_total_ran_vms{name=RUNNER2,plugin=github,owner=veertuinc} 0
+plugin_total_successful_runs_since_start{name=RUNNER2,plugin=github,owner=veertuinc} 0
+plugin_total_failed_runs_since_start{name=RUNNER2,plugin=github,owner=veertuinc} 0
+plugin_total_canceled_runs_since_start{name=RUNNER2,plugin=github,owner=veertuinc} 0
 host_cpu_count 12
 host_cpu_used_count 1
-host_cpu_usage_percentage 10.674157
+host_cpu_usage_percentage 12.371134
 host_memory_total_bytes 38654705664
-host_memory_used_bytes 22701359104
-host_memory_available_bytes 15953346560
-host_memory_usage_percentage 58.728578
+host_memory_used_bytes 19959037952
+host_memory_available_bytes 18695667712
+host_memory_usage_percentage 51.634174
 host_disk_total_bytes 994662584320
-host_disk_used_bytes 459042254848
-host_disk_available_bytes 535620329472
-host_disk_usage_percentage 46.150550
+host_disk_used_bytes 783564165120
+host_disk_available_bytes 211098419200
+host_disk_usage_percentage 78.776881
 ```
 
 ### Metrics Aggregator
@@ -330,7 +346,7 @@ It's possible to use ENVs instead of the yml file. This is useful if you want to
 | --- | --- |
 | ANKLET_METRICS_AGGREGATOR | Whether to enable the aggregator (ex: true) |
 | ANKLET_METRICS_PORT | Port to serve aggregator on (ex: 8081) |
-| ANKLET_METRICS_URLS | Comma separated list of metrics urls to aggregate (ex: http://127.0.0.1:8080/metrics,http://192.168.1.202:8080/metrics) |
+<!-- | ANKLET_METRICS_URLS | Comma separated list of metrics urls to aggregate (ex: http://127.0.0.1:8080/metrics,http://192.168.1.202:8080/metrics) | -->
 | ANKLET_METRICS_SLEEP_INTERVAL | How many seconds between fetching metrics from each Anklet url defined |
 | ANKLET_METRICS_DATABASE_ENABLED | Whether to enable the database (ex: true) |
 | ANKLET_METRICS_DATABASE_URL | URL of the database (ex: localhost) |
@@ -340,7 +356,7 @@ It's possible to use ENVs instead of the yml file. This is useful if you want to
 | ANKLET_METRICS_DATABASE_PASSWORD | Password to use (ex: "") |
 
 Finally, here are the example responses of each format:
-
+<!-- 
 #### JSON
 
 ```json
@@ -406,49 +422,45 @@ Finally, here are the example responses of each format:
     ]
   }
 }
-```
+``` -->
 
 #### Prometheus
 
-This will be a text list, differentiating metrics by `metricsUrl`.
 
 ```
-total_running_vms{metricsUrl=http://127.0.0.1:8080/metrics} 0
-total_successful_runs_since_start{metricsUrl=http://127.0.0.1:8080/metrics} 0
-total_failed_runs_since_start{metricsUrl=http://127.0.0.1:8080/metrics} 0
-plugin_status{plugin_name=RUNNER1,plugin=github,owner=veertuinc,repo=anklet,metricsUrl=http://127.0.0.1:8080/metrics} idle
-plugin_last_successful_run{plugin_name=RUNNER1,plugin=github,owner=veertuinc,repo=anklet,job_url=,metricsUrl=http://127.0.0.1:8080/metrics} 0001-01-01T00:00:00Z
-plugin_last_failed_run{plugin_name=RUNNER1,plugin=github,owner=veertuinc,repo=anklet,job_url=,metricsUrl=http://127.0.0.1:8080/metrics} 0001-01-01T00:00:00Z
-plugin_status_since{plugin_name=RUNNER1,plugin=github,owner=veertuinc,repo=anklet,metricsUrl=http://127.0.0.1:8080/metrics} 2024-06-11T13:57:43-05:00
-host_cpu_count{metricsUrl=http://127.0.0.1:8080/metrics} 12
-host_cpu_used_count{metricsUrl=http://127.0.0.1:8080/metrics} 0
-host_cpu_usage_percentage{metricsUrl=http://127.0.0.1:8080/metrics} 7.300310
-host_memory_total_bytes{metricsUrl=http://127.0.0.1:8080/metrics} 38654705664
-host_memory_used_bytes{metricsUrl=http://127.0.0.1:8080/metrics} 27103789056
-host_memory_available_bytes{metricsUrl=http://127.0.0.1:8080/metrics} 11550916608
-host_memory_usage_percentage{metricsUrl=http://127.0.0.1:8080/metrics} 70.117696
-host_disk_total_bytes{metricsUrl=http://127.0.0.1:8080/metrics} 994662584320
-host_disk_used_bytes{metricsUrl=http://127.0.0.1:8080/metrics} 540769202176
-host_disk_available_bytes{metricsUrl=http://127.0.0.1:8080/metrics} 453893382144
-host_disk_usage_percentage{metricsUrl=http://127.0.0.1:8080/metrics} 54.367100
-total_running_vms{metricsUrl=http://192.168.1.183:8080/metrics} 0
-total_successful_runs_since_start{metricsUrl=http://192.168.1.183:8080/metrics} 0
-total_failed_runs_since_start{metricsUrl=http://192.168.1.183:8080/metrics} 0
-plugin_status{plugin_name=RUNNER3,plugin=github,owner=veertuinc,repo=anklet,metricsUrl=http://192.168.1.183:8080/metrics} idle
-plugin_last_successful_run{plugin_name=RUNNER3,plugin=github,owner=veertuinc,repo=anklet,job_url=,metricsUrl=http://192.168.1.183:8080/metrics} 0001-01-01T00:00:00Z
-plugin_last_failed_run{plugin_name=RUNNER3,plugin=github,owner=veertuinc,repo=anklet,job_url=,metricsUrl=http://192.168.1.183:8080/metrics} 0001-01-01T00:00:00Z
-plugin_status_since{plugin_name=RUNNER3,plugin=github,owner=veertuinc,repo=anklet,metricsUrl=http://192.168.1.183:8080/metrics} 2024-06-11T14:16:42-05:00
-host_cpu_count{metricsUrl=http://192.168.1.183:8080/metrics} 8
-host_cpu_used_count{metricsUrl=http://192.168.1.183:8080/metrics} 1
-host_cpu_usage_percentage{metricsUrl=http://192.168.1.183:8080/metrics} 20.760717
-host_memory_total_bytes{metricsUrl=http://192.168.1.183:8080/metrics} 25769803776
-host_memory_used_bytes{metricsUrl=http://192.168.1.183:8080/metrics} 17975410688
-host_memory_available_bytes{metricsUrl=http://192.168.1.183:8080/metrics} 7794393088
-host_memory_usage_percentage{metricsUrl=http://192.168.1.183:8080/metrics} 69.753774
-host_disk_total_bytes{metricsUrl=http://192.168.1.183:8080/metrics} 994662584320
-host_disk_used_bytes{metricsUrl=http://192.168.1.183:8080/metrics} 629849382912
-host_disk_available_bytes{metricsUrl=http://192.168.1.183:8080/metrics} 364813201408
-host_disk_usage_percentage{metricsUrl=http://192.168.1.183:8080/metrics} 63.322919
+total_running_vms 0
+total_successful_runs_since_start 0
+total_failed_runs_since_start 0
+total_canceled_runs_since_start 1
+plugin_status{name=RUNNER1,plugin=github,owner=veertuinc} idle
+plugin_last_successful_run{name=RUNNER1,plugin=github,owner=veertuinc,job_url=} 0001-01-01T00:00:00Z
+plugin_last_failed_run{name=RUNNER1,plugin=github,owner=veertuinc,job_url=} 0001-01-01T00:00:00Z
+plugin_last_canceled_run{name=RUNNER1,plugin=github,owner=veertuinc,job_url=https://github.com/veertuinc/anklet/actions/runs/12325604197/job/34405145636} 0001-01-01T00:00:00Z
+plugin_status_since{name=RUNNER1,plugin=github,owner=veertuinc} 2024-12-13T19:24:47-06:00
+plugin_total_ran_vms{name=RUNNER1,plugin=github,owner=veertuinc} 0
+plugin_total_successful_runs_since_start{name=RUNNER1,plugin=github,owner=veertuinc} 0
+plugin_total_failed_runs_since_start{name=RUNNER1,plugin=github,owner=veertuinc} 0
+plugin_total_canceled_runs_since_start{name=RUNNER1,plugin=github,owner=veertuinc} 1
+plugin_status{name=RUNNER2,plugin=github,owner=veertuinc} idle
+plugin_last_successful_run{name=RUNNER2,plugin=github,owner=veertuinc,job_url=} 0001-01-01T00:00:00Z
+plugin_last_failed_run{name=RUNNER2,plugin=github,owner=veertuinc,job_url=} 0001-01-01T00:00:00Z
+plugin_last_canceled_run{name=RUNNER2,plugin=github,owner=veertuinc,job_url=} 0001-01-01T00:00:00Z
+plugin_status_since{name=RUNNER2,plugin=github,owner=veertuinc} 2024-12-13T19:24:47-06:00
+plugin_total_ran_vms{name=RUNNER2,plugin=github,owner=veertuinc} 0
+plugin_total_successful_runs_since_start{name=RUNNER2,plugin=github,owner=veertuinc} 0
+plugin_total_failed_runs_since_start{name=RUNNER2,plugin=github,owner=veertuinc} 0
+plugin_total_canceled_runs_since_start{name=RUNNER2,plugin=github,owner=veertuinc} 0
+host_cpu_count 12
+host_cpu_used_count 1
+host_cpu_usage_percentage 13.112463
+host_memory_total_bytes 38654705664
+host_memory_used_bytes 20108099584
+host_memory_available_bytes 18546606080
+host_memory_usage_percentage 52.019797
+host_disk_total_bytes 994662584320
+host_disk_used_bytes 783569383424
+host_disk_available_bytes 211093200896
+host_disk_usage_percentage 78.777406
 ```
 
 ---
