@@ -26,14 +26,15 @@ func (s *Server) StartAggregatorServer(
 			logger.ErrorContext(workerCtx, "error getting database client from context", "error", err)
 			return
 		}
-		loadedConfig, err := config.GetLoadedConfigFromContext(workerCtx)
-		if err != nil {
-			logger.ErrorContext(workerCtx, "error getting loaded config from context", "error", err)
-			return
-		}
-		if r.URL.Query().Get("format") == "json" {
-			s.handleAggregatorJsonMetrics(workerCtx, logger, databaseContainer, loadedConfig)(w, r)
-		} else if r.URL.Query().Get("format") == "prometheus" {
+		// loadedConfig, err := config.GetLoadedConfigFromContext(workerCtx)
+		// if err != nil {
+		// 	logger.ErrorContext(workerCtx, "error getting loaded config from context", "error", err)
+		// 	return
+		// }
+		// if r.URL.Query().Get("format") == "json" {
+		// 	s.handleAggregatorJsonMetrics(workerCtx, logger, databaseContainer, loadedConfig)(w, r)
+		// } else
+		if r.URL.Query().Get("format") == "prometheus" {
 			s.handleAggregatorPrometheusMetrics(workerCtx, logger, databaseContainer)(w, r)
 		} else {
 			http.Error(w, "unsupported format, please use '?format=json' or '?format=prometheus'", http.StatusBadRequest)
@@ -46,32 +47,32 @@ func (s *Server) StartAggregatorServer(
 	http.ListenAndServe(":"+s.Port, nil)
 }
 
-func (s *Server) handleAggregatorJsonMetrics(
-	workerCtx context.Context,
-	logger *slog.Logger,
-	databaseContainer *database.Database,
-	loadedConfig *config.Config,
-) func(w http.ResponseWriter, r *http.Request) {
-	return func(w http.ResponseWriter, r *http.Request) {
-		combinedMetrics := make(map[string]MetricsData)
-		// for _, metricsURL := range loadedConfig.Metrics.MetricsURLs { // TODO: replace with iteration over metrics db keys as below
-		// 	value, err := databaseContainer.Client.Get(workerCtx, metricsURL).Result()
-		// 	if err != nil {
-		// 		logger.ErrorContext(workerCtx, "error getting value from Redis", "key", "error", err)
-		// 		return
-		// 	}
-		// 	var metricsData MetricsData
-		// 	err = json.Unmarshal([]byte(value), &metricsData)
-		// 	if err != nil {
-		// 		logger.ErrorContext(workerCtx, "error unmarshalling metrics data", "error", err)
-		// 		return
-		// 	}
-		// 	combinedMetrics[metricsURL] = metricsData
-		// }
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(combinedMetrics)
-	}
-}
+// func (s *Server) handleAggregatorJsonMetrics(
+// 	workerCtx context.Context,
+// 	logger *slog.Logger,
+// 	databaseContainer *database.Database,
+// 	loadedConfig *config.Config,
+// ) func(w http.ResponseWriter, r *http.Request) {
+// 	return func(w http.ResponseWriter, r *http.Request) {
+// 		combinedMetrics := make(map[string]MetricsData)
+// 		// for _, metricsURL := range loadedConfig.Metrics.MetricsURLs { // TODO: replace with iteration over metrics db keys as below
+// 		// 	value, err := databaseContainer.Client.Get(workerCtx, metricsURL).Result()
+// 		// 	if err != nil {
+// 		// 		logger.ErrorContext(workerCtx, "error getting value from Redis", "key", "error", err)
+// 		// 		return
+// 		// 	}
+// 		// 	var metricsData MetricsData
+// 		// 	err = json.Unmarshal([]byte(value), &metricsData)
+// 		// 	if err != nil {
+// 		// 		logger.ErrorContext(workerCtx, "error unmarshalling metrics data", "error", err)
+// 		// 		return
+// 		// 	}
+// 		// 	combinedMetrics[metricsURL] = metricsData
+// 		// }
+// 		w.Header().Set("Content-Type", "application/json")
+// 		json.NewEncoder(w).Encode(combinedMetrics)
+// 	}
+// }
 
 func (s *Server) handleAggregatorPrometheusMetrics(
 	workerCtx context.Context,
