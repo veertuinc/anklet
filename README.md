@@ -302,7 +302,7 @@ host_disk_usage_percentage 46.150550
 
 In most cases each individual Anklet serving up their own metrics is good enough for your monitoring needs. However, there are situations where you may need to consume them from a single source instead. The Anklet Aggregator service is designed to do just that.
 
-In order to enable the aggregator, you will want to run an Anklet with the `aggregator` flag set to `true`. **You want to run this separate from any plugins.** This will start an Anklet Aggregator service that will collect metrics from all Anklets defined in `metrics_urls` and make them available at `http://{aggregator_url}:{port}/metrics?format=json` or `http://{aggregator_url}:{port}/metrics?format=prometheus`. Here is an example config:
+In order to enable the aggregator, you will want to run an Anklet with the `aggregator` flag set to `true`. **You want to run this separate from any other plugins.** This will start an Anklet Aggregator service that will collect metrics from all Anklet metrics stored in the Databse and make them available at `http://{aggregator_url}:{port}/metrics?format=json` or `http://{aggregator_url}:{port}/metrics?format=prometheus`. Here is an example config:
 
 ```yaml
 ---
@@ -318,10 +318,6 @@ global_database_password: ""
 global_database_database: 0
 metrics:
   aggregator: true
-  metrics_urls:
-    - http://192.168.1.201:8080/metrics
-    - http://192.168.1.202:8080/metrics
-    - http://192.168.1.203:8080/metrics
   port: 8081 # port to serve aggregator on
   sleep_interval: 10 # how often to fetch metrics from each Anklet defined
 ```
