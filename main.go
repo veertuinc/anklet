@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
-	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -284,6 +283,7 @@ func worker(
 		databaseDatabase = loadedConfig.GlobalDatabaseDatabase
 	}
 
+	// TODO: move this into a function/different file
 	// Setup Metrics Server and context
 	metricsPort := "8080"
 	if loadedConfig.Metrics.Port != "" {
@@ -308,7 +308,6 @@ func worker(
 	ln.Close()
 	metricsService := metrics.NewServer(metricsPort)
 	if loadedConfig.Metrics.Aggregator {
-		workerCtx = logging.AppendCtx(workerCtx, slog.Any("metrics_urls", loadedConfig.Metrics.MetricsURLs))
 		if databaseURL == "" { // if no global database URL is set, use the metrics database URL
 			databaseURL = loadedConfig.Metrics.Database.URL
 			databasePort = loadedConfig.Metrics.Database.Port
@@ -330,41 +329,26 @@ func worker(
 		workerCtx = context.WithValue(workerCtx, config.ContextKey("database"), databaseContainer)
 		go metricsService.StartAggregatorServer(workerCtx, parentLogger, false)
 		parentLogger.InfoContext(workerCtx, "metrics aggregator started on port "+metricsPort)
-		for _, metricsURL := range loadedConfig.Metrics.MetricsURLs {
-			wg.Add(1)
-			go func(metricsURL string) {
-				defer wg.Done()
-				pluginCtx, pluginCancel := context.WithCancel(workerCtx) // Inherit from parent context
-				pluginCtx = logging.AppendCtx(pluginCtx, slog.String("metrics_url", metricsURL))
-				// check if valid URL
-				_, err = url.Parse(metricsURL)
-				if err != nil {
-					parentLogger.ErrorContext(pluginCtx, "invalid URL", "error", err)
+		wg.Add(1)
+		defer wg.Done()
+		pluginCtx, pluginCancel := context.WithCancel(workerCtx) // Inherit from parent context
+		for {
+			select {
+			case <-workerCtx.Done():
+				pluginCancel()
+				parentLogger.WarnContext(pluginCtx, shutDownMessage)
+				return
+			default:
+				if workerCtx.Err() != nil || toRunOnce == "true" {
 					pluginCancel()
-					return
+					break
 				}
-				for {
-					select {
-					case <-workerCtx.Done():
-						pluginCancel()
-						parentLogger.WarnContext(pluginCtx, shutDownMessage)
-						return
-					default:
-						// get metrics from endpoint and update the main list
-						metrics.UpdatemetricsURLDBEntry(pluginCtx, parentLogger, metricsURL)
-						if workerCtx.Err() != nil || toRunOnce == "true" {
-							parentLogger.DebugContext(pluginCtx, "workerCtx.Err() != nil || toRunOnce == true")
-							pluginCancel()
-							break
-						}
-						select {
-						case <-time.After(time.Duration(loadedConfig.Metrics.SleepInterval) * time.Second):
-						case <-pluginCtx.Done():
-							break
-						}
-					}
+				select {
+				case <-time.After(time.Duration(loadedConfig.Metrics.SleepInterval) * time.Second):
+				case <-pluginCtx.Done():
+					break
 				}
-			}(metricsURL)
+			}
 		}
 	} else {
 		// firstPluginStarted: always make sure the first plugin in the config starts first before any others.

@@ -106,7 +106,12 @@ func AuthenticateAndReturnGitHubClient(
 }
 
 // https://github.com/gofri/go-github-ratelimit has yet to support primary rate limits, so we have to do it ourselves.
-func ExecuteGitHubClientFunction[T any](pluginCtx context.Context, logger *slog.Logger, executeFunc func() (*T, *github.Response, error)) (context.Context, *T, *github.Response, error) {
+func ExecuteGitHubClientFunction[T any](
+	workerCtx context.Context,
+	pluginCtx context.Context,
+	logger *slog.Logger,
+	executeFunc func() (*T, *github.Response, error),
+) (context.Context, *T, *github.Response, error) {
 	innerPluginCtx, cancel := context.WithCancel(pluginCtx) // Inherit from parent context
 	defer cancel()
 	result, response, err := executeFunc()
@@ -128,17 +133,17 @@ func ExecuteGitHubClientFunction[T any](pluginCtx context.Context, logger *slog.
 			if err != nil {
 				return pluginCtx, nil, nil, err
 			}
-			metricsData.UpdatePlugin(pluginCtx, logger, metrics.PluginBase{
+			metricsData.UpdatePlugin(workerCtx, pluginCtx, logger, metrics.PluginBase{
 				Name:   ctxPlugin.Name,
 				Status: "limit_paused",
 			})
 			select {
 			case <-time.After(sleepDuration):
-				metricsData.UpdatePlugin(pluginCtx, logger, metrics.PluginBase{
+				metricsData.UpdatePlugin(workerCtx, pluginCtx, logger, metrics.PluginBase{
 					Name:   ctxPlugin.Name,
 					Status: "running",
 				})
-				return ExecuteGitHubClientFunction(pluginCtx, logger, executeFunc) // Retry the function after waiting
+				return ExecuteGitHubClientFunction(workerCtx, pluginCtx, logger, executeFunc) // Retry the function after waiting
 			case <-pluginCtx.Done():
 				return pluginCtx, nil, nil, pluginCtx.Err()
 			}

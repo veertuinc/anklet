@@ -25,6 +25,8 @@ type Server struct {
 	Port string
 }
 
+var once sync.Once
+
 // NewServer creates a new instance of Server
 func NewServer(port string) *Server {
 	return &Server{
@@ -105,6 +107,9 @@ func Run(
 		},
 	)
 
+	once.Do(func() {
+		metrics.ExportMetricsToDB(pluginCtx, logger)
+	})
 	configFileName, err := config.GetConfigFileNameFromContext(pluginCtx)
 	if err != nil {
 		return pluginCtx, err
@@ -498,7 +503,7 @@ func Run(
 		// var response *github.Response
 		var err error
 		if isRepoSet {
-			pluginCtx, hookDeliveries, _, err = internalGithub.ExecuteGitHubClientFunction(pluginCtx, logger, func() (*[]*github.HookDelivery, *github.Response, error) {
+			pluginCtx, hookDeliveries, _, err = internalGithub.ExecuteGitHubClientFunction(workerCtx, pluginCtx, logger, func() (*[]*github.HookDelivery, *github.Response, error) {
 				hookDeliveries, response, err := githubClient.Repositories.ListHookDeliveries(pluginCtx, pluginConfig.Owner, pluginConfig.Repo, pluginConfig.HookID, opts)
 				if err != nil {
 					return nil, nil, err
@@ -506,7 +511,7 @@ func Run(
 				return &hookDeliveries, response, nil
 			})
 		} else {
-			pluginCtx, hookDeliveries, _, err = internalGithub.ExecuteGitHubClientFunction(pluginCtx, logger, func() (*[]*github.HookDelivery, *github.Response, error) {
+			pluginCtx, hookDeliveries, _, err = internalGithub.ExecuteGitHubClientFunction(workerCtx, pluginCtx, logger, func() (*[]*github.HookDelivery, *github.Response, error) {
 				hookDeliveries, response, err := githubClient.Organizations.ListHookDeliveries(pluginCtx, pluginConfig.Owner, pluginConfig.HookID, opts)
 				if err != nil {
 					return nil, nil, err
@@ -589,7 +594,7 @@ MainLoop:
 		var gottenHookDelivery *github.HookDelivery
 		var err error
 		if isRepoSet {
-			pluginCtx, gottenHookDelivery, _, err = internalGithub.ExecuteGitHubClientFunction(pluginCtx, logger, func() (*github.HookDelivery, *github.Response, error) {
+			pluginCtx, gottenHookDelivery, _, err = internalGithub.ExecuteGitHubClientFunction(workerCtx, pluginCtx, logger, func() (*github.HookDelivery, *github.Response, error) {
 				gottenHookDelivery, response, err := githubClient.Repositories.GetHookDelivery(pluginCtx, pluginConfig.Owner, pluginConfig.Repo, pluginConfig.HookID, *hookDelivery.ID)
 				if err != nil {
 					return nil, nil, err
@@ -597,7 +602,7 @@ MainLoop:
 				return gottenHookDelivery, response, nil
 			})
 		} else {
-			pluginCtx, gottenHookDelivery, _, err = internalGithub.ExecuteGitHubClientFunction(pluginCtx, logger, func() (*github.HookDelivery, *github.Response, error) {
+			pluginCtx, gottenHookDelivery, _, err = internalGithub.ExecuteGitHubClientFunction(workerCtx, pluginCtx, logger, func() (*github.HookDelivery, *github.Response, error) {
 				gottenHookDelivery, response, err := githubClient.Organizations.GetHookDelivery(pluginCtx, pluginConfig.Owner, pluginConfig.HookID, *hookDelivery.ID)
 				if err != nil {
 					return nil, nil, err
@@ -709,7 +714,7 @@ MainLoop:
 					var otherGottenHookDelivery *github.HookDelivery
 					var err error
 					if isRepoSet {
-						pluginCtx, otherGottenHookDelivery, _, err = internalGithub.ExecuteGitHubClientFunction(pluginCtx, logger, func() (*github.HookDelivery, *github.Response, error) {
+						pluginCtx, otherGottenHookDelivery, _, err = internalGithub.ExecuteGitHubClientFunction(workerCtx, pluginCtx, logger, func() (*github.HookDelivery, *github.Response, error) {
 							otherGottenHookDelivery, response, err := githubClient.Repositories.GetHookDelivery(pluginCtx, pluginConfig.Owner, pluginConfig.Repo, pluginConfig.HookID, *hookDelivery.ID)
 							if err != nil {
 								return nil, nil, err
@@ -717,7 +722,7 @@ MainLoop:
 							return otherGottenHookDelivery, response, nil
 						})
 					} else {
-						pluginCtx, otherGottenHookDelivery, _, err = internalGithub.ExecuteGitHubClientFunction(pluginCtx, logger, func() (*github.HookDelivery, *github.Response, error) {
+						pluginCtx, otherGottenHookDelivery, _, err = internalGithub.ExecuteGitHubClientFunction(workerCtx, pluginCtx, logger, func() (*github.HookDelivery, *github.Response, error) {
 							otherGottenHookDelivery, response, err := githubClient.Organizations.GetHookDelivery(pluginCtx, pluginConfig.Owner, pluginConfig.HookID, *hookDelivery.ID)
 							if err != nil {
 								return nil, nil, err
@@ -754,7 +759,7 @@ MainLoop:
 		// Redeliver the hook
 		var redelivery *github.HookDelivery
 		if isRepoSet {
-			pluginCtx, redelivery, _, _ = internalGithub.ExecuteGitHubClientFunction(pluginCtx, logger, func() (*github.HookDelivery, *github.Response, error) {
+			pluginCtx, redelivery, _, _ = internalGithub.ExecuteGitHubClientFunction(workerCtx, pluginCtx, logger, func() (*github.HookDelivery, *github.Response, error) {
 				redelivery, response, err := githubClient.Repositories.RedeliverHookDelivery(pluginCtx, pluginConfig.Owner, pluginConfig.Repo, pluginConfig.HookID, *hookDelivery.ID)
 				if err != nil {
 					return nil, nil, err
@@ -762,7 +767,7 @@ MainLoop:
 				return redelivery, response, nil
 			})
 		} else {
-			pluginCtx, redelivery, _, _ = internalGithub.ExecuteGitHubClientFunction(pluginCtx, logger, func() (*github.HookDelivery, *github.Response, error) {
+			pluginCtx, redelivery, _, _ = internalGithub.ExecuteGitHubClientFunction(workerCtx, pluginCtx, logger, func() (*github.HookDelivery, *github.Response, error) {
 				redelivery, response, err := githubClient.Organizations.RedeliverHookDelivery(pluginCtx, pluginConfig.Owner, pluginConfig.HookID, *hookDelivery.ID)
 				if err != nil {
 					return nil, nil, err
