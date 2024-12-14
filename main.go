@@ -283,6 +283,7 @@ func worker(
 		databaseDatabase = loadedConfig.GlobalDatabaseDatabase
 	}
 
+	// TODO: move this into a function/different file
 	// Setup Metrics Server and context
 	metricsPort := "8080"
 	if loadedConfig.Metrics.Port != "" {

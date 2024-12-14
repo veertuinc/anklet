@@ -276,7 +276,7 @@ func (cli *Cli) ObtainAnkaVM(workerCtx context.Context, pluginCtx context.Contex
 	if err != nil {
 		return pluginCtx, vm, err
 	}
-	metricsData.IncrementTotalRunningVMs()
+	metricsData.IncrementTotalRunningVMs(workerCtx, pluginCtx, logger)
 	return pluginCtx, vm, nil
 }
 

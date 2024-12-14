@@ -60,7 +60,7 @@ func main() {
 	}
 
 	pluginCtx := context.Background()
-
+	workerCtx := context.Background()
 	var githubClient *github.Client
 
 	githubClient, err = internalGithub.AuthenticateAndReturnGitHubClient(
@@ -81,7 +81,7 @@ func main() {
 	var hookDeliveries *[]*github.HookDelivery
 	opts := &github.ListCursorOptions{PerPage: 10}
 	if isRepoSet {
-		pluginCtx, hookDeliveries, _, err = internalGithub.ExecuteGitHubClientFunction(pluginCtx, logger, func() (*[]*github.HookDelivery, *github.Response, error) {
+		pluginCtx, hookDeliveries, _, err = internalGithub.ExecuteGitHubClientFunction(workerCtx, pluginCtx, logger, func() (*[]*github.HookDelivery, *github.Response, error) {
 			hookDeliveries, response, err := githubClient.Repositories.ListHookDeliveries(pluginCtx, owner, repo, hookID, opts)
 			if err != nil {
 				return nil, nil, err
@@ -89,7 +89,7 @@ func main() {
 			return &hookDeliveries, response, nil
 		})
 	} else {
-		pluginCtx, hookDeliveries, _, err = internalGithub.ExecuteGitHubClientFunction(pluginCtx, logger, func() (*[]*github.HookDelivery, *github.Response, error) {
+		pluginCtx, hookDeliveries, _, err = internalGithub.ExecuteGitHubClientFunction(workerCtx, pluginCtx, logger, func() (*[]*github.HookDelivery, *github.Response, error) {
 			hookDeliveries, response, err := githubClient.Organizations.ListHookDeliveries(pluginCtx, owner, hookID, opts)
 			if err != nil {
 				return nil, nil, err
@@ -141,7 +141,7 @@ func main() {
 		var gottenHookDelivery *github.HookDelivery
 		var err error
 		if isRepoSet {
-			pluginCtx, gottenHookDelivery, _, err = internalGithub.ExecuteGitHubClientFunction(pluginCtx, logger, func() (*github.HookDelivery, *github.Response, error) {
+			pluginCtx, gottenHookDelivery, _, err = internalGithub.ExecuteGitHubClientFunction(workerCtx, pluginCtx, logger, func() (*github.HookDelivery, *github.Response, error) {
 				gottenHookDelivery, response, err := githubClient.Repositories.GetHookDelivery(pluginCtx, owner, repo, hookID, *hookDelivery.ID)
 				if err != nil {
 					return nil, nil, err
@@ -149,7 +149,7 @@ func main() {
 				return gottenHookDelivery, response, nil
 			})
 		} else {
-			pluginCtx, gottenHookDelivery, _, err = internalGithub.ExecuteGitHubClientFunction(pluginCtx, logger, func() (*github.HookDelivery, *github.Response, error) {
+			pluginCtx, gottenHookDelivery, _, err = internalGithub.ExecuteGitHubClientFunction(workerCtx, pluginCtx, logger, func() (*github.HookDelivery, *github.Response, error) {
 				gottenHookDelivery, response, err := githubClient.Organizations.GetHookDelivery(pluginCtx, owner, hookID, *hookDelivery.ID)
 				if err != nil {
 					return nil, nil, err
@@ -170,7 +170,7 @@ func main() {
 
 		workflowJobRepo := *workflowJobEvent.Repo.Name
 		var currentWorkflowJob *github.WorkflowJob
-		pluginCtx, currentWorkflowJob, _, err = internalGithub.ExecuteGitHubClientFunction(pluginCtx, logger, func() (*github.WorkflowJob, *github.Response, error) {
+		pluginCtx, currentWorkflowJob, _, err = internalGithub.ExecuteGitHubClientFunction(workerCtx, pluginCtx, logger, func() (*github.WorkflowJob, *github.Response, error) {
 			currentWorkflowJob, response, err := githubClient.Actions.GetWorkflowJobByID(pluginCtx, owner, workflowJobRepo, *workflowJobEvent.WorkflowJob.ID)
 			if err != nil {
 				return nil, nil, err
