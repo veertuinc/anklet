@@ -267,6 +267,9 @@ func CompareAndUpdateMetrics(currentService interface{}, updatedPlugin interface
 		if !updated.LastFailedRun.IsZero() {
 			currentServiceTyped.LastFailedRun = updated.LastFailedRun
 		}
+		if !updated.LastCanceledRun.IsZero() {
+			currentServiceTyped.LastCanceledRun = updated.LastCanceledRun
+		}
 		if updated.LastSuccessfulRunJobUrl != "" {
 			currentServiceTyped.LastSuccessfulRunJobUrl = updated.LastSuccessfulRunJobUrl
 		}
