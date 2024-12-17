@@ -919,9 +919,9 @@ func Run(
 		logger.DebugContext(pluginCtx, "installing github runner inside of vm")
 		installRunnerErr = ankaCLI.AnkaRun(pluginCtx, "./install-runner.bash")
 		if installRunnerErr != nil {
-			// logger.ErrorContext(pluginCtx, "error executing install-runner.bash", "err", installRunnerErr)
+			logger.ErrorContext(pluginCtx, "error executing install-runner.bash", "err", installRunnerErr)
 			retryChannel <- true
-			return pluginCtx, fmt.Errorf("error executing install-runner.bash: %s", installRunnerErr.Error())
+			return pluginCtx, nil // do not return error here; curl can fail and we need to retry
 		}
 		// Register runner
 		select {
