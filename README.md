@@ -4,7 +4,7 @@ Inspired by our customer requirements, **Anklet** is a solution created to meet 
 
 ## At a glance
 
-- Veertu's Anklet is a service that runs custom and specific [plugins](./plugins) to communicate with your CI platform or other tools, and the Anka CLI.
+- Veertu's Anklet is a service that runs custom [plugins](./plugins) to communicate with your CI platform and the Anka CLI running on macOS hosts.
 - It can run multiple plugins, in parallel, on the same host.
 - Depending on the plugin, it can run on both linux containers/instances and macOS hosts. Plugins using the Anka CLI to spin up macOS VMs would need to run on a macOS host.
 
