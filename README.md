@@ -85,7 +85,6 @@ With the Github Actions plugin, there is a **Receiver** Plugin and a **Handler**
 ### Anklet Setup
 
 1. Download the binary from the [releases page](https://github.com/veertuinc/anklet/releases).
-1. Use the [Plugin Setup and Usage Guides](#plugin-setup-and-usage-guides) to setup the plugin(s) you want to use.
 1. Create a `~/.config/anklet/config.yml` file with the following contents. We'll configure the plugins next.
 
 ```yaml
