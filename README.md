@@ -306,9 +306,6 @@ In order to enable the aggregator, you will want to run an Anklet with the `aggr
 ---
 work_dir: /Users/nathanpierce/anklet/
 pid_file_dir: /tmp/
-log:
-  # if file_dir is not set, it will be set to current directory you execute anklet in
-  file_dir: /Users/nathanpierce/Library/Logs/
 global_database_url: localhost
 global_database_port: 6379
 global_database_user: ""
