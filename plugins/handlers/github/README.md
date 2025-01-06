@@ -33,6 +33,7 @@ plugins:
     registry_url: http://anka.registry:8089
     runner_group: macOS # requires Enterprise github
     # sleep_interval: 5 # Optional; defaults to 1 second.
+    # registration_timeout_seconds: 60 # Optional; defaults to 60 seconds.
     #database:
     #  enabled: true
     #  url: localhost
