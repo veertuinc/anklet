@@ -25,12 +25,19 @@ While these reasons are specific to Github Actions, they apply to many other CI 
 Anklet will have a configuration that defines custom plugins (written by us and/or the community) which handle all of the logic necessary to watch/listen for jobs in the specific CI platform. The plugins determine what logic happens host-side, and for example, prepare a macOS VM + register it to the CI platform for use. We'll talk more about that below. At the time of writing this, plugins are part of Anklet as a monorepo, but will eventually be separated.
 
 1. Anklet loads the configuration from the `~/.config/anklet/config.yml` file on the same host. The configuration defines the plugins that will be started. [Example below.](#anklet-setup)
-    - Each `plugins:` list item in the config specifies a plugin to load and use, the database (if there is one;optional), and any other specific configuration for that plugin.
+    - Each `plugins:` list item in the config specifies a plugin to load and use, potentially a database, and any other specific configuration for that plugin.
 1. Plugins run in parallel, but have separate internal context to avoid collisions.
 1. It supports loading in a database (currently `redis`) to manage state across all of your hosts.
     - The `github` plugin, and likely others, rely on this to prevent race conditions with picking up jobs.
-    - It is `disabled: true` by default to make anklet more lightweight.
-1. Logs are in JSON format and are written to `./anklet.log` (unless otherwise specified). Here is an example of the log structure:
+    - It is `disabled: true` by default to make anklet more lightweight should you not need a database for your plugins.
+1. Logs are in JSON format and are written to STDOUT (unless otherwise specified).
+    ```
+    ❯ ./anklet
+    {"time":"2025-01-06T08:57:53.043991-06:00","level":"ERROR","msg":"unable to load config.yml (is it in the work_dir, or are you using an absolute path?)","error":"open /Users/nathanpierce/.config/anklet/config.yml: no such file or directory"}
+    ```
+
+Here is an example of the log structure (made pretty; normally it's without newlines):
+
     ```JSON
     {
       "time": "2024-04-03T17:10:08.726639-04:00",
@@ -58,10 +65,11 @@ Anklet will have a configuration that defines custom plugins (written by us and/
 
 ### How does it manage VM Templates on the host?
 
-Anklet handles VM [Templates/Tags](https://docs.veertu.com/anka/anka-virtualization-cli/getting-started/creating-vms/#vm-templates) the best it can using the Anka CLI.
-- If the VM Template or Tag does not exist, Anklet will pull it from the Registry using the `default` configured registry under `anka registry list-repos`. You can also set the `registry_url` in the `config.yml` to use a different registry.
+If your plugin uses the Anka CLI to create VMs, Anklet handles VM [Templates/Tags](https://docs.veertu.com/anka/anka-virtualization-cli/getting-started/creating-vms/#vm-templates) the best it can.
+
+1. If the VM Template or Tag does not exist, Anklet will pull it from the Registry using the `default` configured registry under `anka registry list-repos`. You can also set the `registry_url` in the `config.yml` to use a different registry.
     - Two consecutive pulls cannot happen on the same host or else the data may become corrupt. If a second job is picked up that requires a pull, it will send it back to the queue so another host can handle it.
-- If the Template *AND* Tag already exist, it does *not* issue a pull from the Registry (which therefore doesn't require maintaining a Registry at all; useful for users who use `anka export/import`). Important: You must define the tag, or else it will attempt to use "latest" and forcefully issue a pull.
+2. If the Template *AND* Tag already exist, it does *not* issue a pull from the Registry (which therefore doesn't require maintaining a Registry at all; useful for users who use `anka export/import`). Important: You must define the tag, or else it will attempt to use "latest" and forcefully issue a pull.
 
 ---
 
@@ -72,66 +80,33 @@ We're going to use Github Actions as an example, but the process is similar for 
 With the Github Actions plugin, there is a **Receiver** Plugin and a **Handler** Plugin.
 
 - The Github Actions **Receiver** Plugin is a web server that listens for webhooks Github sends and then places the events in the database/queue. It can run on mac and linux.
-- The Github Actions **Handler** Plugin is responsible for pulling a job from the database/queue, preparing a macOS VM, and registering it to the repo's action runners so it can execute the job inside. It can run on mac as it needs access to the Anka CLI.
+- The Github Actions **Handler** Plugin is responsible for pulling a job from the database/queue, preparing a macOS VM, and registering it to the repo's action runners so it can execute the job inside. It can only run on macOS as it needs access to the Anka CLI.
 
 ### Anklet Setup
 
 1. Download the binary from the [releases page](https://github.com/veertuinc/anklet/releases).
 1. Use the [Plugin Setup and Usage Guides](#plugin-setup-and-usage-guides) to setup the plugin(s) you want to use.
-2. Create a `~/.config/anklet/config.yml` file with the following contents and modify any necessary values. We'll use a config for `github`:
-    ```yaml
-    ---
-    work_dir: /tmp/
-    pid_file_dir: /tmp/
-    # plugins_path: ~/.config/anklet/plugins/
-    global_database_url: localhost
-    global_database_port: 6379
-    global_database_user: ""
-    global_database_password: ""
-    global_database_database: 0
-    global_private_key: /Users/nathanpierce/veertuinc-anklet.2024-07-19.private-key.pem
-    log:
-        # if file_dir is not set, it will be set to current directory you execute anklet in
-        file_dir: /Users/myUser/Library/Logs/
-    plugins:
-      # GITHUB RECEIVER
-      - name: GITHUB_WEBHOOK_RECEIVER
-        plugin: github_receiver
-        hook_id: 489747753
-        port: 54321 # port that's open to the internet so github can post to it
-        secret: 00000000
-        #private_key: /Users/nathanpierce/veertuinc-anklet.2024-07-19.private-key.pem
-        app_id: 949431
-        installation_id: 52970581
-        repo: anklet
-        owner: veertuinc
-        #database:
-          #url: localhost
-          #port: 6379
-          #user: ""
-          #password: ""
-          #database: 0
-      # GITHUB HANDLERS
-      - name: RUNNER1
-          plugin: github
-          app_id: 949431
-          installation_id: 52970581
-          repo: anklet
-          owner: veertuinc
-          registry_url: http://anka.registry:8089
-          sleep_interval: 10 # sleep 10 seconds between checks for new jobs
-      - name: RUNNER2
-          plugin: github
-          token: github_pat_1XXXXX
-          repo: anklet
-          owner: veertuinc
-          registry_url: http://anka.registry:8089
+1. Create a `~/.config/anklet/config.yml` file with the following contents. We'll configure the plugins next.
 
-    ```
-    > Note: You can only ever run two VMs per host per the Apple macOS SLA. While you can specify more than two plugins, only two will ever be running a VM at one time. `sleep_interval` can be used to control the frequency/priority of a plugin and increase the odds that a job will be picked up.
-3. Run the binary on the host that has the [Anka CLI installed](https://docs.veertu.com/anka/anka-virtualization-cli/getting-started/installing-the-anka-virtualization-package/) (Anka is not needed if just running an Anklet Receiver).
-    - `tail -fF /Users/myUser/Library/Logs/anklet.log` to see the logs. You can run `anklet` with `LOG_LEVEL=DEBUG` to see more verbose output.
-3. To stop, send an interrupt or ctrl+c. It will attempt a graceful shut down of plugins, sending unfinished jobs back to the queue or waiting until the job is done to prevent orphans.
+```yaml
+---
+work_dir: /tmp/
+pid_file_dir: /tmp/
+# If you want to use the same database for all your plugins, you can set them below:
+# global_database_url: localhost
+# global_database_port: 6379
+# global_database_user: ""
+# global_database_password: ""
+# global_database_database: 0
+# global_private_key: /Users/{YOUR USER HERE}/.private-key.pem # If you use the same key for all your plugins, you can set it here.
+# plugins_path: ~/.config/anklet/plugins/ # This sets the location where scripts used by plugins are stored; we don't recommend changing this.
+plugins:
+```
+1. [Set up the Receiver Plugin.](./plugins/receivers/github/README.md)
+1. [Set up the Handler Plugin.](./plugins/handlers/github/README.md)
+1. Run the binary on the host that has the [Anka CLI installed](https://docs.veertu.com/anka/anka-virtualization-cli/getting-started/installing-the-anka-virtualization-package/) (Anka is not needed if just running an Anklet Receiver).
+    - You can run `anklet` with `LOG_LEVEL=DEBUG` to see more verbose output.
+1. To stop, send an interrupt or ctrl+c. It will attempt a graceful shut down of plugins, sending unfinished jobs back to the queue or waiting until the job is done to prevent orphans.
 
 It is also possible to use ENVs for several of the items in the config. They override anything set in the yml. Here is a list of ENVs that you can use:
 

@@ -5,3 +5,4 @@ dist
 *.log
 *.pid
 docker/anklet*
+anklet_v*

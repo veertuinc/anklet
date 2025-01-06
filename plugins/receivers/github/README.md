@@ -1,32 +1,36 @@
 # GITHUB RECEIVER PLUGIN
 
-The Github Receiver Plugin is used to receive webhook events from github and store them in the database for the Github Service Plugin to pick up and process.
+The Github Receiver Plugin is used to receive webhook events from github and store them in the database for the [Github Handler Plugin](../../handlers/github/README.md) to pick up and process.
 
 ### What you need:
 
-1. An active database the receiver can access. For help setting up the database, see [Database Setup](https://github.com/veertuinc/anklet/blob/main/docs/database.md#database-setup).
-1. Some sort of Auth method like a PAT or a Github App for the repo you want to receive webhooks about. They need `Administration`, `Webhooks`, and `Actions` set to `Read and write`.
-1. A way to receive webhooks. This can be a public URL or IP that points to the server running the Anklet Github Receiver.
+1. An active database the receiver can access. For help setting up the database, see [Database Setup](https://github.com/veertuinc/anklet/tree/main?tab=readme-ov-file#database-setup). It needs to be the same database as the [Github Handler Plugin](../../handlers/github/README.md).
+1. Some sort of Auth method like a PAT or a Github App for the repo you want to receive webhooks for. They need `Administration`, `Webhooks`, and `Actions` set to `Read and write`.
+1. A way to receive webhooks. This can be a public URL or IP that points to the server running the Anklet Github Receiver. Github will send the webhook to this endpoint over the internet.
 
 In the `config.yml`, you can define the `github_receiver` plugin as follows:
 
-**NOTE: Plugin names MUST be unique across all hosts.**
+**NOTE: Plugin `name` MUST be unique across all hosts and plugins in your Anklet cluster.**
 
 ```
+---
+
+. . .
+
 global_receiver_secret: 12345 # this can be set using the ANKLET_GLOBAL_RECEIVER_SECRET env var too
 plugins:
-  - name: GITHUB_RECEIVER
+  - name: GITHUB_WEBHOOK_RECEIVER_1
     plugin: github_receiver
     hook_id: 489747753
     port: 54321
     # secret: 12345
-    private_key: /Users/nathanpierce/veertuinc-anklet.2024-07-19.private-key.pem
+    # private_key: /Users/{YOUR USER HERE}/private-key.pem
     app_id: 949431
     installation_id: 52970581
-    repo: anklet
+    # repo: anklet # Optional; if you want to receive webhooks for a specific repo and not at the org level
     owner: veertuinc
-    skip_redeliver: true
-    # redeliver_hours: 24 # default is 24 hours
+    # skip_redeliver: true # Optional; if you want to skip redelivering undelivered webhooks on startup
+    # redeliver_hours: 24 # Optional; default is 24 hours
     #database:
     #  url: localhost
     #  port: 6379
@@ -35,11 +39,21 @@ plugins:
     #  database: 0
 ```
 
+Some things to note:
+
 - If you leave off `repo`, the receiver will be an organization level receiver.
-- Note: The receiver must come FIRST in the `plugins:` list. Do not place it after other plugins.
+- The receiver must come FIRST in the `plugins:` list. Do not place it after other plugins.
 - **IMPORTANT**: On first start, it will scan for failed webhook deliveries for the past 24 hours and send a re-delivery request for each one. This is to ensure that all webhooks are delivered and processed and nothing in your plugins are orphaned or database. Avoid excessive restarts or else you'll eat up your API limits quickly. You can use `skip_redeliver: true` to disable this behavior.
 
----
+Once configured, you can run Anklet and, if everything is configured properly, you should see logs like this:
+
+```
+{"time":"2025-01-06T10:38:23.198354-06:00","level":"INFO","msg":"starting plugin","ankletVersion":"0.11.2","pluginName":"GITHUB_WEBHOOK_RECEIVER"}
+{"time":"2025-01-06T10:38:23.199399-06:00","level":"INFO","msg":"listing hook deliveries for the last 24 hours to see if any need redelivery (may take a while)...","ankletVersion":"0.11.2","pluginName":"GITHUB_WEBHOOK_RECEIVER","plugin":"github_receiver"}
+{"time":"2025-01-06T10:38:27.186532-06:00","level":"INFO","msg":"started plugin","ankletVersion":"0.11.2","pluginName":"GITHUB_WEBHOOK_RECEIVER","plugin":"github_receiver"}
+```
+
+It should now be ready to receive webhooks. You can now set up a webhook to send events to this receiver.
 
 ## API Endpoints
 
@@ -47,11 +61,11 @@ plugins:
 
 ## Webhook Trigger Setup
 
-1. Find your repo in github.com
+1. Find your repo (or organization) in github.com
 1. Click on `Settings`
 1. Click on `Webhooks`
 1. Click on `Add webhook`
-1. Set the `Payload URL` to the Public IP or URL that points to the server running the Anklet Github Receiver + `/jobs/v1/receiver`. So for example: `http://99.153.180.48:54321/jobs/v1/receiver`
+1. Set the `Payload URL` to the Public IP or URL that points to the server running the Anklet Github Receiver + `/jobs/v1/receiver`. So for example: `http://{PUBLIC IP OR URL}:54321/jobs/v1/receiver`
 1. Set `Content Type` to `application/json`
 1. Set the `Secret` to the `secret` from the `config.yml`
 1. `SSL verfifcation` is up to you.
