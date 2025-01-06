@@ -1,32 +1,37 @@
 # GITHUB HANDLER PLUGIN
 
-The Github Handler Plugin is responsible for pulling a job from the database/queue, preparing a macOS VM, and registering it to the github repo as an action runner so it can execute the job inside.
+**Be sure to set up the [Github Receiver Plugin](../../receivers/github/README.md) first!**
 
-Workflow Run Jobs are processed in order of creation. The Github Webhook Receiver Plugin will place the jobs in the database/queue in the order they're created. Be sure to run the [Receiver](../receivers/github) first!
+The Github Handler Plugin is responsible for pulling a job from the database/queue, preparing a macOS VM, and registering it to the github repo or organization as an action runner so it can execute the job inside.
+
+The Github Handler Plugin will pull jobs from the database/queue in order of creation. The Github Webhook Receiver Plugin will place the jobs in the database/queue in the order they're created. 
 
 Note: Our [Build Cloud Controller](https://docs.veertu.com/anka/anka-build-cloud/#anka-controller) (which is not used by Anklet at the moment) will run VMs under `sudo/root`, but we *do not require* that for anklet. It does not run as root, and will use the current user's space/environment to run VMs.
 
-For help setting up the database, see [Database Setup](https://github.com/veertuinc/anklet/blob/main/docs/database.md#database-setup).
+For help setting up the database, see [Database Setup](https://github.com/veertuinc/anklet/tree/main?tab=readme-ov-file#database-setup).
 
 In the `config.yml`, you can define the `github` plugin as follows:
 
-**NOTE: Plugin names MUST be unique across all hosts.**
+**NOTE: Plugin `name` MUST be unique across all hosts and plugins.**
 
-```
+```yaml
+---
+
+. . .
+
 plugins:
   - name: RUNNER1
     plugin: github
-    token: github_pat_XXX
+    # token: github_pat_XXX
     # Instead of PAT, you can create a github app for your org/repo and use its credentials instead.
     # private_key: /path/to/private/key
     # app_id: 12345678 # Org > Settings > Developer settings > GitHub Apps > New GitHub App
     # installation_id: 12345678 # You need to install the app (Org > Settings > Developer settings > GitHub Apps > click Edit for the app > Install App > select your Repo > then check the URL bar for the installation ID)
     registration: repo
-    repo: anklet # Optional; only needed if registering a specific runner for a repo, otherwise it will be an org level runner.
+    # repo: anklet # Optional; only needed if registering a specific runner for a repo, otherwise it will be an org level runner.
     owner: veertuinc
     registry_url: http://anka.registry:8089
     runner_group: macOS # requires Enterprise github
-    registration_timeout_seconds: 60
     # sleep_interval: 5 # Optional; defaults to 1 second.
     #database:
     #  enabled: true
@@ -41,6 +46,7 @@ plugins:
 - You must define the database in the config.yml file either using the `database` section or the `global_database_*` variables. You can find installation instructions in the anklet main [README.md](../../README.md#database-setup).
 - If you are attempting to register runners for an entire organization, do NOT set `repo` and make sure your Github App has `Self-hosted runners` > `Read and write` permissions.
 - If your Organization level runner is registered and your public repo jobs are not picking it up even though the labels are a perfect match, make sure the Runner groups (likely `Default`) has `Allow public repositories`.
+- There are times when github will not register the runner for some reason. `registration_timeout_seconds` is available to set the custom seconds to wait before considering the runner registration failed (and retry on a new VM).
 
 ---
 

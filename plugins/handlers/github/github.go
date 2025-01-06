@@ -1046,8 +1046,14 @@ func Run(
 					alreadyLogged = true
 				}
 			}
-			if logCounter == int(pluginConfig.RegistrationTimeoutSeconds/jobStatusCheckIntervalSeconds) {
-				// after one minute, check to see if the job has started in the in_progress queue
+			var registrationTimeoutSeconds int
+			if pluginConfig.RegistrationTimeoutSeconds <= 0 {
+				registrationTimeoutSeconds = 60
+			} else {
+				registrationTimeoutSeconds = pluginConfig.RegistrationTimeoutSeconds
+			}
+			if logCounter == int(registrationTimeoutSeconds/jobStatusCheckIntervalSeconds) {
+				// after X seconds, check to see if the job has started in the in_progress queue
 				// if not, then the runner registration failed
 				if !inProgressQueue {
 					logger.ErrorContext(pluginCtx, "waiting for runner registration timed out, will retry")
