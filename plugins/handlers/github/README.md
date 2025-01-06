@@ -85,13 +85,13 @@ jobs:
 
 ### Install Supporting Scripts
 
-Finally, the `github` plugin requires three different bash scripts available on the host, which it will copy into the VM and run. You can find them under https://github.com/veertuinc/anklet/tree/main/plugins/handlers/github. They can be customized to fit your needs. Place them in under `${plugins_path}/handlers/github/` (default `~/.config/anklet/plugins/handlers/github/`).
+Finally, the `github` plugin requires three different bash scripts available on the host, which it will copy into the VM and run. You can find them under https://github.com/veertuinc/anklet/tree/main/plugins/handlers/github. They can be customized to fit your needs. Place them under `${plugins_path}/handlers/github/` (default `~/.config/anklet/plugins/handlers/github/`).
 
 ---
 
 ## Failure and Retry handling
 
-Anklet does its best to handle failures gracefully. We attempt to retry the entire VM setup/registration process for failures that are transient. This includes connection problems, Anka CLI failures that can be retried, and other transient issues.
+Anklet does its best to handle failures gracefully. We attempt to retry the entire VM setup/registration process for failures that are transient and recoverable. This includes connection problems, Anka CLI failures that can be retried, and others.
 
 If something cannot be safely retried, we have to send an API request to cancel the job in Github. Your users will see a cancelled job if there was an unrecoverable failure. Side note: We've asked Github to allow us to annotate the cancellation with a message so we can better understand why it was cancelled, but it's still pending: https://github.com/orgs/community/discussions/134326 (please up vote it!)
 

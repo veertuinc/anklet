@@ -106,7 +106,7 @@ plugins:
 1. [Set up the Handler Plugin.](./plugins/handlers/github/README.md)
 1. Run the binary on the host that has the [Anka CLI installed](https://docs.veertu.com/anka/anka-virtualization-cli/getting-started/installing-the-anka-virtualization-package/) (Anka is not needed if just running an Anklet Receiver).
     - You can run `anklet` with `LOG_LEVEL=DEBUG` to see more verbose output.
-1. To stop, send an interrupt or ctrl+c. It will attempt a graceful shut down of plugins, sending unfinished jobs back to the queue or waiting until the job is done to prevent orphans.
+1. To stop, send an interrupt signal or ctrl+c. It will attempt a graceful shut down of plugins, sending unfinished jobs back to the queue or waiting until the job is done to prevent orphans.
 
 It is also possible to use ENVs for several of the items in the config. They override anything set in the yml. Here is a list of ENVs that you can use:
 
@@ -115,8 +115,13 @@ It is also possible to use ENVs for several of the items in the config. They ove
 | ANKLET_WORK_DIR | Absolute path to work directory for anklet (ex: /tmp/) (defaults to `./`) |
 | ANKLET_PID_FILE_DIR | Absolute path to pid file directory for anklet (ex: /tmp/) (defaults to `./`) |
 | ANKLET_LOG_FILE_DIR | Absolute path to log file directory for anklet (ex: /Users/myUser/Library/Logs/) (defaults to `./`) |
-
-For error handling, see the [github plugin README](./plugins/handlers/github/README.md).
+| ANKLET_PLUGINS_PATH | Absolute path to plugins directory for anklet (ex: /Users/myUser/anklet/plugins/) (defaults to `~/.config/anklet/plugins/`) |
+| ANKLET_GLOBAL_DATABASE_URL | URL of the database (ex: localhost) |
+| ANKLET_GLOBAL_DATABASE_PORT | Port of the database (ex: 6379) |
+| ANKLET_GLOBAL_DATABASE_USER | User to use (ex: "") |
+| ANKLET_GLOBAL_DATABASE_PASSWORD | Password to use (ex: "") |
+| ANKLET_GLOBAL_DATABASE_DATABASE | Database to use (ex: 0) |
+| ANKLET_GLOBAL_PRIVATE_KEY | Absolute path to private key for anklet (ex: /Users/myUser/.private-key.pem) |
 
 ### Database Setup
 
@@ -145,7 +150,7 @@ You can control the location plugins are stored on the host by setting the `plug
 #### Github Actions
 
 - [**`Webhook Receiver Plugin`**](./plugins/receivers/github/README.md)
-- [**`Anka VM Handler Plugin`**](./plugins/handlers/github/README.md)
+- [**`Workflow Run Job Handler Plugin`**](./plugins/handlers/github/README.md)
 
 #### Docker / Containers
 
