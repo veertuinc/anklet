@@ -44,6 +44,7 @@ type Plugin struct {
 }
 
 type MetricsData struct {
+	LastUpdate                    time.Time     `json:"last_update"`
 	TotalRunningVMs               int           `json:"total_running_vms"`
 	TotalSuccessfulRunsSinceStart int           `json:"total_successful_runs_since_start"`
 	TotalFailedRunsSinceStart     int           `json:"total_failed_runs_since_start"`

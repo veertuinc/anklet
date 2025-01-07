@@ -229,6 +229,7 @@ func (s *Server) handleAggregatorPrometheusMetrics(
 					w.Write([]byte(fmt.Sprintf("host_disk_used_bytes{name=%s,owner=%s} %d\n", Name, ownerName, metricsData.HostDiskUsedBytes)))
 					w.Write([]byte(fmt.Sprintf("host_disk_available_bytes{name=%s,owner=%s} %d\n", Name, ownerName, metricsData.HostDiskAvailableBytes)))
 					w.Write([]byte(fmt.Sprintf("host_disk_usage_percentage{name=%s,owner=%s} %f\n", Name, ownerName, metricsData.HostDiskUsagePercentage)))
+					w.Write([]byte(fmt.Sprintf("last_update{name=%s,owner=%s} %s\n", Name, ownerName, metricsData.LastUpdate.Format(time.RFC3339))))
 				}
 			}
 			if nextCursor == 0 {
@@ -278,6 +279,18 @@ func ExportMetricsToDB(pluginCtx context.Context, logger *slog.Logger) {
 					logger.ErrorContext(pluginCtx, "error parsing metrics as json", "error", err.Error())
 				}
 				if pluginCtx.Err() == nil {
+					// add last_update
+					var metricsDataMap map[string]interface{}
+					if err := json.Unmarshal(metricsDataJson, &metricsDataMap); err != nil {
+						logger.ErrorContext(pluginCtx, "error unmarshalling metrics data", "error", err)
+						return
+					}
+					metricsDataMap["last_update"] = time.Now()
+					metricsDataJson, err = json.Marshal(metricsDataMap)
+					if err != nil {
+						logger.ErrorContext(pluginCtx, "error marshalling metrics data", "error", err)
+						return
+					}
 					// This will create a single key using the first plugin's name. It will contain all plugin metrics though.
 					setting := databaseContainer.Client.Set(pluginCtx, "anklet/metrics/"+ctxPlugin.Owner+"/"+ctxPlugin.Name, metricsDataJson, time.Hour*24*7) // keep metrics for one week max
 					if setting.Err() != nil {
