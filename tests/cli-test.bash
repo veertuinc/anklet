@@ -3,8 +3,12 @@ set -eo pipefail
 TESTS_DIR=$(cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd)
 cd $TESTS_DIR/.. # make sure we're in the root
 
-TEST_VM="15.1-arm64"
+TEST_VM="d792c6f6-198c-470f-9526-9c998efe7ab4"
 TEST_LOG="/tmp/test-log"
+
+if [[ -e ~/.config/anklet/config.yml ]]; then
+    mv ~/.config/anklet/config.yml ~/.config/anklet/config.yml.bak
+fi
 
 if ! anka version &> /dev/null; then
     echo "ERROR: Anka CLI not found"
@@ -20,8 +24,10 @@ cleanup() {
     echo "] Cleaning up..."
     rm -rf dist
     rm -f ~/.config/anklet/config.yml
+    mv ~/.config/anklet/config.yml.bak ~/.config/anklet/config.yml &> /dev/null || true
     anka delete --yes "${TEST_VM}-1" &> /dev/null || true
     anka delete --yes "${TEST_VM}-2" &> /dev/null || true
+    echo "] DONE
 }
 trap cleanup EXIT
 
