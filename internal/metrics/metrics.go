@@ -13,6 +13,8 @@ import (
 	"github.com/shirou/gopsutil/v4/disk"
 	"github.com/shirou/gopsutil/v4/mem"
 	"github.com/veertuinc/anklet/internal/config"
+	"github.com/veertuinc/anklet/internal/database"
+	"github.com/veertuinc/anklet/internal/logging"
 )
 
 // Server defines the structure for the API server
@@ -753,4 +755,16 @@ func GetMetricsDataFromContext(ctx context.Context) (*MetricsDataLock, error) {
 		return nil, fmt.Errorf("GetMetricsDataFromContext failed")
 	}
 	return metricsData, nil
+}
+
+func Cleanup(ctx context.Context, logger *slog.Logger, owner string, name string) {
+	databaseContainer, err := database.GetDatabaseFromContext(ctx)
+	if err != nil {
+		logger.ErrorContext(ctx, "error getting database client from context", "error", err.Error())
+	}
+	result := databaseContainer.Client.Del(context.Background(), "anklet/metrics/"+owner+"/"+name)
+	if result.Err() != nil {
+		logger.ErrorContext(ctx, "error deleting metrics data from Redis", "error", result.Err().Error())
+	}
+	logging.DevContext(ctx, "successfully deleted metrics data from Redis, key: anklet/metrics/"+owner+"/"+name)
 }

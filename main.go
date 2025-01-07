@@ -466,6 +466,10 @@ func worker(
 						return
 					}
 					pluginCtx = context.WithValue(pluginCtx, config.ContextKey("database"), databaseClient)
+					// cleanup metrics data when the plugin is stopped (otherwise it's orphaned in the aggregator)
+					if index == 0 { // only cleanup the first plugin's metrics data (they're aggregated by the first plugin's name)
+						defer metrics.Cleanup(pluginCtx, pluginLogger, plugin.Owner, plugin.Name)
+					}
 					logging.DevContext(pluginCtx, "connected to database")
 				}
 
