@@ -21,7 +21,7 @@ global_receiver_secret: 12345 # this can be set using the ANKLET_GLOBAL_RECEIVER
 plugins:
   - name: GITHUB_WEBHOOK_RECEIVER_1
     plugin: github_receiver
-    hook_id: 489747753
+    hook_id: 4897477123
     port: 54321
     # secret: 12345
     # private_key: /Users/{YOUR USER HERE}/private-key.pem

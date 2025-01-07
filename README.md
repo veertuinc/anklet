@@ -324,7 +324,6 @@ It's possible to use ENVs instead of the yml file. This is useful if you want to
 | --- | --- |
 | ANKLET_METRICS_AGGREGATOR | Whether to enable the aggregator (ex: true) |
 | ANKLET_METRICS_PORT | Port to serve aggregator on (ex: 8081) |
-<!-- | ANKLET_METRICS_URLS | Comma separated list of metrics urls to aggregate (ex: http://127.0.0.1:8080/metrics,http://192.168.1.202:8080/metrics) | -->
 | ANKLET_METRICS_SLEEP_INTERVAL | How many seconds between fetching metrics from each Anklet url defined |
 | ANKLET_METRICS_DATABASE_ENABLED | Whether to enable the database (ex: true) |
 | ANKLET_METRICS_DATABASE_URL | URL of the database (ex: localhost) |
