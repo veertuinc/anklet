@@ -20,6 +20,10 @@ func (s *Server) StartAggregatorServer(
 	logger *slog.Logger,
 	soloReceiver bool,
 ) {
+	http.HandleFunc("/healthcheck", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("ok"))
+	})
 	http.HandleFunc("/metrics/v1", func(w http.ResponseWriter, r *http.Request) {
 		databaseContainer, err := database.GetDatabaseFromContext(workerCtx)
 		if err != nil {
