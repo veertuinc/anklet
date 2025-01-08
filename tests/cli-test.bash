@@ -27,7 +27,7 @@ cleanup() {
     mv ~/.config/anklet/config.yml.bak ~/.config/anklet/config.yml &> /dev/null || true
     anka delete --yes "${TEST_VM}-1" &> /dev/null || true
     anka delete --yes "${TEST_VM}-2" &> /dev/null || true
-    echo "] DONE
+    echo "] DONE"
 }
 trap cleanup EXIT
 
