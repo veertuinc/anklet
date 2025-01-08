@@ -433,7 +433,6 @@ Finally, here are the example responses of each format:
 
 #### Prometheus
 
-
 ```
 plugin_status{name=RUNNER1,owner=veertuinc} idle
 plugin_last_successful_run{name=RUNNER1,owner=veertuinc,job_url=https://api.github.com/repos/veertuinc/anklet/actions/jobs/35269653289} 2025-01-07T11:59:21-06:00
