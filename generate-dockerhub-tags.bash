@@ -7,6 +7,7 @@ NAME="anklet"
 cleanup() {
   rm -f "${DOCKERFILE_PATH}/${NAME}"*
   rm -rf dist
+  docker buildx rm mybuilder || true
 }
 rm -rf dist
 ARCH=amd64 make build-linux
@@ -16,7 +17,7 @@ cp -f dist/anklet_v$(cat "${SCRIPT_DIR}"/VERSION)_linux_arm64 "${DOCKERFILE_PATH
 ls -alht "${DOCKERFILE_PATH}/"
 trap cleanup EXIT
 pushd "${DOCKERFILE_PATH}"
-docker buildx create --name mybuilder --use || true
+docker buildx create --name mybuilder --use desktop-linux || true
 docker buildx install || true
 # make sure docker login is handled
 docker build --no-cache --platform linux/amd64,linux/arm64 \
