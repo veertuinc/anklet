@@ -88,7 +88,8 @@ The following logic consumes [API limits](https://docs.github.com/en/rest/using-
 
 | Key | Description | 
 | ------ | ----------- |
-| service_status | Status of the service (idle, running, limit_paused, stopped) |
+| plugin_status | Status of the service (idle, running, limit_paused, stopped) |
+| plugin_status_since | Time the plugin status was last updated |
 | host_cpu_count | Total CPU count of the host |
 | host_cpu_used_count | Total in use CPU count of the host |
 | host_cpu_usage_percentage | CPU usage percentage of the host |
@@ -103,21 +104,22 @@ The following logic consumes [API limits](https://docs.github.com/en/rest/using-
 
 ```
 ❯ curl -s http://127.0.0.1:8080/metrics/v1\?format\=prometheus
-service_status{service_name=github_receiver,plugin=github_receiver,owner=veertuinc,repo=anklet} running
+plugin_status{name=GITHUB_RECEIVER,plugin=github_receiver,owner=veertuinc} running
+plugin_status_since{name=GITHUB_RECEIVER,plugin=github_receiver,owner=veertuinc} 2025-01-07T11:42:57-06:00
 host_cpu_count 12
-host_cpu_used_count 2
-host_cpu_usage_percentage 17.010309
+host_cpu_used_count 5
+host_cpu_usage_percentage 42.171734
 host_memory_total_bytes 38654705664
-host_memory_used_bytes 19195559936
-host_memory_available_bytes 19459145728
-host_memory_usage_percentage 49.659051
+host_memory_used_bytes 28486483968
+host_memory_available_bytes 10168221696
+host_memory_usage_percentage 73.694738
 host_disk_total_bytes 994662584320
-host_disk_used_bytes 537421299712
-host_disk_available_bytes 457241284608
-host_disk_usage_percentage 54.030513
+host_disk_used_bytes 623034486784
+host_disk_available_bytes 371628097536
+host_disk_usage_percentage 62.637773
 ```
 
-```
+<!-- ```
 ❯ curl -s http://127.0.0.1:8080/metrics/v1\?format\=json | jq
 {
   "host_cpu_count": 12,
@@ -141,7 +143,7 @@ host_disk_usage_percentage 54.030513
       "status_since": "2024-08-20T14:58:35.730418-05:00"
     }
   ]
-}
+} -->
 ```
 
 ---

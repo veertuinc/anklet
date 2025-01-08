@@ -333,73 +333,103 @@ It's possible to use ENVs instead of the yml file. This is useful if you want to
 | ANKLET_METRICS_DATABASE_PASSWORD | Password to use (ex: "") |
 
 Finally, here are the example responses of each format:
-<!-- 
+
 #### JSON
 
 ```json
 {
-  "http://127.0.0.1:8080/metrics": {
-    "total_running_vms": 0,
-    "total_successful_runs_since_start": 0,
-    "total_failed_runs_since_start": 0,
+  "GITHUB_RECEIVER": {
+    "repo_name": "",
+    "plugin_name": "github_receiver",
+    "custom_name": "GITHUB_RECEIVER",
+    "owner_name": "veertuinc",
+    "last_update": "2025-01-07T18:17:03-06:00",
+    "plugin_status": "running",
+    "plugin_last_successful_run": "0001-01-01T00:00:00Z",
+    "plugin_last_failed_run": "0001-01-01T00:00:00Z",
+    "plugin_last_canceled_run": "0001-01-01T00:00:00Z",
+    "plugin_status_since": "2025-01-07T18:07:36-06:00",
+    "plugin_total_ran_vms": 0,
+    "plugin_total_successful_runs_since_start": 0,
+    "plugin_total_failed_runs_since_start": 0,
+    "plugin_total_canceled_runs_since_start": 0,
+    "plugin_last_successful_run_job_url": "",
+    "plugin_last_failed_run_job_url": "",
+    "plugin_last_canceled_run_job_url": "",
     "host_cpu_count": 12,
-    "host_cpu_used_count": 1,
-    "host_cpu_usage_percentage": 11.765251850227692,
+    "host_cpu_used_count": 3,
+    "host_cpu_usage_percentage": 27.4378179763971,
     "host_memory_total_bytes": 38654705664,
-    "host_memory_used_bytes": 27379499008,
-    "host_memory_available_bytes": 11275206656,
-    "host_memory_usage_percentage": 70.83095974392361,
+    "host_memory_used_bytes": 29228433408,
+    "host_memory_available_bytes": 9426272256,
+    "host_memory_usage_percentage": 75.6141662597656,
     "host_disk_total_bytes": 994662584320,
-    "host_disk_used_bytes": 540768464896,
-    "host_disk_available_bytes": 453894119424,
-    "host_disk_usage_percentage": 54.367025906146424,
-    "plugins": [
-      {
-        "name": "RUNNER1",
-        "plugin_name": "github",
-        "repo_name": "anklet",
-        "owner_name": "veertuinc",
-        "status": "idle",
-        "last_successful_run_job_url": "",
-        "last_failed_run_job_url": "",
-        "last_successful_run": "0001-01-01T00:00:00Z",
-        "last_failed_run": "0001-01-01T00:00:00Z",
-        "status_since": "2024-06-11T13:57:43.332009-05:00"
-      }
-    ]
+    "host_disk_used_bytes": 623747604480,
+    "host_disk_available_bytes": 370914979840,
+    "host_disk_usage_percentage": 62.7094669401307
   },
-  "http://192.168.1.183:8080/metrics": {
-    "total_running_vms": 0,
-    "total_successful_runs_since_start": 0,
-    "total_failed_runs_since_start": 0,
-    "host_cpu_count": 8,
-    "host_cpu_used_count": 1,
-    "host_cpu_usage_percentage": 20.964819937820444,
-    "host_memory_total_bytes": 25769803776,
-    "host_memory_used_bytes": 18017533952,
-    "host_memory_available_bytes": 7752269824,
-    "host_memory_usage_percentage": 69.91723378499348,
+  "RUNNER1": {
+    "repo_name": "",
+    "plugin_name": "github",
+    "custom_name": "RUNNER1",
+    "owner_name": "veertuinc",
+    "last_update": "2025-01-07T18:16:59-06:00",
+    "plugin_status": "idle",
+    "plugin_last_successful_run": "2025-01-07T18:16:18-06:00",
+    "plugin_last_failed_run": "0001-01-01T00:00:00Z",
+    "plugin_last_canceled_run": "2025-01-07T18:09:26-06:00",
+    "plugin_status_since": "2025-01-07T18:07:29-06:00",
+    "plugin_total_ran_vms": 4,
+    "plugin_total_successful_runs_since_start": 4,
+    "plugin_total_failed_runs_since_start": 0,
+    "plugin_total_canceled_runs_since_start": 2,
+    "plugin_last_successful_run_job_url": "https://api.github.com/repos/veertuinc/anklet/actions/jobs/35284640962",
+    "plugin_last_failed_run_job_url": "",
+    "plugin_last_canceled_run_job_url": "https://github.com/veertuinc/anklet/actions/runs/12661447359/job/35284636456",
+    "host_cpu_count": 12,
+    "host_cpu_used_count": 2,
+    "host_cpu_usage_percentage": 24.2719743523022,
+    "host_memory_total_bytes": 38654705664,
+    "host_memory_used_bytes": 27512193024,
+    "host_memory_available_bytes": 11142512640,
+    "host_memory_usage_percentage": 71.1742401123047,
     "host_disk_total_bytes": 994662584320,
-    "host_disk_used_bytes": 629847568384,
-    "host_disk_available_bytes": 364815015936,
-    "host_disk_usage_percentage": 63.32273660565956,
-    "plugins": [
-      {
-        "name": "RUNNER3",
-        "plugin_name": "github",
-        "repo_name": "anklet",
-        "owner_name": "veertuinc",
-        "status": "idle",
-        "last_successful_run_job_url": "",
-        "last_failed_run_job_url": "",
-        "last_successful_run": "0001-01-01T00:00:00Z",
-        "last_failed_run": "0001-01-01T00:00:00Z",
-        "status_since": "2024-06-11T14:16:42.324542-05:00"
-      }
-    ]
+    "host_disk_used_bytes": 623187689472,
+    "host_disk_available_bytes": 371474894848,
+    "host_disk_usage_percentage": 62.6531749857708
+  },
+  "RUNNER2": {
+    "repo_name": "",
+    "plugin_name": "github",
+    "custom_name": "RUNNER2",
+    "owner_name": "veertuinc",
+    "last_update": "2025-01-07T18:16:59-06:00",
+    "plugin_status": "idle",
+    "plugin_last_successful_run": "2025-01-07T18:16:15-06:00",
+    "plugin_last_failed_run": "2025-01-07T18:10:40-06:00",
+    "plugin_last_canceled_run": "0001-01-01T00:00:00Z",
+    "plugin_status_since": "2025-01-07T18:07:29-06:00",
+    "plugin_total_ran_vms": 4,
+    "plugin_total_successful_runs_since_start": 3,
+    "plugin_total_failed_runs_since_start": 1,
+    "plugin_total_canceled_runs_since_start": 0,
+    "plugin_last_successful_run_job_url": "https://api.github.com/repos/veertuinc/anklet/actions/jobs/35284640731",
+    "plugin_last_failed_run_job_url": "https://api.github.com/repos/veertuinc/anklet/actions/jobs/35284636486",
+    "plugin_last_canceled_run_job_url": "",
+    "host_cpu_count": 12,
+    "host_cpu_used_count": 2,
+    "host_cpu_usage_percentage": 24.2719743523022,
+    "host_memory_total_bytes": 38654705664,
+    "host_memory_used_bytes": 27512193024,
+    "host_memory_available_bytes": 11142512640,
+    "host_memory_usage_percentage": 71.1742401123047,
+    "host_disk_total_bytes": 994662584320,
+    "host_disk_used_bytes": 623187689472,
+    "host_disk_available_bytes": 371474894848,
+    "host_disk_usage_percentage": 62.6531749857708
   }
 }
-``` -->
+```
 
 #### Prometheus
 
