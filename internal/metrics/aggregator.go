@@ -26,15 +26,9 @@ func (s *Server) StartAggregatorServer(
 			logger.ErrorContext(workerCtx, "error getting database client from context", "error", err)
 			return
 		}
-		// loadedConfig, err := config.GetLoadedConfigFromContext(workerCtx)
-		// if err != nil {
-		// 	logger.ErrorContext(workerCtx, "error getting loaded config from context", "error", err)
-		// 	return
-		// }
-		// if r.URL.Query().Get("format") == "json" {
-		// 	s.handleAggregatorJsonMetrics(workerCtx, logger, databaseContainer, loadedConfig)(w, r)
-		// } else
-		if r.URL.Query().Get("format") == "prometheus" {
+		if r.URL.Query().Get("format") == "json" {
+			s.handleAggregatorJsonMetrics(workerCtx, logger, databaseContainer)(w, r)
+		} else if r.URL.Query().Get("format") == "prometheus" {
 			s.handleAggregatorPrometheusMetrics(workerCtx, logger, databaseContainer)(w, r)
 		} else {
 			http.Error(w, "unsupported format, please use '?format=json' or '?format=prometheus'", http.StatusBadRequest)
@@ -47,32 +41,182 @@ func (s *Server) StartAggregatorServer(
 	http.ListenAndServe(":"+s.Port, nil)
 }
 
-// func (s *Server) handleAggregatorJsonMetrics(
-// 	workerCtx context.Context,
-// 	logger *slog.Logger,
-// 	databaseContainer *database.Database,
-// 	loadedConfig *config.Config,
-// ) func(w http.ResponseWriter, r *http.Request) {
-// 	return func(w http.ResponseWriter, r *http.Request) {
-// 		combinedMetrics := make(map[string]MetricsData)
-// 		// for _, metricsURL := range loadedConfig.Metrics.MetricsURLs { // TODO: replace with iteration over metrics db keys as below
-// 		// 	value, err := databaseContainer.Client.Get(workerCtx, metricsURL).Result()
-// 		// 	if err != nil {
-// 		// 		logger.ErrorContext(workerCtx, "error getting value from Redis", "key", "error", err)
-// 		// 		return
-// 		// 	}
-// 		// 	var metricsData MetricsData
-// 		// 	err = json.Unmarshal([]byte(value), &metricsData)
-// 		// 	if err != nil {
-// 		// 		logger.ErrorContext(workerCtx, "error unmarshalling metrics data", "error", err)
-// 		// 		return
-// 		// 	}
-// 		// 	combinedMetrics[metricsURL] = metricsData
-// 		// }
-// 		w.Header().Set("Content-Type", "application/json")
-// 		json.NewEncoder(w).Encode(combinedMetrics)
-// 	}
-// }
+type jsonMetricsResponse struct {
+	RepoName                            string  `json:"repo_name"`
+	PluginName                          string  `json:"plugin_name"`
+	CustomName                          string  `json:"custom_name"`
+	OwnerName                           string  `json:"owner_name"`
+	LastUpdate                          string  `json:"last_update"`
+	PluginStatus                        string  `json:"plugin_status"`
+	PluginLastSuccessfulRun             string  `json:"plugin_last_successful_run"`
+	PluginLastFailedRun                 string  `json:"plugin_last_failed_run"`
+	PluginLastCanceledRun               string  `json:"plugin_last_canceled_run"`
+	PluginStatusSince                   string  `json:"plugin_status_since"`
+	PluginTotalRanVMs                   int     `json:"plugin_total_ran_vms"`
+	PluginTotalSuccessfulRunsSinceStart int     `json:"plugin_total_successful_runs_since_start"`
+	PluginTotalFailedRunsSinceStart     int     `json:"plugin_total_failed_runs_since_start"`
+	PluginTotalCanceledRunsSinceStart   int     `json:"plugin_total_canceled_runs_since_start"`
+	PluginLastSuccessfulRunJobUrl       string  `json:"plugin_last_successful_run_job_url"`
+	PluginLastFailedRunJobUrl           string  `json:"plugin_last_failed_run_job_url"`
+	PluginLastCanceledRunJobUrl         string  `json:"plugin_last_canceled_run_job_url"`
+	HostCPUCount                        int     `json:"host_cpu_count"`
+	HostCPUUsedCount                    int     `json:"host_cpu_used_count"`
+	HostCPUUsagePercentage              float64 `json:"host_cpu_usage_percentage"`
+	HostMemoryTotalBytes                int64   `json:"host_memory_total_bytes"`
+	HostMemoryUsedBytes                 int64   `json:"host_memory_used_bytes"`
+	HostMemoryAvailableBytes            int64   `json:"host_memory_available_bytes"`
+	HostMemoryUsagePercentage           float64 `json:"host_memory_usage_percentage"`
+	HostDiskTotalBytes                  int64   `json:"host_disk_total_bytes"`
+	HostDiskUsedBytes                   int64   `json:"host_disk_used_bytes"`
+	HostDiskAvailableBytes              int64   `json:"host_disk_available_bytes"`
+	HostDiskUsagePercentage             float64 `json:"host_disk_usage_percentage"`
+}
+
+func (s *Server) handleAggregatorJsonMetrics(
+	workerCtx context.Context,
+	logger *slog.Logger,
+	databaseContainer *database.Database,
+) func(w http.ResponseWriter, r *http.Request) {
+	return func(w http.ResponseWriter, r *http.Request) {
+		combinedMetrics := make(map[string]jsonMetricsResponse)
+		w.Header().Set("Content-Type", "application/json")
+		match := "anklet/metrics/*"
+		var cursor uint64
+		for {
+			databaseContainer, err := database.GetDatabaseFromContext(workerCtx)
+			if err != nil {
+				logger.ErrorContext(workerCtx, "error getting database client from context", "error", err)
+				break
+			}
+			keys, nextCursor, err := databaseContainer.Client.Scan(workerCtx, cursor, match, 10).Result()
+			if err != nil {
+				logger.ErrorContext(workerCtx, "error scanning database for metrics", "error", err)
+				break
+			}
+			for _, key := range keys {
+				value, err := databaseContainer.Client.Get(workerCtx, key).Result()
+				if err != nil {
+					logger.ErrorContext(workerCtx, "error getting value from Redis", "key", key, "error", err)
+					return
+				}
+				var metricsData MetricsData
+				err = json.Unmarshal([]byte(value), &metricsData)
+				if err != nil {
+					logger.ErrorContext(workerCtx, "error unmarshalling metrics data", "error", err)
+					return
+				}
+				for _, plugin := range metricsData.Plugins {
+					var pluginName string
+					var customName string
+					var ownerName string
+					var repoName string
+					var status string
+					var lastSuccessfulRunJobUrl string
+					var lastFailedRunJobUrl string
+					var lastCanceledRunJobUrl string
+					var lastSuccessfulRun time.Time
+					var lastFailedRun time.Time
+					var lastCanceledRun time.Time
+					var statusSince time.Time
+					var totalRanVMs int
+					var totalSuccessfulRunsSinceStart int
+					var totalFailedRunsSinceStart int
+					var totalCanceledRunsSinceStart int
+					pluginMap, ok := plugin.(map[string]interface{})
+					if !ok {
+						logger.ErrorContext(workerCtx, "error asserting plugin to map", "plugin", plugin)
+						return
+					}
+					pluginName = pluginMap["PluginName"].(string)
+					customName = pluginMap["Name"].(string)
+					ownerName = pluginMap["OwnerName"].(string)
+					if pluginMap["RepoName"] != nil {
+						repoName = pluginMap["RepoName"].(string)
+					}
+					status = pluginMap["Status"].(string)
+					statusSince, err = time.Parse(time.RFC3339, pluginMap["StatusSince"].(string))
+					if err != nil {
+						logger.ErrorContext(workerCtx, "error parsing status since", "error", err)
+						return
+					}
+					if !strings.Contains(pluginName, "_receiver") {
+						lastSuccessfulRunJobUrl = pluginMap["LastSuccessfulRunJobUrl"].(string)
+						lastFailedRunJobUrl = pluginMap["LastFailedRunJobUrl"].(string)
+						lastSuccessfulRun, err = time.Parse(time.RFC3339, pluginMap["LastSuccessfulRun"].(string))
+						if err != nil {
+							logger.ErrorContext(workerCtx, "error parsing last successful run", "error", err)
+							return
+						}
+						lastFailedRun, err = time.Parse(time.RFC3339, pluginMap["LastFailedRun"].(string))
+						if err != nil {
+							logger.ErrorContext(workerCtx, "error parsing last failed run", "error", err)
+							return
+						}
+						lastCanceledRunJobUrl = pluginMap["LastCanceledRunJobUrl"].(string)
+						lastCanceledRun, err = time.Parse(time.RFC3339, pluginMap["LastCanceledRun"].(string))
+						if err != nil {
+							logger.ErrorContext(workerCtx, "error parsing last canceled run", "error", err)
+							return
+						}
+						totalRanVMs = int(pluginMap["TotalRanVMs"].(float64))
+						totalSuccessfulRunsSinceStart = int(pluginMap["TotalSuccessfulRunsSinceStart"].(float64))
+						totalFailedRunsSinceStart = int(pluginMap["TotalFailedRunsSinceStart"].(float64))
+						totalCanceledRunsSinceStart = int(pluginMap["TotalCanceledRunsSinceStart"].(float64))
+					}
+
+					metrics := combinedMetrics[customName]
+
+					metrics.RepoName = repoName
+					metrics.PluginName = pluginName
+					metrics.CustomName = customName
+					metrics.OwnerName = ownerName
+					metrics.LastUpdate = metricsData.LastUpdate.Format(time.RFC3339)
+					metrics.PluginStatus = status
+					metrics.PluginLastSuccessfulRun = lastSuccessfulRun.Format(time.RFC3339)
+					metrics.PluginLastFailedRun = lastFailedRun.Format(time.RFC3339)
+					metrics.PluginLastCanceledRun = lastCanceledRun.Format(time.RFC3339)
+					metrics.PluginStatusSince = statusSince.Format(time.RFC3339)
+					metrics.PluginTotalRanVMs = totalRanVMs
+					metrics.PluginTotalSuccessfulRunsSinceStart = totalSuccessfulRunsSinceStart
+					metrics.PluginTotalFailedRunsSinceStart = totalFailedRunsSinceStart
+					metrics.PluginTotalCanceledRunsSinceStart = totalCanceledRunsSinceStart
+					metrics.HostCPUCount = metricsData.HostCPUCount
+					metrics.HostCPUUsedCount = metricsData.HostCPUUsedCount
+					metrics.HostCPUUsagePercentage = metricsData.HostCPUUsagePercentage
+					metrics.HostMemoryTotalBytes = int64(metricsData.HostMemoryTotalBytes)
+					metrics.HostMemoryUsedBytes = int64(metricsData.HostMemoryUsedBytes)
+					metrics.HostMemoryAvailableBytes = int64(metricsData.HostMemoryAvailableBytes)
+					metrics.HostMemoryUsagePercentage = metricsData.HostMemoryUsagePercentage
+					metrics.HostDiskTotalBytes = int64(metricsData.HostDiskTotalBytes)
+					metrics.HostDiskUsedBytes = int64(metricsData.HostDiskUsedBytes)
+					metrics.HostDiskAvailableBytes = int64(metricsData.HostDiskAvailableBytes)
+					metrics.HostDiskUsagePercentage = metricsData.HostDiskUsagePercentage
+					metrics.PluginLastSuccessfulRunJobUrl = lastSuccessfulRunJobUrl
+					metrics.PluginLastFailedRunJobUrl = lastFailedRunJobUrl
+					metrics.PluginLastCanceledRunJobUrl = lastCanceledRunJobUrl
+					metrics.PluginStatusSince = statusSince.Format(time.RFC3339)
+
+					if !strings.Contains(pluginName, "_receiver") {
+						metrics.PluginLastSuccessfulRun = lastSuccessfulRun.Format(time.RFC3339)
+						metrics.PluginLastFailedRun = lastFailedRun.Format(time.RFC3339)
+						metrics.PluginLastCanceledRun = lastCanceledRun.Format(time.RFC3339)
+						metrics.PluginTotalRanVMs = totalRanVMs
+						metrics.PluginTotalSuccessfulRunsSinceStart = totalSuccessfulRunsSinceStart
+						metrics.PluginTotalFailedRunsSinceStart = totalFailedRunsSinceStart
+						metrics.PluginTotalCanceledRunsSinceStart = totalCanceledRunsSinceStart
+					}
+
+					combinedMetrics[customName] = metrics
+				}
+			}
+			if nextCursor == 0 {
+				break
+			}
+			cursor = nextCursor
+		}
+		json.NewEncoder(w).Encode(combinedMetrics)
+	}
+}
 
 func (s *Server) handleAggregatorPrometheusMetrics(
 	workerCtx context.Context,
@@ -198,24 +342,6 @@ func (s *Server) handleAggregatorPrometheusMetrics(
 						w.Write([]byte(fmt.Sprintf("plugin_total_successful_runs_since_start{name=%s,plugin=%s,owner=%s} %d\n", Name, pluginName, ownerName, totalSuccessfulRunsSinceStart)))
 						w.Write([]byte(fmt.Sprintf("plugin_total_failed_runs_since_start{name=%s,plugin=%s,owner=%s} %d\n", Name, pluginName, ownerName, totalFailedRunsSinceStart)))
 						w.Write([]byte(fmt.Sprintf("plugin_total_canceled_runs_since_start{name=%s,plugin=%s,owner=%s} %d\n", Name, pluginName, ownerName, totalCanceledRunsSinceStart)))
-						queued_jobs, err := databaseContainer.Client.LLen(workerCtx, "anklet/jobs/github/queued/all-orgs/"+Name).Result()
-						if err != nil {
-							logger.ErrorContext(workerCtx, "error querying queued queue length", "error", err)
-							return
-						}
-						w.Write([]byte(fmt.Sprintf("redis_jobs_queued{name=%s,owner=%s} %d\n", Name, ownerName, queued_jobs)))
-						queued_jobs, err = databaseContainer.Client.LLen(workerCtx, "anklet/jobs/github/queued/all-orgs/"+Name+"/cleaning").Result()
-						if err != nil {
-							logger.ErrorContext(workerCtx, "error querying queued cleaning queue length", "error", err)
-							return
-						}
-						w.Write([]byte(fmt.Sprintf("redis_jobs_queued_cleaning{name=%s,owner=%s} %d\n", Name, ownerName, queued_jobs)))
-						completed_jobs, err := databaseContainer.Client.LLen(workerCtx, "anklet/jobs/github/completed/all-orgs/"+Name).Result()
-						if err != nil {
-							logger.ErrorContext(workerCtx, "error querying completed queue length", "error", err)
-							return
-						}
-						w.Write([]byte(fmt.Sprintf("redis_jobs_completed{name=%s,owner=%s} %d\n", Name, ownerName, completed_jobs)))
 					}
 
 					w.Write([]byte(fmt.Sprintf("host_cpu_count{name=%s,owner=%s} %d\n", Name, ownerName, metricsData.HostCPUCount)))

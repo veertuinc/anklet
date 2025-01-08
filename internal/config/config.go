@@ -65,6 +65,7 @@ type Plugin struct {
 	Owner                      string   `yaml:"owner"`
 	Database                   Database `yaml:"database"`
 	RegistryURL                string   `yaml:"registry_url"`
+	SkipPull                   bool     `yaml:"skip_pull"`
 	PrivateKey                 string   `yaml:"private_key"`
 	AppID                      int64    `yaml:"app_id"`
 	InstallationID             int64    `yaml:"installation_id"`

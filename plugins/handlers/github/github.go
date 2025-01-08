@@ -773,21 +773,22 @@ func Run(
 	skipPrep := false // allows us to wait for the cancellation we sent to be received so we can clean up properly
 
 	// See if VM Template existing already
-	//TODO: be able to interrupt this
-	noTemplateTagExistsError, templateExistsError := ankaCLI.EnsureVMTemplateExists(workerCtx, pluginCtx, workflowJob.AnkaTemplate, workflowJob.AnkaTemplateTag)
-	if templateExistsError != nil {
-		// DO NOT RETURN AN ERROR TO MAIN. It will cause the other job on this node to be cancelled.
-		logger.WarnContext(pluginCtx, "problem ensuring vm template exists on host", "err", templateExistsError)
-		retryChannel <- true // return to queue so another node can pick it up
-		return pluginCtx, nil
-	}
-	if noTemplateTagExistsError != nil {
-		logger.ErrorContext(pluginCtx, "error ensuring vm template exists on host", "err", noTemplateTagExistsError)
-		err := sendCancelWorkflowRun(workerCtx, pluginCtx, logger, workflowJob, metricsData)
-		if err != nil {
-			logger.ErrorContext(pluginCtx, "error sending cancel workflow run", "err", err)
+	if !pluginConfig.SkipPull {
+		noTemplateTagExistsError, templateExistsError := ankaCLI.EnsureVMTemplateExists(workerCtx, pluginCtx, workflowJob.AnkaTemplate, workflowJob.AnkaTemplateTag)
+		if templateExistsError != nil {
+			// DO NOT RETURN AN ERROR TO MAIN. It will cause the other job on this node to be cancelled.
+			logger.WarnContext(pluginCtx, "problem ensuring vm template exists on host", "err", templateExistsError)
+			retryChannel <- true // return to queue so another node can pick it up
+			return pluginCtx, nil
 		}
-		skipPrep = true
+		if noTemplateTagExistsError != nil {
+			logger.ErrorContext(pluginCtx, "error ensuring vm template exists on host", "err", noTemplateTagExistsError)
+			err := sendCancelWorkflowRun(workerCtx, pluginCtx, logger, workflowJob, metricsData)
+			if err != nil {
+				logger.ErrorContext(pluginCtx, "error sending cancel workflow run", "err", err)
+			}
+			skipPrep = true
+		}
 	}
 
 	if pluginCtx.Err() != nil {

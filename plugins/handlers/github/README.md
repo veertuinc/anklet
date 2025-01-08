@@ -30,7 +30,8 @@ plugins:
     registration: repo
     # repo: anklet # Optional; only needed if registering a specific runner for a repo, otherwise it will be an org level runner.
     owner: veertuinc
-    registry_url: http://anka.registry:8089
+    registry_url: http://anka.registry:8089 # Optional; use `skip_pull` to skip pulling the template.
+    # skip_pull: true # Optional; skips pulling the template from the Anka Build Cloud Registry
     runner_group: macOS # requires Enterprise github
     # sleep_interval: 5 # Optional; defaults to 1 second.
     # registration_timeout_seconds: 60 # Optional; defaults to 60 seconds.

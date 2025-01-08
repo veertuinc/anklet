@@ -299,7 +299,7 @@ host_disk_usage_percentage 78.776881
 
 In most cases each individual Anklet serving up their own metrics is good enough for your monitoring needs. However, there are situations where you may need to consume them from a single source instead. The Anklet Aggregator service is designed to do just that.
 
-In order to enable the aggregator, you will want to run an Anklet with the `aggregator` flag set to `true`. **You want to run this separate from any other plugins.** This will start an Anklet Aggregator service that will collect metrics from all Anklet metrics stored in the Databse and make them available at `http://{aggregator_url}:{port}/metrics?format=json` or `http://{aggregator_url}:{port}/metrics?format=prometheus`. Here is an example config:
+In order to enable the aggregator, you will want to run an Anklet with the `metrics > aggregator` flag set to `true`. **You want to run this separate from any other plugins.** This will start an Anklet Aggregator service that will collect metrics from all Anklet metrics stored in the Databse and make them available at `http://{aggregator_url}:{port}/metrics?format=json` or `http://{aggregator_url}:{port}/metrics?format=prometheus`. Here is an example config:
 
 ```yaml
 ---
@@ -405,40 +405,75 @@ Finally, here are the example responses of each format:
 
 
 ```
-total_running_vms 0
-total_successful_runs_since_start 0
-total_failed_runs_since_start 0
-total_canceled_runs_since_start 1
-plugin_status{name=RUNNER1,plugin=github,owner=veertuinc} idle
-plugin_last_successful_run{name=RUNNER1,plugin=github,owner=veertuinc,job_url=} 0001-01-01T00:00:00Z
-plugin_last_failed_run{name=RUNNER1,plugin=github,owner=veertuinc,job_url=} 0001-01-01T00:00:00Z
-plugin_last_canceled_run{name=RUNNER1,plugin=github,owner=veertuinc,job_url=https://github.com/veertuinc/anklet/actions/runs/12325604197/job/34405145636} 0001-01-01T00:00:00Z
-plugin_status_since{name=RUNNER1,plugin=github,owner=veertuinc} 2024-12-13T19:24:47-06:00
-plugin_total_ran_vms{name=RUNNER1,plugin=github,owner=veertuinc} 0
-plugin_total_successful_runs_since_start{name=RUNNER1,plugin=github,owner=veertuinc} 0
-plugin_total_failed_runs_since_start{name=RUNNER1,plugin=github,owner=veertuinc} 0
+plugin_status{name=RUNNER1,owner=veertuinc} idle
+plugin_last_successful_run{name=RUNNER1,owner=veertuinc,job_url=https://api.github.com/repos/veertuinc/anklet/actions/jobs/35269653289} 2025-01-07T11:59:21-06:00
+plugin_last_failed_run{name=RUNNER1,owner=veertuinc,job_url=https://api.github.com/repos/veertuinc/anklet/actions/jobs/35269648602} 2025-01-07T11:56:47-06:00
+plugin_last_canceled_run{name=RUNNER1,owner=veertuinc,job_url=https://github.com/veertuinc/anklet/actions/runs/12656636499/job/35269646979} 2025-01-07T11:55:53-06:00
+plugin_status_since{name=RUNNER1,owner=veertuinc,status=idle} 2025-01-07T11:52:47-06:00
+plugin_total_ran_vms{name=RUNNER1,plugin=github,owner=veertuinc} 5
+plugin_total_successful_runs_since_start{name=RUNNER1,plugin=github,owner=veertuinc} 4
+plugin_total_failed_runs_since_start{name=RUNNER1,plugin=github,owner=veertuinc} 1
 plugin_total_canceled_runs_since_start{name=RUNNER1,plugin=github,owner=veertuinc} 1
-plugin_status{name=RUNNER2,plugin=github,owner=veertuinc} idle
-plugin_last_successful_run{name=RUNNER2,plugin=github,owner=veertuinc,job_url=} 0001-01-01T00:00:00Z
-plugin_last_failed_run{name=RUNNER2,plugin=github,owner=veertuinc,job_url=} 0001-01-01T00:00:00Z
-plugin_last_canceled_run{name=RUNNER2,plugin=github,owner=veertuinc,job_url=} 0001-01-01T00:00:00Z
-plugin_status_since{name=RUNNER2,plugin=github,owner=veertuinc} 2024-12-13T19:24:47-06:00
-plugin_total_ran_vms{name=RUNNER2,plugin=github,owner=veertuinc} 0
-plugin_total_successful_runs_since_start{name=RUNNER2,plugin=github,owner=veertuinc} 0
+redis_jobs_queued{name=RUNNER1,owner=veertuinc} 0
+redis_jobs_queued_cleaning{name=RUNNER1,owner=veertuinc} 0
+redis_jobs_completed{name=RUNNER1,owner=veertuinc} 0
+host_cpu_count{name=RUNNER1,owner=veertuinc} 12
+host_cpu_used_count{name=RUNNER1,owner=veertuinc} 1
+host_cpu_usage_percentage{name=RUNNER1,owner=veertuinc} 12.390755
+host_memory_total_bytes{name=RUNNER1,owner=veertuinc} 38654705664
+host_memory_used_bytes{name=RUNNER1,owner=veertuinc} 24571248640
+host_memory_available_bytes{name=RUNNER1,owner=veertuinc} 14083457024
+host_memory_usage_percentage{name=RUNNER1,owner=veertuinc} 63.565996
+host_disk_total_bytes{name=RUNNER1,owner=veertuinc} 994662584320
+host_disk_used_bytes{name=RUNNER1,owner=veertuinc} 621074538496
+host_disk_available_bytes{name=RUNNER1,owner=veertuinc} 373588045824
+host_disk_usage_percentage{name=RUNNER1,owner=veertuinc} 62.440726
+last_update{name=RUNNER1,owner=veertuinc} 2025-01-07T12:01:47-06:00
+plugin_status{name=RUNNER2,owner=veertuinc} idle
+plugin_last_successful_run{name=RUNNER2,owner=veertuinc,job_url=https://api.github.com/repos/veertuinc/anklet/actions/jobs/35269653543} 2025-01-07T11:59:29-06:00
+plugin_last_failed_run{name=RUNNER2,owner=veertuinc,job_url=} 0001-01-01T00:00:00Z
+plugin_last_canceled_run{name=RUNNER2,owner=veertuinc,job_url=https://github.com/veertuinc/anklet/actions/runs/12656636751/job/35269647515} 2025-01-07T11:55:56-06:00
+plugin_status_since{name=RUNNER2,owner=veertuinc,status=idle} 2025-01-07T11:52:48-06:00
+plugin_total_ran_vms{name=RUNNER2,plugin=github,owner=veertuinc} 5
+plugin_total_successful_runs_since_start{name=RUNNER2,plugin=github,owner=veertuinc} 5
 plugin_total_failed_runs_since_start{name=RUNNER2,plugin=github,owner=veertuinc} 0
-plugin_total_canceled_runs_since_start{name=RUNNER2,plugin=github,owner=veertuinc} 0
-host_cpu_count 12
-host_cpu_used_count 1
-host_cpu_usage_percentage 13.112463
-host_memory_total_bytes 38654705664
-host_memory_used_bytes 20108099584
-host_memory_available_bytes 18546606080
-host_memory_usage_percentage 52.019797
-host_disk_total_bytes 994662584320
-host_disk_used_bytes 783569383424
-host_disk_available_bytes 211093200896
-host_disk_usage_percentage 78.777406
+plugin_total_canceled_runs_since_start{name=RUNNER2,plugin=github,owner=veertuinc} 1
+redis_jobs_queued{name=RUNNER2,owner=veertuinc} 0
+redis_jobs_queued_cleaning{name=RUNNER2,owner=veertuinc} 0
+redis_jobs_completed{name=RUNNER2,owner=veertuinc} 0
+host_cpu_count{name=RUNNER2,owner=veertuinc} 12
+host_cpu_used_count{name=RUNNER2,owner=veertuinc} 1
+host_cpu_usage_percentage{name=RUNNER2,owner=veertuinc} 12.390755
+host_memory_total_bytes{name=RUNNER2,owner=veertuinc} 38654705664
+host_memory_used_bytes{name=RUNNER2,owner=veertuinc} 24571248640
+host_memory_available_bytes{name=RUNNER2,owner=veertuinc} 14083457024
+host_memory_usage_percentage{name=RUNNER2,owner=veertuinc} 63.565996
+host_disk_total_bytes{name=RUNNER2,owner=veertuinc} 994662584320
+host_disk_used_bytes{name=RUNNER2,owner=veertuinc} 621074538496
+host_disk_available_bytes{name=RUNNER2,owner=veertuinc} 373588045824
+host_disk_usage_percentage{name=RUNNER2,owner=veertuinc} 62.440726
+last_update{name=RUNNER2,owner=veertuinc} 2025-01-07T12:01:47-06:00
+plugin_status{name=GITHUB_RECEIVER,owner=veertuinc} running
+plugin_status_since{name=GITHUB_RECEIVER,owner=veertuinc,status=running} 2025-01-07T11:42:57-06:00
+host_cpu_count{name=GITHUB_RECEIVER,owner=veertuinc} 12
+host_cpu_used_count{name=GITHUB_RECEIVER,owner=veertuinc} 5
+host_cpu_usage_percentage{name=GITHUB_RECEIVER,owner=veertuinc} 42.171734
+host_memory_total_bytes{name=GITHUB_RECEIVER,owner=veertuinc} 38654705664
+host_memory_used_bytes{name=GITHUB_RECEIVER,owner=veertuinc} 28486483968
+host_memory_available_bytes{name=GITHUB_RECEIVER,owner=veertuinc} 10168221696
+host_memory_usage_percentage{name=GITHUB_RECEIVER,owner=veertuinc} 73.694738
+host_disk_total_bytes{name=GITHUB_RECEIVER,owner=veertuinc} 994662584320
+host_disk_used_bytes{name=GITHUB_RECEIVER,owner=veertuinc} 623034486784
+host_disk_available_bytes{name=GITHUB_RECEIVER,owner=veertuinc} 371628097536
+host_disk_usage_percentage{name=GITHUB_RECEIVER,owner=veertuinc} 62.637773
+last_update{name=GITHUB_RECEIVER,owner=veertuinc} 2025-01-07T12:01:46-06:00
+redis_jobs_queued_total 0
+redis_jobs_completed_total 0
 ```
+
+Important metrics are:
+
+- `last_update` - updated every 10 seconds, you can use this to determine if the Anklet is sending metrics at all to the database by alarming if the timestamp is <= 11 seconds ago.
 
 ---
 
