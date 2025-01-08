@@ -443,9 +443,6 @@ plugin_total_ran_vms{name=RUNNER1,plugin=github,owner=veertuinc} 5
 plugin_total_successful_runs_since_start{name=RUNNER1,plugin=github,owner=veertuinc} 4
 plugin_total_failed_runs_since_start{name=RUNNER1,plugin=github,owner=veertuinc} 1
 plugin_total_canceled_runs_since_start{name=RUNNER1,plugin=github,owner=veertuinc} 1
-redis_jobs_queued{name=RUNNER1,owner=veertuinc} 0
-redis_jobs_queued_cleaning{name=RUNNER1,owner=veertuinc} 0
-redis_jobs_completed{name=RUNNER1,owner=veertuinc} 0
 host_cpu_count{name=RUNNER1,owner=veertuinc} 12
 host_cpu_used_count{name=RUNNER1,owner=veertuinc} 1
 host_cpu_usage_percentage{name=RUNNER1,owner=veertuinc} 12.390755
@@ -467,9 +464,6 @@ plugin_total_ran_vms{name=RUNNER2,plugin=github,owner=veertuinc} 5
 plugin_total_successful_runs_since_start{name=RUNNER2,plugin=github,owner=veertuinc} 5
 plugin_total_failed_runs_since_start{name=RUNNER2,plugin=github,owner=veertuinc} 0
 plugin_total_canceled_runs_since_start{name=RUNNER2,plugin=github,owner=veertuinc} 1
-redis_jobs_queued{name=RUNNER2,owner=veertuinc} 0
-redis_jobs_queued_cleaning{name=RUNNER2,owner=veertuinc} 0
-redis_jobs_completed{name=RUNNER2,owner=veertuinc} 0
 host_cpu_count{name=RUNNER2,owner=veertuinc} 12
 host_cpu_used_count{name=RUNNER2,owner=veertuinc} 1
 host_cpu_usage_percentage{name=RUNNER2,owner=veertuinc} 12.390755
@@ -496,8 +490,6 @@ host_disk_used_bytes{name=GITHUB_RECEIVER,owner=veertuinc} 623034486784
 host_disk_available_bytes{name=GITHUB_RECEIVER,owner=veertuinc} 371628097536
 host_disk_usage_percentage{name=GITHUB_RECEIVER,owner=veertuinc} 62.637773
 last_update{name=GITHUB_RECEIVER,owner=veertuinc} 2025-01-07T12:01:46-06:00
-redis_jobs_queued_total 0
-redis_jobs_completed_total 0
 ```
 
 Important metrics are:

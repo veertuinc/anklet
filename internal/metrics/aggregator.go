@@ -363,19 +363,6 @@ func (s *Server) handleAggregatorPrometheusMetrics(
 			}
 			cursor = nextCursor
 		}
-		// global queues
-		queued_jobs, err := databaseContainer.Client.LLen(workerCtx, "anklet/jobs/github/queued/all-orgs").Result()
-		if err != nil {
-			logger.ErrorContext(workerCtx, "error querying queued queue length", "error", err)
-			return
-		}
-		w.Write([]byte(fmt.Sprintf("redis_jobs_queued_total %d\n", queued_jobs)))
-		completed_jobs, err := databaseContainer.Client.LLen(workerCtx, "anklet/jobs/github/completed/all-orgs").Result()
-		if err != nil {
-			logger.ErrorContext(workerCtx, "error querying completed queue length", "error", err)
-			return
-		}
-		w.Write([]byte(fmt.Sprintf("redis_jobs_completed_total %d\n", completed_jobs)))
 	}
 }
 
