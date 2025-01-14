@@ -1003,7 +1003,7 @@ func Run(
 							Name: pluginConfig.Name,
 						},
 						LastSuccessfulRun:       time.Now(),
-						LastSuccessfulRunJobUrl: *completedJobEvent.WorkflowJob.URL,
+						LastSuccessfulRunJobUrl: *completedJobEvent.WorkflowJob.HTMLURL,
 					})
 				} else if *completedJobEvent.WorkflowJob.Conclusion == "failure" {
 					metricsData, err := metrics.GetMetricsDataFromContext(workerCtx)
@@ -1016,7 +1016,7 @@ func Run(
 							Name: pluginConfig.Name,
 						},
 						LastFailedRun:       time.Now(),
-						LastFailedRunJobUrl: *completedJobEvent.WorkflowJob.URL,
+						LastFailedRunJobUrl: *completedJobEvent.WorkflowJob.HTMLURL,
 					})
 					workflowJob.Conclusion = "failure" // support removeSelfHostedRunner
 				}
