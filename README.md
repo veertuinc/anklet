@@ -498,6 +498,23 @@ Important metrics are:
 
 ---
 
+## Upgrading
+
+### For AWS EC2 Mac (using the Cloud Connect [`ANKA_EXECUTE_SCRIPT`](https://docs.veertu.com/anka/aws-ec2-mac/#anka_execute_script-string))
+
+Because Anklet is installed as a service, you need to stop the service, replace the binary, and start the service again. [The installation script is available](https://github.com/veertuinc/aws-ec2-mac-amis/blob/main/scripts/anklet-install.bash) for review so you can see where things are installed.
+
+1. Download the latest release from the [releases page](https://github.com/veertuinc/anklet/releases)
+1. Unzip
+1. Transfer the `anklet` binary to the EC2 Mac instance
+1. Log into the EC2 Mac instance with SSH.
+1. Stop the running Anklet service: `sudo launchctl stop com.veertu.anklet`
+1. Replace the existing `anklet` binary with the new one: `sudo chmod +x anklet_v0.12.2_darwin_arm64 && sudo mv anklet_v0.12.2_darwin_arm64 /usr/local/bin/anklet`
+1. Start the Anklet service: `sudo launchctl start com.veertu.anklet`
+1. Check the logs to ensure the service is running: `tail -100 /tmp/anklet-plist.out.log`
+
+---
+
 ## Development
 
 ### Prepare your environment for development:
