@@ -795,7 +795,8 @@ MainLoop:
 	}
 	logger.InfoContext(pluginCtx, "started plugin")
 	metrics.UpdatePlugin(workerCtx, pluginCtx, logger, metrics.PluginBase{
-		Status: "running",
+		Status:      "running",
+		StatusSince: time.Now(),
 	})
 	// wait for the context to be canceled
 	<-pluginCtx.Done()

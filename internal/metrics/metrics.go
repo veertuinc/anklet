@@ -451,13 +451,19 @@ func (m *MetricsDataLock) SetStatus(pluginCtx context.Context, logger *slog.Logg
 		switch typedPlugin := plugin.(type) {
 		case Plugin:
 			if typedPlugin.PluginBase.Name == ctxPlugin.Name {
-				typedPlugin.Status = status
-				m.Plugins[i] = typedPlugin
+				if typedPlugin.Status != status { // only update status if it's changing
+					typedPlugin.Status = status
+					m.Plugins[i] = typedPlugin
+					typedPlugin.StatusSince = time.Now()
+				}
 			}
 		case PluginBase:
 			if typedPlugin.Name == ctxPlugin.Name {
-				typedPlugin.Status = status
-				m.Plugins[i] = typedPlugin
+				if typedPlugin.Status != status { // only update status if it's changing
+					typedPlugin.Status = status
+					m.Plugins[i] = typedPlugin
+					typedPlugin.StatusSince = time.Now()
+				}
 			}
 		}
 	}

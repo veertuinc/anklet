@@ -134,14 +134,16 @@ func ExecuteGitHubClientFunction[T any](
 				return pluginCtx, nil, nil, err
 			}
 			metricsData.UpdatePlugin(workerCtx, pluginCtx, logger, metrics.PluginBase{
-				Name:   ctxPlugin.Name,
-				Status: "limit_paused",
+				Name:        ctxPlugin.Name,
+				Status:      "limit_paused",
+				StatusSince: time.Now(),
 			})
 			select {
 			case <-time.After(sleepDuration):
 				metricsData.UpdatePlugin(workerCtx, pluginCtx, logger, metrics.PluginBase{
-					Name:   ctxPlugin.Name,
-					Status: "running",
+					Name:        ctxPlugin.Name,
+					Status:      "running",
+					StatusSince: time.Now(),
 				})
 				return ExecuteGitHubClientFunction(workerCtx, pluginCtx, logger, executeFunc) // Retry the function after waiting
 			case <-pluginCtx.Done():
