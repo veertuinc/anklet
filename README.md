@@ -38,28 +38,24 @@ Anklet will have a configuration that defines custom plugins (written by us and/
 
 Here is an example of the log structure (made pretty; normally it's without newlines):
 
-    ```JSON
-    {
-      "time": "2024-04-03T17:10:08.726639-04:00",
-      "level": "INFO",
-      "msg": "handling anka workflow run job",
-      "ankletVersion": "dev",
-      "pluginName": "RUNNER1",
-      "plugin": "github",
-      "repo": "anklet",
-      "owner": "veertuinc",
-      "workflowName": "t1-without-tag",
-      "workflowRunName": "t1-without-tag",
-      "workflowRunId": 8544945071,
-      "workflowJobId": 23414111000,
-      "workflowJobName": "testJob",
-      "ankaTemplate": "d792c6f6-198c-470f-9526-9c998efe7ab4",
-      "ankaTemplateTag": "(using latest)",
-      "jobURL": "https://github.com/veertuinc/anklet/actions/runs/8544945071/job/23414111000",
-      "uniqueRunKey": "8544945071:1"
-    }
-    ```
-    - All critical errors your Ops team needs to watch for are level `ERROR`.
+  ```JSON
+{
+  "ankaTemplate": "d792c6f6-198c-470f-9526-9c998efe7ab4",
+  "ankaTemplateTag": "vanilla+port-forward-22+brew-git",
+  "ankletVersion": "dev",
+  "jobURL": "https://github.com/veertuinc/anklet/actions/runs/12774640532/job/35609194339",
+  "owner": "veertuinc",
+  "plugin": "github",
+  "pluginName": "RUNNER1",
+  "repo": "anklet",
+  "workflowJobID": 35609194339,
+  "workflowJobName": "t1-with-tag-1-matrix-nodes-2 (2)",
+  "workflowJobRunID": 12774640532,
+  "workflowName": "t1-with-tag-1-matrix-nodes-2"
+}
+  ```
+
+ Important: All critical errors your Ops team needs to watch for are level `ERROR`.
 
 ---
 

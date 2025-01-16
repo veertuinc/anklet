@@ -56,11 +56,14 @@ Next, in your Github Actions workflow yml you need to add several labels to `run
 
 1. `anka-template:{UUID OF TEMPLATE HERE}` (required)
 1. `anka-template-tag:{TAG NAME OF TEMPLATE HERE}` (optional; uses latest if not populated)
-1. `unique-id:{ANYTHING HERE}` - a label that is used to ensure multiple jobs in the same run don't compete for the same runner.
+1. `unique-id:{A UNIQUE ID FOR THE JOB}` (optional; only needed for complex workflow runs)
 <!-- 1. `run-id:${{ github.run_id }}` (do not change this) - label that is used to ensure that jobs in the same workspace don't compete for the same runner. -->
 <!-- 1. `unique-id:{UNIQUE ID OF JOB HERE}` - a label that is used to ensure multiple jobs in the same run don't compete for the same runner. -->
 
-**WARNING/NOTE:** If you are using the same template/tag/labels in `runs-on` for multiple runs/jobs, you will need to ensure that each job has a unique `unique-id` label or else they will compete for the same runner. To do this, set `"unique-id:${{ github.run_id }}"`. If you are starting multiple jobs in the same run, each job will need a unique `unique-id` label like `"unique-id:${{ github.run_id }}-1"` changing 1 to 2, 3, etc, for each job. For matrixes, you can use `"unique-id:${{ github.run_id }}-${{ matrix.node }}"`.
+**IMPORTANT:** 
+
+- If you are using the same template/tag/labels in `runs-on` for multiple jobs, you will need to ensure that each job has a unique `unique-id` label or else they will compete for the same runner. To do this, set `"unique-id:${{ github.run_id }}"`.
+- If you are starting multiple Anka VM jobs in the same run, each job will need a unique `unique-id` label like `"unique-id:${{ github.run_id }}-1"` changing 1 to 2, 3, etc, for each job. For matrixes, you can use `"unique-id:${{ strategy.job-index }}"`.
 
 (from [t1-with-tag-1.yml](.github/workflows/t1-with-tag-1.yml))
 

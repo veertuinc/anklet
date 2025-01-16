@@ -29,10 +29,9 @@ type WorkflowRunJobDetail struct {
 	AnkaTemplate    string
 	AnkaTemplateTag string
 	RunID           int64
-	// UniqueID        string
-	Labels     []string
-	Repo       string
-	Conclusion string
+	Labels          []string
+	Repo            string
+	Conclusion      string
 }
 
 var once sync.Once
@@ -728,14 +727,6 @@ func Run(
 	default:
 	}
 
-	// get the unique unique-id for this job
-	// this ensures that multiple jobs in the same workflow run don't compete for the same runner
-	// uniqueID := extractLabelValue(queuedJob.WorkflowJob.Labels, "unique-id:")
-	// if uniqueID == "" {
-	// 	logger.WarnContext(pluginCtx, "unique-id label not found or empty; something wrong with your workflow yaml")
-	// 	return
-	// }
-	// pluginCtx = logging.AppendCtx(pluginCtx, slog.String("uniqueID", uniqueID))
 	ankaTemplate := extractLabelValue(queuedJob.WorkflowJob.Labels, "anka-template:")
 	if ankaTemplate == "" {
 		// logger.WarnContext(pluginCtx, "warning: unable to find Anka Template specified in labels - skipping")
@@ -756,9 +747,8 @@ func Run(
 		AnkaTemplate:    ankaTemplate,
 		AnkaTemplateTag: ankaTemplateTag,
 		RunID:           *queuedJob.WorkflowJob.RunID,
-		// UniqueID:        uniqueID,
-		Labels: queuedJob.WorkflowJob.Labels,
-		Repo:   *queuedJob.Repo.Name,
+		Labels:          queuedJob.WorkflowJob.Labels,
+		Repo:            *queuedJob.Repo.Name,
 	}
 
 	// get anka CLI
@@ -938,7 +928,11 @@ func Run(
 		logger.DebugContext(pluginCtx, "registering github runner inside of vm")
 		registerRunnerErr = ankaCLI.AnkaRun(pluginCtx,
 			"./register-runner.bash",
-			vm.Name, *runnerRegistration.Token, repositoryURL, strings.Join(workflowJob.Labels, ","), pluginConfig.RunnerGroup,
+			vm.Name,
+			*runnerRegistration.Token,
+			repositoryURL,
+			strings.Join(workflowJob.Labels, ","),
+			pluginConfig.RunnerGroup,
 		)
 		if registerRunnerErr != nil {
 			// logger.ErrorContext(pluginCtx, "error executing register-runner.bash", "err", registerRunnerErr)
