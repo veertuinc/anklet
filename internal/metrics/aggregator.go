@@ -31,7 +31,21 @@ func (s *Server) StartAggregatorServer(
 			return
 		}
 		if r.URL.Query().Get("format") == "json" {
-			s.handleAggregatorJsonMetrics(workerCtx, logger, databaseContainer)(w, r)
+			s.handleAggregatorJsonMetricsV1(workerCtx, logger, databaseContainer)(w, r)
+		} else if r.URL.Query().Get("format") == "prometheus" {
+			s.handleAggregatorPrometheusMetrics(workerCtx, logger, databaseContainer)(w, r)
+		} else {
+			http.Error(w, "unsupported format, please use '?format=json' or '?format=prometheus'", http.StatusBadRequest)
+		}
+	})
+	http.HandleFunc("/metrics/v2", func(w http.ResponseWriter, r *http.Request) {
+		databaseContainer, err := database.GetDatabaseFromContext(workerCtx)
+		if err != nil {
+			logger.ErrorContext(workerCtx, "error getting database client from context", "error", err)
+			return
+		}
+		if r.URL.Query().Get("format") == "json" {
+			s.handleAggregatorJsonMetricsV2(workerCtx, logger, databaseContainer)(w, r)
 		} else if r.URL.Query().Get("format") == "prometheus" {
 			s.handleAggregatorPrometheusMetrics(workerCtx, logger, databaseContainer)(w, r)
 		} else {
@@ -76,7 +90,7 @@ type jsonMetricsResponse struct {
 	HostDiskUsagePercentage             float64 `json:"host_disk_usage_percentage"`
 }
 
-func (s *Server) handleAggregatorJsonMetrics(
+func (s *Server) handleAggregatorJsonMetricsV1(
 	workerCtx context.Context,
 	logger *slog.Logger,
 	databaseContainer *database.Database,
@@ -211,6 +225,151 @@ func (s *Server) handleAggregatorJsonMetrics(
 					}
 
 					combinedMetrics[customName] = metrics
+				}
+			}
+			if nextCursor == 0 {
+				break
+			}
+			cursor = nextCursor
+		}
+		json.NewEncoder(w).Encode(combinedMetrics)
+	}
+}
+
+func (s *Server) handleAggregatorJsonMetricsV2(
+	workerCtx context.Context,
+	logger *slog.Logger,
+	databaseContainer *database.Database,
+) func(w http.ResponseWriter, r *http.Request) {
+	return func(w http.ResponseWriter, r *http.Request) {
+		combinedMetrics := []jsonMetricsResponse{}
+		w.Header().Set("Content-Type", "application/json")
+		match := "anklet/metrics/*"
+		var cursor uint64
+		for {
+			databaseContainer, err := database.GetDatabaseFromContext(workerCtx)
+			if err != nil {
+				logger.ErrorContext(workerCtx, "error getting database client from context", "error", err)
+				break
+			}
+			keys, nextCursor, err := databaseContainer.Client.Scan(workerCtx, cursor, match, 10).Result()
+			if err != nil {
+				logger.ErrorContext(workerCtx, "error scanning database for metrics", "error", err)
+				break
+			}
+			for _, key := range keys {
+				value, err := databaseContainer.Client.Get(workerCtx, key).Result()
+				if err != nil {
+					logger.ErrorContext(workerCtx, "error getting value from Redis", "key", key, "error", err)
+					return
+				}
+				var metricsData MetricsData
+				err = json.Unmarshal([]byte(value), &metricsData)
+				if err != nil {
+					logger.ErrorContext(workerCtx, "error unmarshalling metrics data", "error", err)
+					return
+				}
+				for _, plugin := range metricsData.Plugins {
+					var pluginName string
+					var customName string
+					var ownerName string
+					var repoName string
+					var status string
+					var lastSuccessfulRunJobUrl string
+					var lastFailedRunJobUrl string
+					var lastCanceledRunJobUrl string
+					var lastSuccessfulRun time.Time
+					var lastFailedRun time.Time
+					var lastCanceledRun time.Time
+					var statusSince time.Time
+					var totalRanVMs int
+					var totalSuccessfulRunsSinceStart int
+					var totalFailedRunsSinceStart int
+					var totalCanceledRunsSinceStart int
+					pluginMap, ok := plugin.(map[string]interface{})
+					if !ok {
+						logger.ErrorContext(workerCtx, "error asserting plugin to map", "plugin", plugin)
+						return
+					}
+					pluginName = pluginMap["PluginName"].(string)
+					customName = pluginMap["Name"].(string)
+					ownerName = pluginMap["OwnerName"].(string)
+					if pluginMap["RepoName"] != nil {
+						repoName = pluginMap["RepoName"].(string)
+					}
+					status = pluginMap["Status"].(string)
+					statusSince, err = time.Parse(time.RFC3339, pluginMap["StatusSince"].(string))
+					if err != nil {
+						logger.ErrorContext(workerCtx, "error parsing status since", "error", err)
+						return
+					}
+					if !strings.Contains(pluginName, "_receiver") {
+						lastSuccessfulRunJobUrl = pluginMap["LastSuccessfulRunJobUrl"].(string)
+						lastFailedRunJobUrl = pluginMap["LastFailedRunJobUrl"].(string)
+						lastSuccessfulRun, err = time.Parse(time.RFC3339, pluginMap["LastSuccessfulRun"].(string))
+						if err != nil {
+							logger.ErrorContext(workerCtx, "error parsing last successful run", "error", err)
+							return
+						}
+						lastFailedRun, err = time.Parse(time.RFC3339, pluginMap["LastFailedRun"].(string))
+						if err != nil {
+							logger.ErrorContext(workerCtx, "error parsing last failed run", "error", err)
+							return
+						}
+						lastCanceledRunJobUrl = pluginMap["LastCanceledRunJobUrl"].(string)
+						lastCanceledRun, err = time.Parse(time.RFC3339, pluginMap["LastCanceledRun"].(string))
+						if err != nil {
+							logger.ErrorContext(workerCtx, "error parsing last canceled run", "error", err)
+							return
+						}
+						totalRanVMs = int(pluginMap["TotalRanVMs"].(float64))
+						totalSuccessfulRunsSinceStart = int(pluginMap["TotalSuccessfulRunsSinceStart"].(float64))
+						totalFailedRunsSinceStart = int(pluginMap["TotalFailedRunsSinceStart"].(float64))
+						totalCanceledRunsSinceStart = int(pluginMap["TotalCanceledRunsSinceStart"].(float64))
+					}
+
+					metrics := jsonMetricsResponse{}
+					metrics.RepoName = repoName
+					metrics.PluginName = pluginName
+					metrics.CustomName = customName
+					metrics.OwnerName = ownerName
+					metrics.LastUpdate = metricsData.LastUpdate.Format(time.RFC3339)
+					metrics.PluginStatus = status
+					metrics.PluginLastSuccessfulRun = lastSuccessfulRun.Format(time.RFC3339)
+					metrics.PluginLastFailedRun = lastFailedRun.Format(time.RFC3339)
+					metrics.PluginLastCanceledRun = lastCanceledRun.Format(time.RFC3339)
+					metrics.PluginStatusSince = statusSince.Format(time.RFC3339)
+					metrics.PluginTotalRanVMs = totalRanVMs
+					metrics.PluginTotalSuccessfulRunsSinceStart = totalSuccessfulRunsSinceStart
+					metrics.PluginTotalFailedRunsSinceStart = totalFailedRunsSinceStart
+					metrics.PluginTotalCanceledRunsSinceStart = totalCanceledRunsSinceStart
+					metrics.HostCPUCount = metricsData.HostCPUCount
+					metrics.HostCPUUsedCount = metricsData.HostCPUUsedCount
+					metrics.HostCPUUsagePercentage = metricsData.HostCPUUsagePercentage
+					metrics.HostMemoryTotalBytes = int64(metricsData.HostMemoryTotalBytes)
+					metrics.HostMemoryUsedBytes = int64(metricsData.HostMemoryUsedBytes)
+					metrics.HostMemoryAvailableBytes = int64(metricsData.HostMemoryAvailableBytes)
+					metrics.HostMemoryUsagePercentage = metricsData.HostMemoryUsagePercentage
+					metrics.HostDiskTotalBytes = int64(metricsData.HostDiskTotalBytes)
+					metrics.HostDiskUsedBytes = int64(metricsData.HostDiskUsedBytes)
+					metrics.HostDiskAvailableBytes = int64(metricsData.HostDiskAvailableBytes)
+					metrics.HostDiskUsagePercentage = metricsData.HostDiskUsagePercentage
+					metrics.PluginLastSuccessfulRunJobUrl = lastSuccessfulRunJobUrl
+					metrics.PluginLastFailedRunJobUrl = lastFailedRunJobUrl
+					metrics.PluginLastCanceledRunJobUrl = lastCanceledRunJobUrl
+					metrics.PluginStatusSince = statusSince.Format(time.RFC3339)
+
+					if !strings.Contains(pluginName, "_receiver") {
+						metrics.PluginLastSuccessfulRun = lastSuccessfulRun.Format(time.RFC3339)
+						metrics.PluginLastFailedRun = lastFailedRun.Format(time.RFC3339)
+						metrics.PluginLastCanceledRun = lastCanceledRun.Format(time.RFC3339)
+						metrics.PluginTotalRanVMs = totalRanVMs
+						metrics.PluginTotalSuccessfulRunsSinceStart = totalSuccessfulRunsSinceStart
+						metrics.PluginTotalFailedRunsSinceStart = totalFailedRunsSinceStart
+						metrics.PluginTotalCanceledRunsSinceStart = totalCanceledRunsSinceStart
+					}
+
+					combinedMetrics = append(combinedMetrics, metrics)
 				}
 			}
 			if nextCursor == 0 {

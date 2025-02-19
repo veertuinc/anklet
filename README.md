@@ -330,7 +330,7 @@ It's possible to use ENVs instead of the yml file. This is useful if you want to
 
 Finally, here are the example responses of each format:
 
-#### JSON
+#### JSON (/v1)
 
 ```json
 {
@@ -425,6 +425,103 @@ Finally, here are the example responses of each format:
     "host_disk_usage_percentage": 62.6531749857708
   }
 }
+```
+
+#### JSON (/v2)
+
+```json
+[
+  {
+    "repo_name": "",
+    "plugin_name": "github_receiver",
+    "custom_name": "GITHUB_RECEIVER",
+    "owner_name": "veertuinc",
+    "last_update": "2025-02-19T17:27:10-06:00",
+    "plugin_status": "running",
+    "plugin_last_successful_run": "0001-01-01T00:00:00Z",
+    "plugin_last_failed_run": "0001-01-01T00:00:00Z",
+    "plugin_last_canceled_run": "0001-01-01T00:00:00Z",
+    "plugin_status_since": "2025-02-19T17:24:20-06:00",
+    "plugin_total_ran_vms": 0,
+    "plugin_total_successful_runs_since_start": 0,
+    "plugin_total_failed_runs_since_start": 0,
+    "plugin_total_canceled_runs_since_start": 0,
+    "plugin_last_successful_run_job_url": "",
+    "plugin_last_failed_run_job_url": "",
+    "plugin_last_canceled_run_job_url": "",
+    "host_cpu_count": 12,
+    "host_cpu_used_count": 2,
+    "host_cpu_usage_percentage": 19.9605729629056,
+    "host_memory_total_bytes": 38654705664,
+    "host_memory_used_bytes": 28348104704,
+    "host_memory_available_bytes": 10306600960,
+    "host_memory_usage_percentage": 73.3367496066623,
+    "host_disk_total_bytes": 994662584320,
+    "host_disk_used_bytes": 752575967232,
+    "host_disk_available_bytes": 242086617088,
+    "host_disk_usage_percentage": 75.6614332433644
+  },
+  {
+    "repo_name": "",
+    "plugin_name": "github",
+    "custom_name": "RUNNER1",
+    "owner_name": "veertuinc",
+    "last_update": "2025-02-19T17:27:11-06:00",
+    "plugin_status": "running",
+    "plugin_last_successful_run": "0001-01-01T00:00:00Z",
+    "plugin_last_failed_run": "0001-01-01T00:00:00Z",
+    "plugin_last_canceled_run": "2025-02-19T17:25:04-06:00",
+    "plugin_status_since": "2025-02-19T17:26:58-06:00",
+    "plugin_total_ran_vms": 2,
+    "plugin_total_successful_runs_since_start": 0,
+    "plugin_total_failed_runs_since_start": 0,
+    "plugin_total_canceled_runs_since_start": 1,
+    "plugin_last_successful_run_job_url": "",
+    "plugin_last_failed_run_job_url": "",
+    "plugin_last_canceled_run_job_url": "https://github.com/veertuinc/anklet/actions/runs/13424339271/job/37504116762",
+    "host_cpu_count": 12,
+    "host_cpu_used_count": 2,
+    "host_cpu_usage_percentage": 19.9605763305933,
+    "host_memory_total_bytes": 38654705664,
+    "host_memory_used_bytes": 28236300288,
+    "host_memory_available_bytes": 10418405376,
+    "host_memory_usage_percentage": 73.0475107828776,
+    "host_disk_total_bytes": 994662584320,
+    "host_disk_used_bytes": 752583897088,
+    "host_disk_available_bytes": 242078687232,
+    "host_disk_usage_percentage": 75.66223048417
+  },
+  {
+    "repo_name": "",
+    "plugin_name": "github",
+    "custom_name": "RUNNER2",
+    "owner_name": "veertuinc",
+    "last_update": "2025-02-19T17:27:11-06:00",
+    "plugin_status": "running",
+    "plugin_last_successful_run": "2025-02-19T17:26:42-06:00",
+    "plugin_last_failed_run": "2025-02-19T17:25:52-06:00",
+    "plugin_last_canceled_run": "2025-02-19T17:25:04-06:00",
+    "plugin_status_since": "2025-02-19T17:26:56-06:00",
+    "plugin_total_ran_vms": 3,
+    "plugin_total_successful_runs_since_start": 1,
+    "plugin_total_failed_runs_since_start": 1,
+    "plugin_total_canceled_runs_since_start": 1,
+    "plugin_last_successful_run_job_url": "https://github.com/veertuinc/anklet/actions/runs/13424340307/job/37504119547",
+    "plugin_last_failed_run_job_url": "https://github.com/veertuinc/anklet/actions/runs/13424339882/job/37504118023",
+    "plugin_last_canceled_run_job_url": "https://github.com/veertuinc/anklet/actions/runs/13424339543/job/37504117422",
+    "host_cpu_count": 12,
+    "host_cpu_used_count": 2,
+    "host_cpu_usage_percentage": 19.9605763305933,
+    "host_memory_total_bytes": 38654705664,
+    "host_memory_used_bytes": 28236300288,
+    "host_memory_available_bytes": 10418405376,
+    "host_memory_usage_percentage": 73.0475107828776,
+    "host_disk_total_bytes": 994662584320,
+    "host_disk_used_bytes": 752583897088,
+    "host_disk_available_bytes": 242078687232,
+    "host_disk_usage_percentage": 75.66223048417
+  }
+]
 ```
 
 #### Prometheus
