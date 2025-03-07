@@ -711,7 +711,15 @@ func Run(
 	pluginCtx = logging.AppendCtx(pluginCtx, slog.Int64("workflowJobRunID", *queuedJob.WorkflowJob.RunID))
 	pluginCtx = logging.AppendCtx(pluginCtx, slog.String("workflowName", *queuedJob.WorkflowJob.WorkflowName))
 	pluginCtx = logging.AppendCtx(pluginCtx, slog.String("jobURL", *queuedJob.WorkflowJob.HTMLURL))
-	logger.DebugContext(pluginCtx, "queued job found", "queuedJob", queuedJob.Action)
+	logger.InfoContext(
+		pluginCtx,
+		"queued job found",
+		"labels", queuedJob.WorkflowJob.Labels,
+		"workflowJobName", queuedJob.WorkflowJob.Name,
+		"workflowJobID", queuedJob.WorkflowJob.ID,
+		"workflowJobRunID", queuedJob.WorkflowJob.RunID,
+	)
+	logger.DebugContext(pluginCtx, "queued job found (debug)", "queuedJob", queuedJob.Action)
 
 	// check if the job is already completed, so we don't orphan if there is
 	// a job in anklet/jobs/github/queued and also a anklet/jobs/github/completed
