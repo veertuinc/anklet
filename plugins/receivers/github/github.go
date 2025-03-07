@@ -180,6 +180,8 @@ func Run(
 		case *github.WorkflowJobEvent:
 			logger.DebugContext(pluginCtx, "received workflow job to consider",
 				"workflowJob.Action", *workflowJob.Action,
+			)
+			logger.InfoContext(pluginCtx, "received workflow job to consider",
 				"workflowJob.WorkflowJob.Labels", workflowJob.WorkflowJob.Labels,
 				"workflowJob.WorkflowJob.ID", *workflowJob.WorkflowJob.ID,
 				"workflowJob.WorkflowJob.Name", *workflowJob.WorkflowJob.Name,
