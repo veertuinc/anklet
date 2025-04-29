@@ -6,12 +6,12 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
 	"github.com/veertuinc/anklet/internal/config"
 	"github.com/veertuinc/anklet/internal/database"
-	"github.com/veertuinc/anklet/internal/logging"
 )
 
 // Start runs the HTTP server
@@ -530,58 +530,80 @@ func (s *Server) handleAggregatorPrometheusMetrics(
 }
 
 func ExportMetricsToDB(pluginCtx context.Context, logger *slog.Logger) {
+	ctxPlugin, err := config.GetPluginFromContext(pluginCtx)
+	if err != nil {
+		logger.ErrorContext(pluginCtx, "error getting plugin from context", "error", err.Error())
+	}
+	databaseContainer, err := database.GetDatabaseFromContext(pluginCtx)
+	if err != nil {
+		logger.ErrorContext(pluginCtx, "error getting database client from context", "error", err.Error())
+	}
+	metricsData, err := GetMetricsDataFromContext(pluginCtx)
+	if err != nil {
+		logger.ErrorContext(pluginCtx, "error getting metrics data from context", "error", err.Error())
+	}
+	metricsDataJson, err := json.Marshal(metricsData.MetricsData)
+	if err != nil {
+		logger.ErrorContext(pluginCtx, "error parsing metrics as json", "error", err.Error())
+	}
 	ticker := time.NewTicker(10 * time.Second)
+	amountOfErrorsAllowed := 60
+	metricsKey := "anklet/metrics/" + ctxPlugin.Owner + "/" + ctxPlugin.Name
 	go func() {
 		for {
 			select {
 			case <-pluginCtx.Done():
 				return
 			case <-ticker.C:
-				logging.DevContext(pluginCtx, "Exporting metrics to database")
-				ctxPlugin, err := config.GetPluginFromContext(pluginCtx)
-				if err != nil {
-					logger.ErrorContext(pluginCtx, "error getting plugin from context", "error", err.Error())
-				}
-				databaseContainer, err := database.GetDatabaseFromContext(pluginCtx)
-				if err != nil {
-					logger.ErrorContext(pluginCtx, "error getting database client from context", "error", err.Error())
-				}
-				metricsData, err := GetMetricsDataFromContext(pluginCtx)
-				if err != nil {
-					logger.ErrorContext(pluginCtx, "error getting metrics data from context", "error", err.Error())
-				}
-				metricsDataJson, err := json.Marshal(metricsData.MetricsData)
-				if err != nil {
-					logger.ErrorContext(pluginCtx, "error parsing metrics as json", "error", err.Error())
-				}
+				// logging.DevContext(pluginCtx, "Exporting metrics to database")
 				if pluginCtx.Err() == nil {
 					// add last_update
-					var metricsDataMap map[string]interface{}
+					var metricsDataMap map[string]any
 					if err := json.Unmarshal(metricsDataJson, &metricsDataMap); err != nil {
 						logger.ErrorContext(pluginCtx, "error unmarshalling metrics data", "error", err)
-						return
+						amountOfErrorsAllowed--
+						if amountOfErrorsAllowed == 0 {
+							os.Exit(1)
+						}
+						continue
 					}
 					metricsDataMap["last_update"] = time.Now()
 					metricsDataJson, err = json.Marshal(metricsDataMap)
 					if err != nil {
 						logger.ErrorContext(pluginCtx, "error marshalling metrics data", "error", err)
-						return
+						amountOfErrorsAllowed--
+						if amountOfErrorsAllowed == 0 {
+							os.Exit(1)
+						}
+						continue
 					}
 					// This will create a single key using the first plugin's name. It will contain all plugin metrics though.
-					setting := databaseContainer.Client.Set(pluginCtx, "anklet/metrics/"+ctxPlugin.Owner+"/"+ctxPlugin.Name, metricsDataJson, time.Hour*24*7) // keep metrics for one week max
+					setting := databaseContainer.Client.Set(pluginCtx, metricsKey, metricsDataJson, time.Hour*24*7) // keep metrics for one week max
 					if setting.Err() != nil {
 						logger.ErrorContext(pluginCtx, "error storing metrics data in Redis", "error", setting.Err())
-						return
+						amountOfErrorsAllowed--
+						if amountOfErrorsAllowed == 0 {
+							os.Exit(1)
+						}
+						continue
 					}
-					exists, err := databaseContainer.Client.Exists(pluginCtx, "anklet/metrics/"+ctxPlugin.Owner+"/"+ctxPlugin.Name).Result()
+					_, err := databaseContainer.Client.Exists(pluginCtx, metricsKey).Result()
 					if err != nil {
-						logger.ErrorContext(pluginCtx, "error checking if key exists in Redis", "key", "anklet/metrics/"+ctxPlugin.Owner+"/"+ctxPlugin.Name, "error", err)
-						return
+						logger.ErrorContext(pluginCtx, "error checking if key exists in Redis", "key", metricsKey, "error", err)
+						amountOfErrorsAllowed--
+						if amountOfErrorsAllowed == 0 {
+							os.Exit(1)
+						}
+						continue
 					}
-					if exists == 1 {
-						logging.DevContext(pluginCtx, "successfully stored metrics data in Redis, key: anklet/metrics/"+ctxPlugin.Owner+"/"+ctxPlugin.Name+" exists: true")
-					} else {
-						logging.DevContext(pluginCtx, "successfully stored metrics data in Redis, key: anklet/metrics/"+ctxPlugin.Owner+"/"+ctxPlugin.Name+" exists: false")
+					// if exists == 1 {
+					// 	logging.DevContext(pluginCtx, "successfully stored metrics data in Redis, key: anklet/metrics/"+ctxPlugin.Owner+"/"+ctxPlugin.Name+" exists: true")
+					// } else {
+					// 	logging.DevContext(pluginCtx, "successfully stored metrics data in Redis, key: anklet/metrics/"+ctxPlugin.Owner+"/"+ctxPlugin.Name+" exists: false")
+					// }
+					if amountOfErrorsAllowed < 60 {
+						logger.InfoContext(pluginCtx, "errors resolved with metrics export")
+						amountOfErrorsAllowed = 60
 					}
 				}
 			}

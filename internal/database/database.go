@@ -127,26 +127,26 @@ func AddUniqueRunKey(ctx context.Context) (bool, error) {
 	return true, errors.New("unique run key already exists")
 }
 
-func UnwrapPayload[T any](payload string) (T, error, error) {
-	var wrappedPayload map[string]interface{}
+func Unwrap[T any](payload string) (T, error, error) {
+	var wrappedPayload map[string]any
 	var t T
 	err := json.Unmarshal([]byte(payload), &wrappedPayload)
 	if err != nil {
 		return t, err, nil
 	}
-	payloadBytes, err := json.Marshal(wrappedPayload["payload"])
+	payloadBytes, err := json.Marshal(wrappedPayload)
 	if err != nil {
 		return t, err, nil
 	}
 	if err := json.Unmarshal(payloadBytes, &t); err != nil {
 		return t, err, nil
 	}
-	jobType, ok := wrappedPayload["type"].(string)
-	if !ok {
-		return t, nil, errors.New("job type not found or not a string")
-	}
-	if jobType == "anka.VM" {
-		return t, nil, errors.New("job type " + jobType + " is not what we expect")
-	}
+	// jobType, ok := wrappedPayload["type"].(string)
+	// if !ok {
+	// 	return t, nil, errors.New("job type not found or not a string")
+	// }
+	// if jobType == "anka.VM" {
+	// 	return t, nil, errors.New("job type " + jobType + " is not what we expect")
+	// }
 	return t, nil, nil
 }

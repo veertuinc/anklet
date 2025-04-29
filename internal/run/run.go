@@ -17,7 +17,6 @@ func Plugin(
 	pluginCtx context.Context,
 	pluginCancel context.CancelFunc,
 	logger *slog.Logger,
-	firstPluginStarted chan bool,
 	metricsData *metrics.MetricsDataLock,
 ) (context.Context, error) {
 	var updatedPluginCtx context.Context
@@ -30,6 +29,10 @@ func Plugin(
 	if ctxPlugin.Plugin == "" {
 		return pluginCtx, fmt.Errorf("plugin is not set in yaml:plugins:" + ctxPlugin.Name + ":plugin")
 	}
+	workerGlobals, err := config.GetWorkerGlobalsFromContext(workerCtx)
+	if err != nil {
+		return pluginCtx, err
+	}
 	if ctxPlugin.Plugin == "github" {
 		// for {
 		select {
@@ -39,11 +42,17 @@ func Plugin(
 		default:
 			// notify the main thread that the service has started
 			select {
-			case <-firstPluginStarted:
+			case <-workerGlobals.FirstPluginStarted:
 			default:
-				close(firstPluginStarted)
+				close(workerGlobals.FirstPluginStarted)
 			}
-			updatedPluginCtx, err = github.Run(workerCtx, pluginCtx, pluginCancel, logger, metricsData)
+			updatedPluginCtx, err = github.Run(
+				workerCtx,
+				pluginCtx,
+				pluginCancel,
+				logger,
+				metricsData,
+			)
 			if err != nil {
 				return updatedPluginCtx, err
 			}
@@ -52,7 +61,13 @@ func Plugin(
 		}
 		// }
 	} else if ctxPlugin.Plugin == "github_receiver" {
-		updatedPluginCtx, err = github_receiver.Run(workerCtx, pluginCtx, pluginCancel, logger, firstPluginStarted, metricsData)
+		updatedPluginCtx, err = github_receiver.Run(
+			workerCtx,
+			pluginCtx,
+			pluginCancel,
+			logger,
+			metricsData,
+		)
 		if err != nil {
 			return updatedPluginCtx, err
 		}

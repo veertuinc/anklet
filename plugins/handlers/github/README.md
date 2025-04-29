@@ -108,7 +108,72 @@ However, there are more complex failures that happen with the registration of th
 The following logic consumes [API limits](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api?apiVersion=2022-11-28). Should you run out, all processing will pause until the limits are reset after the specific github duration and then resume where it left off.
 
   1. Obtaining a registration token. (single call)
-  2. Should the job request a template or tag that doesn't exist, we need to forcefully cancel the job in github or else other anklets will attempt processing indefinitely. (one call to check if already cancelled, one to cancel)
-  3. Should the runner be orphaned and not have been shut down cleanly so it unregistred itself, we will send a removal request. It can not happen with #2. (one to check if already removed, one to remove)
+  2. Should the job request a template that doesn't exist, we need to forcefully cancel the job in github or else other anklets will attempt processing indefinitely.
+  3. Should the runner be orphaned and not have been shut down cleanly, we will send a removal request to the API. (one to check if already removed, one to remove)
+  4. If jobs were `in_progress` when anklet was exited, we will make a single API call to see if the job finished successfully or not. If the job is still running, the VM will stay running and the plugin will wait for it to finish. Otherwise, we'll proceed with the cleanup.
+  5. If a job failed for some reason and is being retried, on the next attempts to run the job, we will make a single API call to see if the job finished successfully or not in github. This is necessary since github will sometimes not send updates to the webhook. There is a limit of 5 attempts before we cancel the job forcefully.
 
-This means in the worst case scenario it could make a total of 3 api calls total. Otherwise only one should happen on job success.
+This means worst case scenario it could make a total of 3 api calls total. Otherwise only one should happen on job success.
+
+---
+
+## FAQS
+
+1. My Jobs are taking a long time to be picked up.
+
+This can happen for several reasons. It's important to understand that the Github Actions plugin will go one-by-one through the queue starting with the eldest item to find a job it can run. This is necessary so that the plugins can clean up the queue of older cancelled jobs that are still queued in the DB.
+
+Check that:
+
+  1. You don't have too many queued jobs piled up. If your target template needs 12 CPU cores, but almost all of your hosts only have 8 cores, the few hosts with 12 may take a while to get the job off the queue and out of the way. Remember, the plugin on completion of a job will reset the queue target index so it starts from the beginning of the queue. It will need to crawl through all of the jobs it can't run each time.
+  2. The jobs you're running are just long running jobs. You may need more hosts to handle the demand.
+
+2. Debug logging can be enabled with `LOG_LEVEL=dev` in the environment. All output of debug logging will be in JSON.
+
+## Development
+
+This plugin handles running jobs queued in the DB. It checks queued items one by one (starting at 0 index) to find one that it can run. It is also responsible for finding completed jobs in the DB and cleaning the jobs up, even if it can't run the job according to requirements.
+
+When first starting up, the plugin will do an initial check to see if it has any job that was running last time it stopped. It picks up where it left off if so. Other plugins will be paused while this happens until it's their turn (`workerGlobals.IsAPluginPreparingState()`). They do this one by one in the order they're listed in the config.
+
+
+
+### Functions
+
+#### `cleanup`
+
+This function runs at the end of the plugin's run, ensuring that everything is cleaned up.
+
+- It uses its own context to avoid context cancellation preventing it from running.
+- It pops items off the plugin's queue one by one in the newest first order and handles them. For example, a job that runs fully will have index 0,1 with 0 being the newest object inserted in the plugin queue and representing the anka.VM. The function sees this and processes the deletion of the VM, then moves on to the next object until there is nothing left to cleanup.
+
+#### `checkForCompletedJobs`
+
+This runs constantly for the entire life of the plugin. It constantly checks the main completed queue for a job that matches the currently active job ID. If it finds one, it sets the existing job's status, etc.
+
+- You can tell it to start wrapping up the job/run by sending `pluginGlobals.JobChannel <- internalGithub.QueueJob{Action: "finish"}` to the channel.
+
+#### `watchForJobCompletion`
+
+This function loops and waits for the job to be in a completed status in the specific plugin's queue.
+
+#### `sendCancelWorkflowRun`
+
+This function sends a cancel request to the github API, preventing the runner from being orphaned in github.
+
+#### `Run`
+
+The primary function that runs the plugin.
+
+- On start we run a full `checkForCompletedJobs` and `cleanup` in order to continue where we left off if the plugin was stopped mid-run.
+- In versions >= `0.14.0`, we support handling VMs with varying resource requirements. To do this, we need to check the VM Template's needs and what we have currently available. This requires that plugins don't start VMs at the same time or else we won't have usage information to compare to. `workerGlobals.SetAPluginIsPreparing(pluginConfig.Name)` is used to allow us to only allow one plugin at a time to start the VM. It unlocks after preparing the VM so that the other plugin on the host can start preparing its own VM though.
+- Each `return` from this function must include some sort of instruction to interrupt the `checkForCompletedJobs` otherwise it will run indefinitely.
+
+
+#### Preparing your local machine for development
+
+```
+# clone into ~/anklet, otherwise change this
+mkdir -p ~/.config/anklet
+ln -s ~/anklet/plugins /Users/veertu/.config/anklet/plugins
+```
