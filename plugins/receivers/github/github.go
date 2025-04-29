@@ -200,6 +200,10 @@ func Run(
 						wrappedJobPayload := map[string]interface{}{
 							"type":    "WorkflowJobPayload",
 							"payload": workflowJob,
+							"required_resources": config.RequiredResources{
+								CPU: 0,
+								RAM: 0,
+							},
 						}
 						wrappedPayloadJSON, err := json.Marshal(wrappedJobPayload)
 						if err != nil {
@@ -220,6 +224,7 @@ func Run(
 							"conclusion", workflowJob.WorkflowJob.Conclusion,
 							"started_at", workflowJob.WorkflowJob.StartedAt,
 							"completed_at", workflowJob.WorkflowJob.CompletedAt,
+							"required_resources", wrappedJobPayload["required_resources"],
 						)
 					}
 				}
@@ -237,6 +242,10 @@ func Run(
 						wrappedJobPayload := map[string]interface{}{
 							"type":    "WorkflowJobPayload",
 							"payload": workflowJob,
+							"required_resources": config.RequiredResources{
+								CPU: 0,
+								RAM: 0,
+							},
 						}
 						wrappedPayloadJSON, err := json.Marshal(wrappedJobPayload)
 						if err != nil {
@@ -257,6 +266,7 @@ func Run(
 							"conclusion", workflowJob.WorkflowJob.Conclusion,
 							"started_at", workflowJob.WorkflowJob.StartedAt,
 							"completed_at", workflowJob.WorkflowJob.CompletedAt,
+							"required_resources", wrappedJobPayload["required_resources"],
 						)
 					}
 				}
@@ -306,6 +316,10 @@ func Run(
 							wrappedJobPayload := map[string]interface{}{
 								"type":    "WorkflowJobPayload",
 								"payload": workflowJob,
+								"required_resources": config.RequiredResources{
+									CPU: 0,
+									RAM: 0,
+								},
 							}
 							wrappedPayloadJSON, err := json.Marshal(wrappedJobPayload)
 							if err != nil {
@@ -326,6 +340,7 @@ func Run(
 								"conclusion", workflowJob.WorkflowJob.Conclusion,
 								"started_at", workflowJob.WorkflowJob.StartedAt,
 								"completed_at", workflowJob.WorkflowJob.CompletedAt,
+								"required_resources", wrappedJobPayload["required_resources"],
 							)
 						}
 					}

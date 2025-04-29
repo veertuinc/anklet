@@ -56,6 +56,11 @@ type Workflow struct {
 	Exclude []string `yaml:"exclude"`
 }
 
+type RequiredResources struct {
+	CPU int `yaml:"cpu"`
+	RAM int `yaml:"ram"`
+}
+
 type Plugin struct {
 	SleepInterval              int      `yaml:"sleep_interval"`
 	Name                       string   `yaml:"name"`
