@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -186,6 +187,7 @@ func main() {
 		PullLock:     &sync.Mutex{},
 		PluginsPath:  pluginsPath,
 		DebugEnabled: logging.IsDebugEnabled(),
+		IsPaused:     atomic.Bool{},
 	})
 
 	httpTransport := http.DefaultTransport
@@ -484,6 +486,15 @@ func worker(
 						pluginCancel()
 						return
 					default:
+
+						if globals.IsPausedState() {
+							logging.DevContext(pluginCtx, "pausing due to global pause state")
+							// When paused, sleep briefly and continue checking
+							metricsData.SetStatus(pluginCtx, pluginLogger, "paused")
+							time.Sleep(time.Second + 5)
+							continue
+						}
+
 						updatedPluginCtx, err := run.Plugin(
 							workerCtx,
 							pluginCtx,

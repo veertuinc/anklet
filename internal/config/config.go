@@ -5,6 +5,7 @@ import (
 	"os"
 	"strconv"
 	"sync"
+	"sync/atomic"
 
 	"context"
 
@@ -212,6 +213,7 @@ type Globals struct {
 	PullLock     *sync.Mutex
 	PluginsPath  string
 	DebugEnabled bool
+	IsPaused     atomic.Bool
 }
 
 func GetGlobalsFromContext(ctx context.Context) (Globals, error) {
@@ -220,6 +222,18 @@ func GetGlobalsFromContext(ctx context.Context) (Globals, error) {
 		return Globals{}, fmt.Errorf("GetGlobalsFromContext failed")
 	}
 	return globals, nil
+}
+
+func (g *Globals) Pause() {
+	g.IsPaused.Store(true)
+}
+
+func (g *Globals) Unpause() {
+	g.IsPaused.Store(false)
+}
+
+func (g *Globals) IsPausedState() bool {
+	return g.IsPaused.Load()
 }
 
 func GetLoadedConfigFromContext(ctx context.Context) (*Config, error) {
