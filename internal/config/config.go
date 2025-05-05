@@ -216,10 +216,10 @@ type Globals struct {
 	IsPaused     atomic.Bool
 }
 
-func GetGlobalsFromContext(ctx context.Context) (Globals, error) {
-	globals, ok := ctx.Value(ContextKey("globals")).(Globals)
+func GetGlobalsFromContext(ctx context.Context) (*Globals, error) {
+	globals, ok := ctx.Value(ContextKey("globals")).(*Globals)
 	if !ok {
-		return Globals{}, fmt.Errorf("GetGlobalsFromContext failed")
+		return nil, fmt.Errorf("GetGlobalsFromContext failed")
 	}
 	return globals, nil
 }

@@ -182,7 +182,7 @@ func main() {
 
 	parentLogger.InfoContext(parentCtx, "plugins path", slog.String("pluginsPath", pluginsPath))
 
-	parentCtx = context.WithValue(parentCtx, config.ContextKey("globals"), config.Globals{
+	parentCtx = context.WithValue(parentCtx, config.ContextKey("globals"), &config.Globals{
 		RunOnce:      runOnce,
 		PullLock:     &sync.Mutex{},
 		PluginsPath:  pluginsPath,
