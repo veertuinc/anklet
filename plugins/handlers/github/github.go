@@ -835,7 +835,7 @@ func Run(
 		var wrappedVmJSON []byte
 		var wrappedVmErr error
 		if vm != nil {
-			wrappedVM := map[string]interface{}{
+			wrappedVM := map[string]any{
 				"type":    "anka.VM",
 				"payload": vm,
 			}

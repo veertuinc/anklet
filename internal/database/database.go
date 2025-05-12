@@ -128,7 +128,7 @@ func AddUniqueRunKey(ctx context.Context) (bool, error) {
 }
 
 func UnwrapPayload[T any](payload string) (T, error, error) {
-	var wrappedPayload map[string]interface{}
+	var wrappedPayload map[string]any
 	var t T
 	err := json.Unmarshal([]byte(payload), &wrappedPayload)
 	if err != nil {
