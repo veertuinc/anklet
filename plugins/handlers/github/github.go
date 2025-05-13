@@ -21,19 +21,6 @@ import (
 	"github.com/veertuinc/anklet/internal/metrics"
 )
 
-type WorkflowRunJobDetail struct {
-	JobID           int64
-	JobName         string
-	JobURL          string
-	WorkflowName    string
-	AnkaTemplate    string
-	AnkaTemplateTag string
-	RunID           int64
-	Labels          []string
-	Repo            string
-	Conclusion      string
-}
-
 var once sync.Once
 
 // func exists_in_array_exact(array_to_search_in []string, desired []string) bool {
@@ -185,7 +172,7 @@ func sendCancelWorkflowRun(
 	workerCtx context.Context,
 	pluginCtx context.Context,
 	logger *slog.Logger,
-	workflow WorkflowRunJobDetail,
+	workflow internalGithub.WorkflowRunJobDetail,
 	metricsData *metrics.MetricsDataLock,
 ) error {
 	githubClient, err := internalGithub.GetGitHubClientFromContext(pluginCtx)
@@ -246,7 +233,7 @@ func CheckForCompletedJobs(
 	pluginCtx context.Context,
 	logger *slog.Logger,
 	checkForCompletedJobsMu *sync.Mutex,
-	completedJobChannel chan github.WorkflowJobEvent,
+	completedJobChannel chan internalGithub.SimplifiedWorkflowJobEvent,
 	ranOnce chan struct{},
 	runOnce bool,
 	retryChannel chan bool,
@@ -308,7 +295,7 @@ func CheckForCompletedJobs(
 					logger.ErrorContext(pluginCtx, "error getting count of objects in anklet/jobs/github/completed/"+pluginConfig.Owner+"/"+pluginConfig.Name, "err", err)
 					return
 				}
-				existingJobEvent, err, typeErr := database.UnwrapPayload[github.WorkflowJobEvent](existingJobString)
+				existingJobEvent, err, typeErr := database.UnwrapPayload[internalGithub.SimplifiedWorkflowJobEvent](existingJobString)
 				if err != nil || typeErr != nil {
 					logger.ErrorContext(pluginCtx, "error unmarshalling job", "err", err)
 					return
@@ -330,12 +317,12 @@ func CheckForCompletedJobs(
 						logger.ErrorContext(pluginCtx, "error getting list of completed jobs", "err", err)
 						return
 					}
-					if existingJobEvent.WorkflowJob == nil {
-						logger.ErrorContext(pluginCtx, "existingJobEvent.WorkflowJob is nil")
+					if existingJobEvent.WorkflowJob.ID == nil {
+						logger.ErrorContext(pluginCtx, "existingJobEvent.WorkflowJob.ID is nil")
 						return
 					}
 					for _, completedJob := range completedJobs {
-						completedJobWebhookEvent, err, typeErr := database.UnwrapPayload[github.WorkflowJobEvent](completedJob)
+						completedJobWebhookEvent, err, typeErr := database.UnwrapPayload[internalGithub.SimplifiedWorkflowJobEvent](completedJob)
 						if err != nil || typeErr != nil {
 							logger.ErrorContext(pluginCtx, "error unmarshalling job", "err", err)
 							return
@@ -389,7 +376,7 @@ func cleanup(
 	workerCtx context.Context,
 	pluginCtx context.Context,
 	logger *slog.Logger,
-	completedJobChannel chan github.WorkflowJobEvent,
+	completedJobChannel chan internalGithub.SimplifiedWorkflowJobEvent,
 	cleanupMu *sync.Mutex,
 ) {
 	cleanupMu.Lock()
@@ -627,7 +614,7 @@ func Run(
 
 	retryChannel := make(chan bool, 1)
 
-	completedJobChannel := make(chan github.WorkflowJobEvent, 1)
+	completedJobChannel := make(chan internalGithub.SimplifiedWorkflowJobEvent, 1)
 	// wait group so we can wait for the goroutine to finish before exiting the service
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -665,7 +652,7 @@ func Run(
 	select {
 	case <-completedJobChannel:
 		logger.InfoContext(pluginCtx, "completed job found at start")
-		completedJobChannel <- github.WorkflowJobEvent{}
+		completedJobChannel <- internalGithub.SimplifiedWorkflowJobEvent{}
 		return pluginCtx, nil
 	case <-pluginCtx.Done():
 		logger.WarnContext(pluginCtx, "context canceled before completed job found")
@@ -686,7 +673,7 @@ func Run(
 		eldestQueuedJob, err := databaseContainer.Client.LPop(pluginCtx, "anklet/jobs/github/queued/"+pluginConfig.Owner).Result()
 		if err == redis.Nil {
 			logger.DebugContext(pluginCtx, "no queued jobs found")
-			completedJobChannel <- github.WorkflowJobEvent{} // send true to the channel to stop the check for completed jobs goroutine
+			completedJobChannel <- internalGithub.SimplifiedWorkflowJobEvent{} // send true to the channel to stop the check for completed jobs goroutine
 			return pluginCtx, nil
 		}
 		if err != nil {
@@ -698,13 +685,13 @@ func Run(
 		wrappedPayloadJSON = eldestQueuedJob
 	}
 
-	queuedJob, err, typeErr := database.UnwrapPayload[github.WorkflowJobEvent](wrappedPayloadJSON)
+	queuedJob, err, typeErr := database.UnwrapPayload[internalGithub.SimplifiedWorkflowJobEvent](wrappedPayloadJSON)
 	if err != nil || typeErr != nil {
 		// logger.ErrorContext(pluginCtx, "error unmarshalling job", "err", err)
 		return pluginCtx, fmt.Errorf("error unmarshalling job: %s", err.Error())
 	}
 	if !isRepoSet {
-		pluginCtx = logging.AppendCtx(pluginCtx, slog.String("repo", *queuedJob.Repo.Name))
+		pluginCtx = logging.AppendCtx(pluginCtx, slog.String("repo", *queuedJob.Repository.Name))
 	}
 	pluginCtx = logging.AppendCtx(pluginCtx, slog.Int64("workflowJobID", *queuedJob.WorkflowJob.ID))
 	pluginCtx = logging.AppendCtx(pluginCtx, slog.String("workflowJobName", *queuedJob.WorkflowJob.Name))
@@ -727,7 +714,7 @@ func Run(
 	select {
 	case <-completedJobChannel:
 		logger.InfoContext(pluginCtx, "completed job found by CheckForCompletedJobs")
-		completedJobChannel <- github.WorkflowJobEvent{} // send true to the channel to stop the check for completed jobs goroutine
+		completedJobChannel <- internalGithub.SimplifiedWorkflowJobEvent{} // send true to the channel to stop the check for completed jobs goroutine
 		return pluginCtx, nil
 	case <-pluginCtx.Done():
 		logger.WarnContext(pluginCtx, "context canceled before completed job found")
@@ -747,7 +734,7 @@ func Run(
 	}
 	pluginCtx = logging.AppendCtx(pluginCtx, slog.String("ankaTemplateTag", ankaTemplateTag))
 
-	workflowJob := WorkflowRunJobDetail{
+	workflowJob := internalGithub.WorkflowRunJobDetail{
 		JobID:           *queuedJob.WorkflowJob.ID,
 		JobName:         *queuedJob.WorkflowJob.Name,
 		JobURL:          *queuedJob.WorkflowJob.HTMLURL,
@@ -756,7 +743,7 @@ func Run(
 		AnkaTemplateTag: ankaTemplateTag,
 		RunID:           *queuedJob.WorkflowJob.RunID,
 		Labels:          queuedJob.WorkflowJob.Labels,
-		Repo:            *queuedJob.Repo.Name,
+		Repo:            *queuedJob.Repository.Name,
 	}
 
 	// get anka CLI
@@ -906,7 +893,7 @@ func Run(
 		select {
 		case <-completedJobChannel:
 			logger.WarnContext(pluginCtx, "completed job found before installing runner")
-			completedJobChannel <- github.WorkflowJobEvent{} // send true to the channel to stop the check for completed jobs goroutine
+			completedJobChannel <- internalGithub.SimplifiedWorkflowJobEvent{} // send true to the channel to stop the check for completed jobs goroutine
 			return pluginCtx, nil
 		case <-pluginCtx.Done():
 			logger.WarnContext(pluginCtx, "context canceled before install runner")
@@ -926,7 +913,7 @@ func Run(
 		select {
 		case <-completedJobChannel:
 			logger.InfoContext(pluginCtx, "completed job found before registering runner")
-			completedJobChannel <- github.WorkflowJobEvent{} // send true to the channel to stop the check for completed jobs goroutine
+			completedJobChannel <- internalGithub.SimplifiedWorkflowJobEvent{} // send true to the channel to stop the check for completed jobs goroutine
 			return pluginCtx, nil
 		case <-pluginCtx.Done():
 			logger.WarnContext(pluginCtx, "context canceled before register runner")
@@ -952,7 +939,7 @@ func Run(
 		select {
 		case <-completedJobChannel:
 			logger.InfoContext(pluginCtx, "completed job found before starting runner")
-			completedJobChannel <- github.WorkflowJobEvent{} // send true to the channel to stop the check for completed jobs goroutine
+			completedJobChannel <- internalGithub.SimplifiedWorkflowJobEvent{} // send true to the channel to stop the check for completed jobs goroutine
 			return pluginCtx, nil
 		case <-pluginCtx.Done():
 			logger.WarnContext(pluginCtx, "context canceled before start runner")
@@ -970,7 +957,7 @@ func Run(
 		select {
 		case <-completedJobChannel:
 			logger.InfoContext(pluginCtx, "completed job found before jobCompleted checks")
-			completedJobChannel <- github.WorkflowJobEvent{} // send true to the channel to stop the check for completed jobs goroutine
+			completedJobChannel <- internalGithub.SimplifiedWorkflowJobEvent{} // send true to the channel to stop the check for completed jobs goroutine
 			return pluginCtx, nil
 		case <-pluginCtx.Done():
 			logger.WarnContext(pluginCtx, "context canceled before jobCompleted checks")
@@ -988,7 +975,7 @@ func Run(
 	for {
 		select {
 		case completedJobEvent := <-completedJobChannel:
-			if *completedJobEvent.Action == "completed" {
+			if completedJobEvent.Action == "completed" {
 				pluginCtx = logging.AppendCtx(pluginCtx, slog.String("conclusion", *completedJobEvent.WorkflowJob.Conclusion))
 				logger.InfoContext(pluginCtx, "job completed",
 					"job_id", completedJobEvent.WorkflowJob.ID,
@@ -1028,7 +1015,7 @@ func Run(
 					return pluginCtx, nil
 				}
 			}
-			completedJobChannel <- github.WorkflowJobEvent{} // so cleanup can also see it as completed
+			completedJobChannel <- internalGithub.SimplifiedWorkflowJobEvent{} // so cleanup can also see it as completed
 			return pluginCtx, nil
 		case <-pluginCtx.Done():
 			logger.WarnContext(pluginCtx, "context canceled while watching for job completion")
@@ -1113,7 +1100,7 @@ func removeSelfHostedRunner(
 	workerCtx context.Context,
 	pluginCtx context.Context,
 	vm anka.VM,
-	workflow *WorkflowRunJobDetail,
+	workflow *internalGithub.WorkflowRunJobDetail,
 	metricsData *metrics.MetricsDataLock,
 ) {
 	var err error

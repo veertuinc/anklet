@@ -370,6 +370,9 @@ func (cli *Cli) AnkaCopyIntoVM(ctx context.Context, filesToCopyIn ...string) err
 			return fmt.Errorf("error evaluating symlink for %s: %w", hostLevelFile, err)
 		}
 		hostLevelFile = realPath
+		if ctx.Err() != nil {
+			return fmt.Errorf("context canceled before AnkaCopyIntoVM executing anka cp")
+		}
 		copyOutput, err := cli.ExecuteParseJson(ctx, "anka", "-j", "cp", "-a", hostLevelFile, fmt.Sprintf("%s:", vm.Name))
 		if err != nil {
 			return err

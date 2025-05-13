@@ -179,17 +179,21 @@ func Run(
 		case *github.WorkflowJobEvent:
 			simplifiedWorkflowJobEvent := internalGithub.SimplifiedWorkflowJobEvent{
 				WorkflowJob: internalGithub.SimplifiedWorkflowJob{
-					ID:          workflowJob.WorkflowJob.ID,
-					Name:        workflowJob.WorkflowJob.Name,
-					RunID:       workflowJob.WorkflowJob.RunID,
-					Status:      workflowJob.WorkflowJob.Status,
-					Conclusion:  workflowJob.WorkflowJob.Conclusion,
-					StartedAt:   workflowJob.WorkflowJob.StartedAt,
-					CompletedAt: workflowJob.WorkflowJob.CompletedAt,
-					Labels:      workflowJob.WorkflowJob.Labels,
-					HTMLURL:     workflowJob.WorkflowJob.HTMLURL,
+					ID:           workflowJob.WorkflowJob.ID,
+					Name:         workflowJob.WorkflowJob.Name,
+					RunID:        workflowJob.WorkflowJob.RunID,
+					Status:       workflowJob.WorkflowJob.Status,
+					Conclusion:   workflowJob.WorkflowJob.Conclusion,
+					StartedAt:    workflowJob.WorkflowJob.StartedAt,
+					CompletedAt:  workflowJob.WorkflowJob.CompletedAt,
+					Labels:       workflowJob.WorkflowJob.Labels,
+					HTMLURL:      workflowJob.WorkflowJob.HTMLURL,
+					WorkflowName: workflowJob.WorkflowJob.WorkflowName,
 				},
 				Action: *workflowJob.Action,
+				Repository: internalGithub.SimplifiedRepository{
+					Name: workflowJob.Repo.Name,
+				},
 			}
 			logger.DebugContext(pluginCtx, "received workflow job to consider",
 				"workflowJob.Action", simplifiedWorkflowJobEvent.Action,
@@ -205,6 +209,7 @@ func Run(
 				"workflowJob.WorkflowJob.StartedAt", simplifiedWorkflowJobEvent.WorkflowJob.StartedAt,
 				"workflowJob.WorkflowJob.CompletedAt", simplifiedWorkflowJobEvent.WorkflowJob.CompletedAt,
 				"workflowJob.Action", simplifiedWorkflowJobEvent.Action,
+				"workflowJob.WorkflowJob.WorkflowName", simplifiedWorkflowJobEvent.WorkflowJob.WorkflowName,
 			)
 			if *workflowJob.Action == "queued" {
 				if exists_in_array_partial(simplifiedWorkflowJobEvent.WorkflowJob.Labels, []string{"anka-template"}) {
@@ -273,14 +278,14 @@ func Run(
 							return
 						}
 						logger.InfoContext(pluginCtx, "job pushed to in_progress queue",
-							"workflowJob.ID", *simplifiedWorkflowJobEvent.WorkflowJob.ID,
-							"workflowJob.Name", *simplifiedWorkflowJobEvent.WorkflowJob.Name,
-							"workflowJob.RunID", *simplifiedWorkflowJobEvent.WorkflowJob.RunID,
-							"html_url", *simplifiedWorkflowJobEvent.WorkflowJob.HTMLURL,
-							"status", *simplifiedWorkflowJobEvent.WorkflowJob.Status,
-							"conclusion", *simplifiedWorkflowJobEvent.WorkflowJob.Conclusion,
-							"started_at", *simplifiedWorkflowJobEvent.WorkflowJob.StartedAt,
-							"completed_at", *simplifiedWorkflowJobEvent.WorkflowJob.CompletedAt,
+							"workflowJob.ID", simplifiedWorkflowJobEvent.WorkflowJob.ID,
+							"workflowJob.Name", simplifiedWorkflowJobEvent.WorkflowJob.Name,
+							"workflowJob.RunID", simplifiedWorkflowJobEvent.WorkflowJob.RunID,
+							"html_url", simplifiedWorkflowJobEvent.WorkflowJob.HTMLURL,
+							"status", simplifiedWorkflowJobEvent.WorkflowJob.Status,
+							"conclusion", simplifiedWorkflowJobEvent.WorkflowJob.Conclusion,
+							"started_at", simplifiedWorkflowJobEvent.WorkflowJob.StartedAt,
+							"completed_at", simplifiedWorkflowJobEvent.WorkflowJob.CompletedAt,
 						)
 					}
 				}
@@ -670,7 +675,7 @@ MainLoop:
 				if queuedJob == "" {
 					continue
 				}
-				wrappedPayload, err, typeErr := database.UnwrapPayload[github.WorkflowJobEvent](queuedJob)
+				wrappedPayload, err, typeErr := database.UnwrapPayload[internalGithub.SimplifiedWorkflowJobEvent](queuedJob)
 				if err != nil {
 					// logger.ErrorContext(pluginCtx, "error unmarshalling job", "err", err)
 					return pluginCtx, fmt.Errorf("error unmarshalling job: %s", err.Error())
@@ -697,7 +702,7 @@ MainLoop:
 		if *hookDelivery.Action == "completed" {
 			for key, completedJobs := range allCompletedJobs {
 				for index, completedJob := range completedJobs {
-					wrappedPayload, err, typeErr := database.UnwrapPayload[github.WorkflowJobEvent](completedJob)
+					wrappedPayload, err, typeErr := database.UnwrapPayload[internalGithub.SimplifiedWorkflowJobEvent](completedJob)
 					if err != nil {
 						// logger.ErrorContext(pluginCtx, "error unmarshalling job", "err", err)
 						return pluginCtx, fmt.Errorf("error unmarshalling job: %s", err.Error())
