@@ -19,8 +19,8 @@ type Repository struct {
 }
 
 type RequiredResources struct {
-	CPU int64 `json:"CPU"`
-	MEM int64 `json:"MEM"`
+	CPU float64 `json:"CPU"`
+	MEM float64 `json:"MEM"`
 }
 
 type SimplifiedWorkflowJob struct {

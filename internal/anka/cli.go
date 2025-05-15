@@ -21,7 +21,7 @@ import (
 type AnkaJson struct {
 	Status  string
 	Code    int
-	Body    interface{}
+	Body    any
 	Message string
 }
 
@@ -33,6 +33,11 @@ type Cli struct {
 	}
 	Version           string
 	RegistryPullMutex sync.Mutex
+}
+
+type AnkaShowOutput struct {
+	CPU      float64 `json:"cpu_cores"`
+	MEMBytes float64 `json:"ram_size"`
 }
 
 func GetAnkaCLIFromContext(pluginCtx context.Context) (*Cli, error) {
@@ -179,6 +184,22 @@ func (cli *Cli) AnkaRun(pluginCtx context.Context, args ...string) error {
 	}
 	logger.DebugContext(pluginCtx, "command executed successfully", "stdout", string(runOutput))
 	return nil
+}
+
+func (cli *Cli) AnkaShow(pluginCtx context.Context, template string) (*AnkaShowOutput, error) {
+	ankaJson, err := cli.ExecuteParseJson(pluginCtx, "anka", "-j", "show", template)
+	if err != nil {
+		return nil, err
+	}
+	logger, err := logging.GetLoggerFromContext(pluginCtx)
+	if err != nil {
+		return nil, err
+	}
+	logger.DebugContext(pluginCtx, "command executed successfully", "stdout", ankaJson.Body)
+	return &AnkaShowOutput{
+		CPU:      ankaJson.Body.(map[string]any)["cpu_cores"].(float64),
+		MEMBytes: ankaJson.Body.(map[string]any)["ram_size"].(float64),
+	}, nil
 }
 
 func (cli *Cli) AnkaRegistryPull(workerCtx context.Context, pluginCtx context.Context, template string, tag string) (*AnkaJson, error) {
@@ -460,12 +481,12 @@ func (cli *Cli) EnsureVMTemplateExists(workerCtx context.Context, pluginCtx cont
 		}
 		if list.Status == "OK" {
 			// ensure tag is proper; skip if tag is hard coded and we already have it locally
-			if bodySlice, ok := list.Body.([]interface{}); ok {
-				body, ok := bodySlice[0].(map[string]interface{})
+			if bodySlice, ok := list.Body.([]any); ok {
+				body, ok := bodySlice[0].(map[string]any)
 				if !ok {
 					logger.InfoContext(pluginCtx, "list", "body", list.Body)
-					logger.ErrorContext(pluginCtx, "unable to parse bodySlice[0] to map[string]interface{}")
-					return nil, fmt.Errorf("unable to parse bodySlice[0] to map[string]interface{}")
+					logger.ErrorContext(pluginCtx, "unable to parse bodySlice[0] to map[string]any")
+					return nil, fmt.Errorf("unable to parse bodySlice[0] to map[string]any")
 				}
 				if status, ok := body["status"].(string); ok {
 					if status == "failed" {

@@ -677,6 +677,20 @@ func Run(
 		}
 	}
 
+	// Determine CPU and MEM from the template and tag
+	ankaShowOutput, err := ankaCLI.AnkaShow(pluginCtx, ankaTemplate)
+	if err != nil {
+		logger.ErrorContext(pluginCtx, "error getting anka show output", "err", err)
+		retryChannel <- true
+		return pluginCtx, fmt.Errorf("error getting anka show output: %s", err.Error())
+	}
+
+	logger.DebugContext(pluginCtx, "anka show output", "output", ankaShowOutput)
+	queuedJob.RequiredResources.CPU = ankaShowOutput.CPU
+	queuedJob.RequiredResources.MEM = ankaShowOutput.MEMBytes / 1024 / 1024 / 1024
+
+	logger.DebugContext(pluginCtx, "queuedJob.RequiredResources", "requiredResources", queuedJob.RequiredResources)
+
 	if pluginCtx.Err() != nil {
 		// logger.WarnContext(pluginCtx, "context canceled during vm template check")
 		retryChannel <- true
