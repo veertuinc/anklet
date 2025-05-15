@@ -4,15 +4,10 @@ package host
 import "C"
 import (
 	"context"
-
-	"github.com/shirou/gopsutil/v4/cpu"
 )
 
 func GetHostCPUCount(pluginCtx context.Context) (int, error) {
-	cpuCount, err := cpu.Counts(true)
-	if err != nil {
-		return 0, err
-	}
+	cpuCount := int(C.sysconf(C._SC_NPROCESSORS_ONLN))
 	return cpuCount, nil
 }
 
