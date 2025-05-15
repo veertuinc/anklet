@@ -2,11 +2,13 @@ package github
 
 import (
 	"github.com/google/go-github/v66/github"
+	"github.com/veertuinc/anklet/internal/anka"
 )
 
 type QueueJob struct {
 	Type              string                `json:"type"`
 	WorkflowJob       SimplifiedWorkflowJob `json:"workflow_job"`
+	AnkaVM            anka.VM               `json:"anka_vm"`
 	RequiredResources RequiredResources     `json:"required_resources"`
 	Repository        Repository            `json:"repository"`
 	Action            string                `json:"action"`

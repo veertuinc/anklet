@@ -222,7 +222,7 @@ func CheckForCompletedJobs(
 		default:
 		}
 		// get the job ID
-		existingJobString, err := databaseContainer.Client.LIndex(pluginCtx, "anklet/jobs/github/queued/"+pluginConfig.Owner+"/"+pluginConfig.Name, 0).Result()
+		existingJob, err := databaseContainer.Client.LIndex(pluginCtx, "anklet/jobs/github/queued/"+pluginConfig.Owner+"/"+pluginConfig.Name, 0).Result()
 		if runOnce && err == redis.Nil { // handle no job for service; needed so the github plugin resets and looks for new jobs again
 			logger.ErrorContext(pluginCtx, "CheckForCompletedJobs"+pluginConfig.Name+" err == redis.Nil")
 			return
@@ -235,14 +235,14 @@ func CheckForCompletedJobs(
 					logger.ErrorContext(pluginCtx, "error getting count of objects in anklet/jobs/github/completed/"+pluginConfig.Owner+"/"+pluginConfig.Name, "err", err)
 					return
 				}
-				existingJobEvent, err, typeErr := database.Unwrap[internalGithub.QueueJob](existingJobString)
+				existingJob, err, typeErr := database.Unwrap[internalGithub.QueueJob](existingJob)
 				if err != nil || typeErr != nil {
 					logger.ErrorContext(pluginCtx, "error unmarshalling job", "err", err)
 					return
 				}
 				if count > 0 {
 					select {
-					case completedJobChannel <- existingJobEvent:
+					case completedJobChannel <- existingJob:
 					default:
 						// remove the completed job we found
 						_, err = databaseContainer.Client.Del(pluginCtx, "anklet/jobs/github/completed/"+pluginConfig.Owner+"/"+pluginConfig.Name).Result()
@@ -257,21 +257,21 @@ func CheckForCompletedJobs(
 						logger.ErrorContext(pluginCtx, "error getting list of completed jobs", "err", err)
 						return
 					}
-					if existingJobEvent.WorkflowJob.ID == nil {
-						logger.ErrorContext(pluginCtx, "existingJobEvent.WorkflowJob.ID is nil")
+					if existingJob.WorkflowJob.ID == nil {
+						logger.ErrorContext(pluginCtx, "existingJob.WorkflowJob.ID is nil")
 						return
 					}
 					for _, completedJob := range completedJobs {
-						completedJobWebhookEvent, err, typeErr := database.Unwrap[internalGithub.QueueJob](completedJob)
+						completedQueueJob, err, typeErr := database.Unwrap[internalGithub.QueueJob](completedJob)
 						if err != nil || typeErr != nil {
 							logger.ErrorContext(pluginCtx, "error unmarshalling job", "err", err)
 							return
 						}
-						if *completedJobWebhookEvent.WorkflowJob.ID == *existingJobEvent.WorkflowJob.ID {
+						if *completedQueueJob.WorkflowJob.ID == *existingJob.WorkflowJob.ID {
 							// remove the completed job we found
 							_, err = databaseContainer.Client.LRem(pluginCtx, "anklet/jobs/github/completed/"+pluginConfig.Owner, 1, completedJob).Result()
 							if err != nil {
-								logger.ErrorContext(pluginCtx, "error removing completedJob from anklet/jobs/github/completed/"+pluginConfig.Owner, "err", err, "completedJob", completedJobWebhookEvent)
+								logger.ErrorContext(pluginCtx, "error removing completedJob from anklet/jobs/github/completed/"+pluginConfig.Owner, "err", err, "completedJob", completedJob)
 								return
 							}
 							// delete the existing service task
@@ -286,7 +286,7 @@ func CheckForCompletedJobs(
 								logger.ErrorContext(pluginCtx, "error inserting completed job into list", "err", err)
 								return
 							}
-							completedJobChannel <- completedJobWebhookEvent
+							completedJobChannel <- completedQueueJob
 							return
 						}
 					}
@@ -373,58 +373,31 @@ func cleanup(
 				return
 			}
 		}
-		var typedJob map[string]any
-		if err := json.Unmarshal([]byte(jobJSON), &typedJob); err != nil {
+		var queuedJob internalGithub.QueueJob
+		err = json.Unmarshal([]byte(jobJSON), &queuedJob)
+		if err != nil {
 			logger.ErrorContext(pluginCtx, "error unmarshalling job", "err", err)
 			return
 		}
-
-		var payload map[string]any
-		payloadJSON, err := json.Marshal(typedJob)
-		if err != nil {
-			logger.ErrorContext(pluginCtx, "error marshalling payload", "err", err)
-			return
-		}
-		if err := json.Unmarshal(payloadJSON, &payload); err != nil {
-			logger.ErrorContext(pluginCtx, "error unmarshalling job", "err", err)
-			return
-		}
-		payloadBytes, err := json.Marshal(payload["payload"])
-		if err != nil {
-			logger.ErrorContext(pluginCtx, "error marshalling payload", "err", err)
-			return
-		}
-		switch typedJob["type"] {
+		switch queuedJob.Type {
 		case "anka.VM":
-			var vm anka.VM
-			err = json.Unmarshal(payloadBytes, &vm)
-			if err != nil {
-				logger.ErrorContext(pluginCtx, "error unmarshalling payload to webhook.WorkflowJobPayload", "err", err)
-				return
-			}
 			ankaCLI, err := anka.GetAnkaCLIFromContext(pluginCtx)
 			if err != nil {
 				logger.ErrorContext(pluginCtx, "error getting ankaCLI from context", "err", err)
 				return
 			}
 			if strings.ToUpper(os.Getenv("LOG_LEVEL")) == "DEBUG" || strings.ToUpper(os.Getenv("LOG_LEVEL")) == "DEV" {
-				err = ankaCLI.AnkaCopyOutOfVM(pluginCtx, "/Users/anka/actions-runner/_diag", "/tmp/"+vm.Name)
+				err = ankaCLI.AnkaCopyOutOfVM(pluginCtx, "/Users/anka/actions-runner/_diag", "/tmp/"+queuedJob.AnkaVM.Name)
 				if err != nil {
 					logger.ErrorContext(pluginCtx, "error copying actions runner out of vm", "err", err)
 				}
 			}
-			ankaCLI.AnkaDelete(workerCtx, pluginCtx, &vm)
+			ankaCLI.AnkaDelete(workerCtx, pluginCtx, &queuedJob.AnkaVM)
 			databaseContainer.Client.Del(cleanupContext, "anklet/jobs/github/queued/"+pluginConfig.Owner+"/"+pluginConfig.Name+"/cleaning")
 			continue // required to keep processing tasks in the db list
 		case "WorkflowJobPayload": // MUST COME LAST
-			var workflowJobEvent github.WorkflowJobEvent
-			err = json.Unmarshal(payloadBytes, &workflowJobEvent)
-			if err != nil {
-				logger.ErrorContext(pluginCtx, "error unmarshalling payload to webhook.WorkflowJobPayload", "err", err)
-				return
-			}
 			// delete the in_progress queue's index that matches the wrkflowJobID
-			err = internalGithub.DeleteFromQueue(pluginCtx, logger, *workflowJobEvent.WorkflowJob.ID, "anklet/jobs/github/in_progress/"+pluginConfig.Owner)
+			err = internalGithub.DeleteFromQueue(pluginCtx, logger, *queuedJob.WorkflowJob.ID, "anklet/jobs/github/in_progress/"+pluginConfig.Owner)
 			if err != nil {
 				logger.ErrorContext(pluginCtx, "error deleting from in_progress queue", "err", err)
 			}
@@ -456,7 +429,7 @@ func cleanup(
 				}
 			}
 		default:
-			logger.ErrorContext(pluginCtx, "unknown job type", "job", typedJob)
+			logger.ErrorContext(pluginCtx, "unknown job type", "job", queuedJob)
 			return
 		}
 		return // don't delete the queued/servicename
@@ -762,9 +735,9 @@ func Run(
 		var wrappedVmJSON []byte
 		var wrappedVmErr error
 		if vm != nil {
-			wrappedVM := map[string]any{
-				"type":    "anka.VM",
-				"payload": vm,
+			wrappedVM := internalGithub.QueueJob{
+				Type:   "anka.VM",
+				AnkaVM: *vm,
 			}
 			wrappedVmJSON, wrappedVmErr = json.Marshal(wrappedVM)
 			if wrappedVmErr != nil {
