@@ -732,6 +732,9 @@ func Run(
 
 		// Obtain Anka VM (and name)
 		newPluginCtx, vm, err := ankaCLI.ObtainAnkaVM(workerCtx, pluginCtx, workflowJob.AnkaTemplate)
+		if pluginCtx.Err() != nil {
+			return pluginCtx, fmt.Errorf("context canceled after ObtainAnkaVM")
+		}
 		var wrappedVmJSON []byte
 		var wrappedVmErr error
 		if vm != nil {

@@ -94,7 +94,7 @@ func (cli *Cli) Execute(pluginCtx context.Context, args ...string) ([]byte, int,
 	var combinedOutput bytes.Buffer
 
 	go func() {
-		cmd = exec.Command(args[0], args[1:]...)
+		cmd = exec.CommandContext(pluginCtx, args[0], args[1:]...)
 		cmd.Stdout = &combinedOutput
 		cmd.Stderr = &combinedOutput
 		err := cmd.Run()
@@ -106,10 +106,15 @@ func (cli *Cli) Execute(pluginCtx context.Context, args ...string) ([]byte, int,
 
 	for {
 		select {
+		case <-pluginCtx.Done():
+			// Context was cancelled, kill the command
+			if cmd != nil && cmd.Process != nil {
+				cmd.Process.Kill()
+			}
+			return nil, 0, pluginCtx.Err()
 		case <-ticker.C:
 			logger.InfoContext(pluginCtx, fmt.Sprintf("execution of command %v is still in progress...", args))
 		case err := <-done:
-			// logger.InfoContext(pluginCtx, fmt.Sprintf("execution of command %v completed", args))
 			exitCode := 0
 			if exitErr, ok := err.(*exec.ExitError); ok {
 				exitCode = exitErr.ExitCode()
