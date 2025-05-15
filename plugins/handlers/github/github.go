@@ -112,7 +112,7 @@ func sendCancelWorkflowRun(
 	workerCtx context.Context,
 	pluginCtx context.Context,
 	logger *slog.Logger,
-	workflow internalGithub.WorkflowRunJobDetail,
+	queuedJob internalGithub.QueueJob,
 	metricsData *metrics.MetricsDataLock,
 ) error {
 	githubClient, err := internalGithub.GetGitHubClientFromContext(pluginCtx)
@@ -126,7 +126,7 @@ func sendCancelWorkflowRun(
 	cancelSent := false
 	for {
 		newPluginCtx, workflowRun, _, err := internalGithub.ExecuteGitHubClientFunction(workerCtx, pluginCtx, logger, func() (*github.WorkflowRun, *github.Response, error) {
-			workflowRun, resp, err := githubClient.Actions.GetWorkflowRunByID(context.Background(), pluginConfig.Owner, workflow.Repo, workflow.RunID)
+			workflowRun, resp, err := githubClient.Actions.GetWorkflowRunByID(context.Background(), pluginConfig.Owner, *queuedJob.Repository.Name, *queuedJob.WorkflowJob.RunID)
 			return workflowRun, resp, err
 		})
 		if err != nil {
@@ -143,14 +143,14 @@ func sendCancelWorkflowRun(
 					Name: pluginConfig.Name,
 				},
 				LastCanceledRun:       time.Now(),
-				LastCanceledRunJobUrl: workflow.JobURL,
+				LastCanceledRunJobUrl: *queuedJob.WorkflowJob.HTMLURL,
 			})
 			break
 		} else {
-			logger.WarnContext(pluginCtx, "workflow run is still active... waiting for cancellation so we can clean up...", "workflow_run_id", workflow.RunID)
+			logger.WarnContext(pluginCtx, "workflow run is still active... waiting for cancellation so we can clean up...", "workflow_run_id", *queuedJob.WorkflowJob.RunID)
 			if !cancelSent { // this has to happen here so that it doesn't error with "409 Cannot cancel a workflow run that is completed. " if the job is already cancelled
 				newPluginCtx, cancelResponse, _, cancelErr := internalGithub.ExecuteGitHubClientFunction(workerCtx, pluginCtx, logger, func() (*github.Response, *github.Response, error) {
-					resp, err := githubClient.Actions.CancelWorkflowRunByID(context.Background(), pluginConfig.Owner, workflow.Repo, workflow.RunID)
+					resp, err := githubClient.Actions.CancelWorkflowRunByID(context.Background(), pluginConfig.Owner, *queuedJob.Repository.Name, *queuedJob.WorkflowJob.RunID)
 					return resp, nil, err
 				})
 				// don't use cancelResponse.Response.StatusCode or else it'll error with SIGSEV
@@ -160,7 +160,7 @@ func sendCancelWorkflowRun(
 				}
 				pluginCtx = newPluginCtx
 				cancelSent = true
-				logger.WarnContext(pluginCtx, "sent cancel workflow run", "workflow_run_id", workflow.RunID)
+				logger.WarnContext(pluginCtx, "sent cancel workflow run", "workflow_run_id", *queuedJob.WorkflowJob.RunID)
 			}
 			time.Sleep(10 * time.Second)
 		}
@@ -647,18 +647,6 @@ func Run(
 	}
 	pluginCtx = logging.AppendCtx(pluginCtx, slog.String("ankaTemplateTag", ankaTemplateTag))
 
-	workflowJob := internalGithub.WorkflowRunJobDetail{
-		JobID:           *queuedJob.WorkflowJob.ID,
-		JobName:         *queuedJob.WorkflowJob.Name,
-		JobURL:          *queuedJob.WorkflowJob.HTMLURL,
-		WorkflowName:    *queuedJob.WorkflowJob.WorkflowName,
-		AnkaTemplate:    ankaTemplate,
-		AnkaTemplateTag: ankaTemplateTag,
-		RunID:           *queuedJob.WorkflowJob.RunID,
-		Labels:          queuedJob.WorkflowJob.Labels,
-		Repo:            *queuedJob.Repository.Name,
-	}
-
 	// get anka CLI
 	ankaCLI, err := anka.GetAnkaCLIFromContext(pluginCtx)
 	if err != nil {
@@ -672,7 +660,7 @@ func Run(
 
 	// See if VM Template existing already
 	if !pluginConfig.SkipPull {
-		noTemplateTagExistsError, templateExistsError := ankaCLI.EnsureVMTemplateExists(workerCtx, pluginCtx, workflowJob.AnkaTemplate, workflowJob.AnkaTemplateTag)
+		noTemplateTagExistsError, templateExistsError := ankaCLI.EnsureVMTemplateExists(workerCtx, pluginCtx, ankaTemplate, ankaTemplateTag)
 		if templateExistsError != nil {
 			// DO NOT RETURN AN ERROR TO MAIN. It will cause the other job on this node to be cancelled.
 			logger.WarnContext(pluginCtx, "problem ensuring vm template exists on host", "err", templateExistsError)
@@ -681,7 +669,7 @@ func Run(
 		}
 		if noTemplateTagExistsError != nil {
 			logger.ErrorContext(pluginCtx, "error ensuring vm template exists on host", "err", noTemplateTagExistsError)
-			err := sendCancelWorkflowRun(workerCtx, pluginCtx, logger, workflowJob, metricsData)
+			err := sendCancelWorkflowRun(workerCtx, pluginCtx, logger, queuedJob, metricsData)
 			if err != nil {
 				logger.ErrorContext(pluginCtx, "error sending cancel workflow run", "err", err)
 			}
@@ -731,7 +719,7 @@ func Run(
 		}
 
 		// Obtain Anka VM (and name)
-		newPluginCtx, vm, err := ankaCLI.ObtainAnkaVM(workerCtx, pluginCtx, workflowJob.AnkaTemplate)
+		newPluginCtx, vm, err := ankaCLI.ObtainAnkaVM(workerCtx, pluginCtx, ankaTemplate)
 		if pluginCtx.Err() != nil {
 			return pluginCtx, fmt.Errorf("context canceled after ObtainAnkaVM")
 		}
@@ -786,7 +774,7 @@ func Run(
 		_, startRunnerErr := os.Stat(startRunnerPath)
 		if installRunnerErr != nil || registerRunnerErr != nil || startRunnerErr != nil {
 			// logger.ErrorContext(pluginCtx, "must include install-runner.bash, register-runner.bash, and start-runner.bash in "+globals.PluginsPath+"/handlers/github/", "err", err)
-			err := sendCancelWorkflowRun(workerCtx, pluginCtx, logger, workflowJob, metricsData)
+			err := sendCancelWorkflowRun(workerCtx, pluginCtx, logger, queuedJob, metricsData)
 			if err != nil {
 				logger.ErrorContext(pluginCtx, "error sending cancel workflow run", "err", err)
 			}
@@ -842,7 +830,7 @@ func Run(
 			vm.Name,
 			*runnerRegistration.Token,
 			repositoryURL,
-			strings.Join(workflowJob.Labels, ","),
+			strings.Join(queuedJob.WorkflowJob.Labels, ","),
 			pluginConfig.RunnerGroup,
 		)
 		if registerRunnerErr != nil {
@@ -850,7 +838,7 @@ func Run(
 			retryChannel <- true
 			return pluginCtx, fmt.Errorf("error executing register-runner.bash: %s", registerRunnerErr.Error())
 		}
-		defer removeSelfHostedRunner(workerCtx, pluginCtx, *vm, &workflowJob, metricsData)
+		defer removeSelfHostedRunner(workerCtx, pluginCtx, *vm, &queuedJob, metricsData)
 		// Start runner
 		select {
 		case <-completedJobChannel:
@@ -923,7 +911,7 @@ func Run(
 						LastFailedRun:       time.Now(),
 						LastFailedRunJobUrl: *completedJobEvent.WorkflowJob.HTMLURL,
 					})
-					workflowJob.Conclusion = "failure" // support removeSelfHostedRunner
+					queuedJob.WorkflowJob.Conclusion = github.String("failure") // support removeSelfHostedRunner
 				}
 			} else if logCounter%2 == 0 {
 				if pluginCtx.Err() != nil {
@@ -938,17 +926,17 @@ func Run(
 			return pluginCtx, nil
 		default:
 			time.Sleep(time.Duration(jobStatusCheckIntervalSeconds) * time.Second)
-			inProgressQueue, err := internalGithub.InQueue(pluginCtx, logger, workflowJob.JobID, "anklet/jobs/github/in_progress/"+pluginConfig.Owner)
+			inProgressQueue, err := internalGithub.InQueue(pluginCtx, logger, *queuedJob.WorkflowJob.ID, "anklet/jobs/github/in_progress/"+pluginConfig.Owner)
 			if err != nil {
 				logger.ErrorContext(pluginCtx, "error searching in queue", "error", err)
 			}
 			if inProgressQueue {
 				if logCounter%2 == 0 {
-					logger.InfoContext(pluginCtx, "job found registered runner and is now in progress", "job_id", workflowJob.JobID)
+					logger.InfoContext(pluginCtx, "job found registered runner and is now in progress", "job_id", *queuedJob.WorkflowJob.ID)
 				}
 			} else {
 				if !alreadyLogged {
-					logger.InfoContext(pluginCtx, "job is waiting for registered runner", "job_id", workflowJob.JobID)
+					logger.InfoContext(pluginCtx, "job is waiting for registered runner", "job_id", *queuedJob.WorkflowJob.ID)
 					alreadyLogged = true
 				}
 			}
@@ -963,7 +951,7 @@ func Run(
 				// if not, then the runner registration failed
 				if !inProgressQueue {
 					logger.ErrorContext(pluginCtx, "waiting for runner registration timed out, will retry")
-					workflowJob.Conclusion = "failure" // support removeSelfHostedRunner
+					queuedJob.WorkflowJob.Conclusion = github.String("failure") // support removeSelfHostedRunner
 					retryChannel <- true
 					return pluginCtx, nil
 				}
@@ -1016,7 +1004,7 @@ func removeSelfHostedRunner(
 	workerCtx context.Context,
 	pluginCtx context.Context,
 	vm anka.VM,
-	workflow *internalGithub.WorkflowRunJobDetail,
+	queuedJob *internalGithub.QueueJob,
 	metricsData *metrics.MetricsDataLock,
 ) {
 	var err error
@@ -1038,7 +1026,7 @@ func removeSelfHostedRunner(
 	if err != nil {
 		logger.ErrorContext(pluginCtx, "error getting isRepoSet from context", "err", err)
 	}
-	if workflow.Conclusion == "failure" {
+	if queuedJob.WorkflowJob.Conclusion != nil && *queuedJob.WorkflowJob.Conclusion == "failure" {
 		if isRepoSet {
 			pluginCtx, runnersList, response, err = internalGithub.ExecuteGitHubClientFunction(workerCtx, pluginCtx, logger, func() (*github.Runners, *github.Response, error) {
 				runnersList, resp, err := githubClient.Actions.ListRunners(context.Background(), pluginConfig.Owner, pluginConfig.Repo, &github.ListRunnersOptions{})
@@ -1068,7 +1056,7 @@ func removeSelfHostedRunner(
 						"ankaTemplateTag": "(using latest)",
 						"err": "DELETE https://api.github.com/repos/veertuinc/anklet/actions/runners/142: 422 Bad request - Runner \"anklet-vm-\u003cuuid\u003e\" is still running a job\" []",
 					*/
-					err := sendCancelWorkflowRun(workerCtx, pluginCtx, logger, *workflow, metricsData)
+					err := sendCancelWorkflowRun(workerCtx, pluginCtx, logger, *queuedJob, metricsData)
 					if err != nil {
 						logger.ErrorContext(pluginCtx, "error sending cancel workflow run", "err", err)
 						return
