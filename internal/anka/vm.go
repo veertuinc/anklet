@@ -8,7 +8,9 @@ import (
 )
 
 type VM struct {
-	Name string
+	Name string `json:"name"`
+	CPU  int    `json:"cpu_cores"`
+	MEM  uint64 `json:"ram_size"`
 }
 
 func GetAnkaVmFromContext(ctx context.Context) (*VM, error) {

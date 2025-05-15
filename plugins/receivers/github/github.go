@@ -167,8 +167,8 @@ func Run(
 					Name: workflowJob.Repo.Name,
 				},
 				RequiredResources: internalGithub.RequiredResources{
-					CPU: 0,
-					MEM: 0,
+					CPU:      0,
+					MEMBytes: 0,
 				},
 			}
 			logger.InfoContext(pluginCtx, "received workflow job to consider",

@@ -17,6 +17,7 @@ import (
 	"github.com/veertuinc/anklet/internal/config"
 	"github.com/veertuinc/anklet/internal/database"
 	internalGithub "github.com/veertuinc/anklet/internal/github"
+	"github.com/veertuinc/anklet/internal/host"
 	"github.com/veertuinc/anklet/internal/logging"
 	"github.com/veertuinc/anklet/internal/metrics"
 )
@@ -677,6 +678,12 @@ func Run(
 		}
 	}
 
+	if pluginCtx.Err() != nil {
+		// logger.WarnContext(pluginCtx, "context canceled during vm template check")
+		retryChannel <- true
+		return pluginCtx, fmt.Errorf("context canceled during vm template check")
+	}
+
 	// Determine CPU and MEM from the template and tag
 	ankaShowOutput, err := ankaCLI.AnkaShow(pluginCtx, ankaTemplate)
 	if err != nil {
@@ -687,14 +694,67 @@ func Run(
 
 	logger.DebugContext(pluginCtx, "anka show output", "output", ankaShowOutput)
 	queuedJob.RequiredResources.CPU = ankaShowOutput.CPU
-	queuedJob.RequiredResources.MEM = ankaShowOutput.MEMBytes / 1024 / 1024 / 1024
-
+	queuedJob.RequiredResources.MEMBytes = ankaShowOutput.MEMBytes
 	logger.DebugContext(pluginCtx, "queuedJob.RequiredResources", "requiredResources", queuedJob.RequiredResources)
 
-	if pluginCtx.Err() != nil {
-		// logger.WarnContext(pluginCtx, "context canceled during vm template check")
+	// Determine host level resources
+	hostCPUCount, err := host.GetHostCPUCount(pluginCtx)
+	if err != nil {
+		logger.ErrorContext(pluginCtx, "error getting host cpu count", "err", err)
 		retryChannel <- true
-		return pluginCtx, fmt.Errorf("context canceled during vm template check")
+		return pluginCtx, fmt.Errorf("error getting host cpu count: %s", err.Error())
+	}
+	logger.DebugContext(pluginCtx, "hostCPUCount", "hostCPUCount", hostCPUCount)
+
+	hostMemoryBytes, err := host.GetHostMemoryBytes(pluginCtx)
+	if err != nil {
+		logger.ErrorContext(pluginCtx, "error getting host memory bytes", "err", err)
+		retryChannel <- true
+		return pluginCtx, fmt.Errorf("error getting host memory bytes: %s", err.Error())
+	}
+	logger.DebugContext(pluginCtx, "hostMemoryBytes", "hostMemoryBytes", hostMemoryBytes)
+
+	// Get resource usage of other active VMs on the host
+	ankaListOutput, err := ankaCLI.AnkaList(pluginCtx, "--running")
+	if err != nil {
+		logger.ErrorContext(pluginCtx, "error getting anka list output", "err", err)
+		retryChannel <- true
+		return pluginCtx, fmt.Errorf("error getting anka list output: %s", err.Error())
+	}
+	logger.DebugContext(pluginCtx, "ankaListOutput", "ankaListOutput", ankaListOutput)
+	ankaVMs := []anka.VM{}
+	for _, vm := range ankaListOutput.Body.([]any) {
+		vmMap := vm.(map[string]any)
+		vmName := vmMap["name"].(string)
+		ankaShowOutput, err := ankaCLI.AnkaShow(pluginCtx, vmName)
+		if err != nil {
+			logger.ErrorContext(pluginCtx, "error getting anka show output", "err", err)
+			retryChannel <- true
+			return pluginCtx, fmt.Errorf("error getting anka show output: %s", err.Error())
+		}
+		ankaVMs = append(ankaVMs, anka.VM{
+			CPU: ankaShowOutput.CPU,
+			MEM: ankaShowOutput.MEMBytes,
+		})
+	}
+	// See if host has enough resources to run VM
+	totalVMCPUUsed := 0
+	totalVMMEMBytesUsed := uint64(0)
+	for _, vm := range ankaVMs {
+		totalVMCPUUsed += vm.CPU
+		totalVMMEMBytesUsed += vm.MEM
+	}
+	logger.DebugContext(pluginCtx, "totalVMCPUUsed", "totalVMCPUUsed", totalVMCPUUsed)
+	logger.DebugContext(pluginCtx, "totalVMMEMBytesUsed", "totalVMMEMBytesUsed", totalVMMEMBytesUsed)
+	if (queuedJob.RequiredResources.CPU + totalVMCPUUsed) > hostCPUCount {
+		logger.ErrorContext(pluginCtx, "host does not have enough CPU cores to run VM", "requiredResources", queuedJob.RequiredResources, "totalVMCPUUsed", totalVMCPUUsed, "hostCPUCount", hostCPUCount)
+		retryChannel <- true
+		return pluginCtx, fmt.Errorf("host does not have enough CPU cores to run VM")
+	}
+	if (queuedJob.RequiredResources.MEMBytes + totalVMMEMBytesUsed) > hostMemoryBytes {
+		logger.ErrorContext(pluginCtx, "host does not have enough memory to run VM", "requiredResources", queuedJob.RequiredResources, "totalVMMEMBytesUsed", totalVMMEMBytesUsed, "hostMemoryBytes", hostMemoryBytes)
+		retryChannel <- true
+		return pluginCtx, fmt.Errorf("host does not have enough memory to run VM")
 	}
 
 	if !skipPrep {

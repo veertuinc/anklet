@@ -36,8 +36,8 @@ type Cli struct {
 }
 
 type AnkaShowOutput struct {
-	CPU      float64 `json:"cpu_cores"`
-	MEMBytes float64 `json:"ram_size"`
+	CPU      int    `json:"cpu_cores"`
+	MEMBytes uint64 `json:"ram_size"`
 }
 
 func GetAnkaCLIFromContext(pluginCtx context.Context) (*Cli, error) {
@@ -197,8 +197,8 @@ func (cli *Cli) AnkaShow(pluginCtx context.Context, template string) (*AnkaShowO
 	}
 	logger.DebugContext(pluginCtx, "command executed successfully", "stdout", ankaJson.Body)
 	return &AnkaShowOutput{
-		CPU:      ankaJson.Body.(map[string]any)["cpu_cores"].(float64),
-		MEMBytes: ankaJson.Body.(map[string]any)["ram_size"].(float64),
+		CPU:      int(ankaJson.Body.(map[string]any)["cpu_cores"].(float64)),
+		MEMBytes: uint64(ankaJson.Body.(map[string]any)["ram_size"].(float64)),
 	}, nil
 }
 
@@ -352,6 +352,15 @@ func (cli *Cli) AnkaStart(pluginCtx context.Context) error {
 	return nil
 }
 
+func (cli *Cli) AnkaList(pluginCtx context.Context, args ...string) (*AnkaJson, error) {
+	args = append([]string{"anka", "-j", "list"}, args...)
+	output, err := cli.ExecuteParseJson(pluginCtx, args...)
+	if err != nil {
+		return nil, err
+	}
+	return output, nil
+}
+
 func (cli *Cli) AnkaCopyOutOfVM(ctx context.Context, objectToCopyOut string, hostLevelDestination string) error {
 	if ctx.Err() != nil {
 		return fmt.Errorf("context canceled before AnkaCopyOutOfVM")
@@ -460,9 +469,9 @@ func (cli *Cli) EnsureVMTemplateExists(workerCtx context.Context, pluginCtx cont
 		return nil, err
 	}
 	pullTemplate := false
-	list, err := ankaCLI.ExecuteParseJson(pluginCtx, "anka", "-j", "list", targetTemplate)
+	list, err := ankaCLI.AnkaList(pluginCtx, targetTemplate)
 	if err != nil {
-		list, innerErr := ankaCLI.ExecuteParseJson(pluginCtx, "anka", "-j", "list")
+		list, innerErr := ankaCLI.AnkaList(pluginCtx)
 		if innerErr != nil {
 			logger.ErrorContext(pluginCtx, "error executing anka list", "err", innerErr)
 			return nil, innerErr
