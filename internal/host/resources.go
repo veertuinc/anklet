@@ -1,19 +1,14 @@
 package host
 
+// #include <unistd.h>
+import "C"
 import (
 	"context"
 
 	"github.com/shirou/gopsutil/v4/cpu"
-	"github.com/shirou/gopsutil/v4/mem"
-	"github.com/veertuinc/anklet/internal/logging"
 )
 
 func GetHostCPUCount(pluginCtx context.Context) (int, error) {
-	logger, err := logging.GetLoggerFromContext(pluginCtx)
-	if err != nil {
-		return 0, err
-	}
-	logger.DebugContext(pluginCtx, "getting host cpu count")
 	cpuCount, err := cpu.Counts(true)
 	if err != nil {
 		return 0, err
@@ -22,15 +17,5 @@ func GetHostCPUCount(pluginCtx context.Context) (int, error) {
 }
 
 func GetHostMemoryBytes(pluginCtx context.Context) (uint64, error) {
-	logger, err := logging.GetLoggerFromContext(pluginCtx)
-	if err != nil {
-		return 0, err
-	}
-	logger.DebugContext(pluginCtx, "getting host memory bytes")
-	memory, err := mem.VirtualMemory()
-	if err != nil {
-		return 0, err
-	}
-	memoryBytes := memory.Free
-	return memoryBytes, nil
+	return uint64(C.sysconf(C._SC_PHYS_PAGES) * C.sysconf(C._SC_PAGE_SIZE)), nil
 }

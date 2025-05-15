@@ -722,7 +722,8 @@ func Run(
 		return pluginCtx, fmt.Errorf("error getting anka list output: %s", err.Error())
 	}
 	logger.DebugContext(pluginCtx, "ankaListOutput", "ankaListOutput", ankaListOutput)
-	ankaVMs := []anka.VM{}
+	totalVMCPUUsed := 0
+	totalVMMEMBytesUsed := uint64(0)
 	for _, vm := range ankaListOutput.Body.([]any) {
 		vmMap := vm.(map[string]any)
 		vmName := vmMap["name"].(string)
@@ -732,18 +733,10 @@ func Run(
 			retryChannel <- true
 			return pluginCtx, fmt.Errorf("error getting anka show output: %s", err.Error())
 		}
-		ankaVMs = append(ankaVMs, anka.VM{
-			CPU: ankaShowOutput.CPU,
-			MEM: ankaShowOutput.MEMBytes,
-		})
+		totalVMCPUUsed += ankaShowOutput.CPU
+		totalVMMEMBytesUsed += ankaShowOutput.MEMBytes
 	}
 	// See if host has enough resources to run VM
-	totalVMCPUUsed := 0
-	totalVMMEMBytesUsed := uint64(0)
-	for _, vm := range ankaVMs {
-		totalVMCPUUsed += vm.CPU
-		totalVMMEMBytesUsed += vm.MEM
-	}
 	logger.DebugContext(pluginCtx, "totalVMCPUUsed", "totalVMCPUUsed", totalVMCPUUsed)
 	logger.DebugContext(pluginCtx, "totalVMMEMBytesUsed", "totalVMMEMBytesUsed", totalVMMEMBytesUsed)
 	if (queuedJob.RequiredResources.CPU + totalVMCPUUsed) > hostCPUCount {
@@ -794,9 +787,6 @@ func Run(
 
 		// Obtain Anka VM (and name)
 		newPluginCtx, vm, err := ankaCLI.ObtainAnkaVM(workerCtx, pluginCtx, ankaTemplate)
-		if pluginCtx.Err() != nil {
-			return pluginCtx, fmt.Errorf("context canceled after ObtainAnkaVM")
-		}
 		var wrappedVmJSON []byte
 		var wrappedVmErr error
 		if vm != nil {
@@ -814,6 +804,10 @@ func Run(
 			newPluginCtx = logging.AppendCtx(newPluginCtx, slog.String("vmName", vm.Name))
 		}
 		pluginCtx = newPluginCtx
+		if pluginCtx.Err() != nil {
+			ankaCLI.AnkaDelete(workerCtx, pluginCtx, vm)
+			return pluginCtx, fmt.Errorf("context canceled after ObtainAnkaVM")
+		}
 
 		dbErr := databaseContainer.Client.RPush(pluginCtx, "anklet/jobs/github/queued/"+pluginConfig.Owner+"/"+pluginConfig.Name, wrappedVmJSON).Err()
 		if dbErr != nil {

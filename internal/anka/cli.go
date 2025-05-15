@@ -86,6 +86,7 @@ func NewCLI(pluginCtx context.Context) (*Cli, error) {
 	return cli, nil
 }
 
+// DO NOT RUN exec.Command with context or else the cancellation will interrupt things like VM deletion, which we don't want!
 func (cli *Cli) Execute(pluginCtx context.Context, args ...string) ([]byte, int, error) {
 	logger, err := logging.GetLoggerFromContext(pluginCtx)
 	if err != nil {
@@ -99,7 +100,7 @@ func (cli *Cli) Execute(pluginCtx context.Context, args ...string) ([]byte, int,
 	var combinedOutput bytes.Buffer
 
 	go func() {
-		cmd = exec.CommandContext(pluginCtx, args[0], args[1:]...)
+		cmd = exec.Command(args[0], args[1:]...)
 		cmd.Stdout = &combinedOutput
 		cmd.Stderr = &combinedOutput
 		err := cmd.Run()
@@ -111,12 +112,6 @@ func (cli *Cli) Execute(pluginCtx context.Context, args ...string) ([]byte, int,
 
 	for {
 		select {
-		case <-pluginCtx.Done():
-			// Context was cancelled, kill the command
-			if cmd != nil && cmd.Process != nil {
-				cmd.Process.Kill()
-			}
-			return nil, 0, pluginCtx.Err()
 		case <-ticker.C:
 			logger.InfoContext(pluginCtx, fmt.Sprintf("execution of command %v is still in progress...", args))
 		case err := <-done:
@@ -294,6 +289,7 @@ func (cli *Cli) ObtainAnkaVM(workerCtx context.Context, pluginCtx context.Contex
 	// Start
 	err = cli.AnkaStart(pluginCtx)
 	if err != nil {
+		logger.DebugContext(pluginCtx, "vm", "vm", vm)
 		logger.ErrorContext(pluginCtx, "error executing anka start", "err", err)
 		return pluginCtx, vm, err
 	}
