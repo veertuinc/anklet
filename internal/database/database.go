@@ -127,14 +127,14 @@ func AddUniqueRunKey(ctx context.Context) (bool, error) {
 	return true, errors.New("unique run key already exists")
 }
 
-func UnwrapPayload[T any](payload string) (T, error, error) {
+func Unwrap[T any](payload string) (T, error, error) {
 	var wrappedPayload map[string]any
 	var t T
 	err := json.Unmarshal([]byte(payload), &wrappedPayload)
 	if err != nil {
 		return t, err, nil
 	}
-	payloadBytes, err := json.Marshal(wrappedPayload["payload"])
+	payloadBytes, err := json.Marshal(wrappedPayload)
 	if err != nil {
 		return t, err, nil
 	}

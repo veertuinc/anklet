@@ -4,14 +4,21 @@ import (
 	"github.com/google/go-github/v66/github"
 )
 
-type SimplifiedWorkflowJobEvent struct {
-	WorkflowJob SimplifiedWorkflowJob `json:"workflow_job"`
-	Action      string                `json:"action"`
-	Repository  SimplifiedRepository  `json:"repository"`
+type QueueJob struct {
+	Type              string                `json:"type"`
+	WorkflowJob       SimplifiedWorkflowJob `json:"workflow_job"`
+	RequiredResources RequiredResources     `json:"required_resources"`
+	Repository        Repository            `json:"repository"`
+	Action            string                `json:"action"`
 }
 
-type SimplifiedRepository struct {
+type Repository struct {
 	Name *string `json:"name"`
+}
+
+type RequiredResources struct {
+	CPU int64 `json:"CPU"`
+	MEM int64 `json:"MEM"`
 }
 
 type SimplifiedWorkflowJob struct {

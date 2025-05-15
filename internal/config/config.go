@@ -59,7 +59,7 @@ type Workflow struct {
 
 type RequiredResources struct {
 	CPU int `yaml:"cpu"`
-	RAM int `yaml:"ram"`
+	MEM int `yaml:"mem"`
 }
 
 type Plugin struct {
