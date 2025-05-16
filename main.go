@@ -188,6 +188,7 @@ func main() {
 		PluginsPath:  pluginsPath,
 		DebugEnabled: logging.IsDebugEnabled(),
 		IsBlocked:    atomic.Bool{},
+		PrepLock:     &sync.Mutex{},
 	})
 
 	httpTransport := http.DefaultTransport

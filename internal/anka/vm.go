@@ -82,6 +82,16 @@ func VmHasEnoughResources(pluginCtx context.Context, templateName string) (bool,
 	// See if host has enough resources to run VM
 	logger.DebugContext(pluginCtx, "totalVMCPUUsed", "totalVMCPUUsed", totalVMCPUUsed)
 	logger.DebugContext(pluginCtx, "totalVMMEMBytesUsed", "totalVMMEMBytesUsed", totalVMMEMBytesUsed)
+	// be sure to check if the template is just needing more than the host and can never run
+	if vm.CPU > hostCPUCount {
+		logger.WarnContext(pluginCtx, "host does not have enough CPU cores to run VM", "vm.CPU", vm.CPU, "hostCPUCount", hostCPUCount)
+		return false, vm, fmt.Errorf("host does not have enough CPU cores to run VM")
+	}
+	if vm.MEMBytes > hostMemoryBytes {
+		logger.WarnContext(pluginCtx, "host does not have enough memory to run VM", "vm.MEMBytes", vm.MEMBytes, "hostMemoryBytes", hostMemoryBytes)
+		return false, vm, fmt.Errorf("host does not have enough memory to run VM")
+	}
+	// check if the host has enough resources to run the VM given other VMs already running
 	if (vm.CPU + totalVMCPUUsed) > hostCPUCount {
 		logger.WarnContext(pluginCtx, "host does not have enough CPU cores to run VM", "vm.CPU", vm.CPU, "totalVMCPUUsed", totalVMCPUUsed, "hostCPUCount", hostCPUCount)
 		return false, vm, nil

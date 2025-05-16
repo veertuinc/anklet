@@ -321,6 +321,7 @@ func cleanup(
 	cleanupMu *sync.Mutex,
 	responsibleForBlocking *bool,
 	globals *config.Globals,
+	responsibleForPrepLock *bool,
 ) {
 	cleanupMu.Lock()
 	// create an idependent copy of the pluginCtx so we can do cleanup even if pluginCtx got "context canceled"
@@ -328,6 +329,10 @@ func cleanup(
 	// If we were responsible for blocking, we need to unblock now so other plugins can start working again
 	if responsibleForBlocking != nil && *responsibleForBlocking {
 		globals.Unblock()
+	}
+	// make sure the prep lock is unlocked, always
+	if responsibleForPrepLock != nil && *responsibleForPrepLock {
+		globals.PrepLock.Unlock()
 	}
 	pluginConfig, err := config.GetPluginFromContext(pluginCtx)
 	if err != nil {
@@ -541,6 +546,7 @@ func Run(
 	completedJobChannel := make(chan internalGithub.QueueJob, 1)
 
 	responsibleForBlocking := false
+	responsibleForPrepLock := false
 
 	// wait group so we can wait for the goroutine to finish before exiting the service
 	var wg sync.WaitGroup
@@ -554,7 +560,7 @@ func Run(
 
 	defer func() {
 		wg.Wait()
-		cleanup(workerCtx, pluginCtx, logger, completedJobChannel, cleanupMu, &responsibleForBlocking, globals)
+		cleanup(workerCtx, pluginCtx, logger, completedJobChannel, cleanupMu, &responsibleForBlocking, globals, &responsibleForPrepLock)
 		close(completedJobChannel)
 	}()
 
@@ -575,7 +581,7 @@ func Run(
 	}()
 	<-ranOnce // wait for the goroutine to run at least once
 	// finalize cleanup if the service crashed mid-cleanup
-	cleanup(workerCtx, pluginCtx, logger, completedJobChannel, cleanupMu, &responsibleForBlocking, globals)
+	cleanup(workerCtx, pluginCtx, logger, completedJobChannel, cleanupMu, &responsibleForBlocking, globals, &responsibleForPrepLock)
 	select {
 	case <-completedJobChannel:
 		logger.InfoContext(pluginCtx, "completed job found at start")
@@ -585,6 +591,24 @@ func Run(
 		logger.WarnContext(pluginCtx, "context canceled before completed job found")
 		return pluginCtx, nil
 	default:
+	}
+
+	// check if another plugin is already running preparation phase and if it is, wait for it to finish
+	prepLock := globals.PrepLock.TryLock()
+	if prepLock {
+		responsibleForPrepLock = true
+	}
+	for !prepLock {
+		prepLock = globals.PrepLock.TryLock()
+		if prepLock {
+			responsibleForPrepLock = true
+			break
+		}
+		logger.WarnContext(pluginCtx, "cannot run vm yet, another plugin is already preparing a vm, retrying...")
+		time.Sleep(2 * time.Second)
+		if pluginCtx.Err() != nil {
+			return pluginCtx, fmt.Errorf("context canceled while waiting for prep lock")
+		}
 	}
 
 	logger.InfoContext(pluginCtx, "checking for jobs....")
@@ -716,7 +740,6 @@ func Run(
 	queuedJob.RequiredResources.CPU = vmInfo.CPU
 	queuedJob.RequiredResources.MEMBytes = vmInfo.MEMBytes
 	logger.DebugContext(pluginCtx, "queuedJob.RequiredResources", "requiredResources", queuedJob.RequiredResources)
-
 	if !vmHasEnoughResources {
 		responsibleForBlocking = true
 		globals.Block()
@@ -799,6 +822,10 @@ func Run(
 		// If we were responsible for blocking, we need to unblock now so other plugins can start working again
 		if responsibleForBlocking {
 			globals.Unblock()
+		}
+		if responsibleForPrepLock {
+			globals.PrepLock.Unlock()
+			responsibleForPrepLock = false // prevent fatal error: sync: unlock of unlocked mutex
 		}
 
 		dbErr := databaseContainer.Client.RPush(pluginCtx, "anklet/jobs/github/queued/"+pluginConfig.Owner+"/"+pluginConfig.Name, wrappedVmJSON).Err()

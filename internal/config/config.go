@@ -211,6 +211,7 @@ func GetPluginFromContext(ctx context.Context) (Plugin, error) {
 type Globals struct {
 	RunOnce      string
 	PullLock     *sync.Mutex
+	PrepLock     *sync.Mutex
 	PluginsPath  string
 	DebugEnabled bool
 	IsBlocked    atomic.Bool
