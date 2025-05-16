@@ -21,7 +21,7 @@ import (
 type AnkaJson struct {
 	Status  string
 	Code    int
-	Body    interface{}
+	Body    any
 	Message string
 }
 
@@ -33,6 +33,11 @@ type Cli struct {
 	}
 	Version           string
 	RegistryPullMutex sync.Mutex
+}
+
+type AnkaShowOutput struct {
+	CPU      int    `json:"cpu_cores"`
+	MEMBytes uint64 `json:"ram_size"`
 }
 
 func GetAnkaCLIFromContext(pluginCtx context.Context) (*Cli, error) {
@@ -81,6 +86,7 @@ func NewCLI(pluginCtx context.Context) (*Cli, error) {
 	return cli, nil
 }
 
+// DO NOT RUN exec.Command with context or else the cancellation will interrupt things like VM deletion, which we don't want!
 func (cli *Cli) Execute(pluginCtx context.Context, args ...string) ([]byte, int, error) {
 	logger, err := logging.GetLoggerFromContext(pluginCtx)
 	if err != nil {
@@ -109,7 +115,6 @@ func (cli *Cli) Execute(pluginCtx context.Context, args ...string) ([]byte, int,
 		case <-ticker.C:
 			logger.InfoContext(pluginCtx, fmt.Sprintf("execution of command %v is still in progress...", args))
 		case err := <-done:
-			// logger.InfoContext(pluginCtx, fmt.Sprintf("execution of command %v completed", args))
 			exitCode := 0
 			if exitErr, ok := err.(*exec.ExitError); ok {
 				exitCode = exitErr.ExitCode()
@@ -174,6 +179,22 @@ func (cli *Cli) AnkaRun(pluginCtx context.Context, args ...string) error {
 	}
 	logger.DebugContext(pluginCtx, "command executed successfully", "stdout", string(runOutput))
 	return nil
+}
+
+func (cli *Cli) AnkaShow(pluginCtx context.Context, template string) (*AnkaShowOutput, error) {
+	ankaJson, err := cli.ExecuteParseJson(pluginCtx, "anka", "-j", "show", template)
+	if err != nil {
+		return nil, err
+	}
+	logger, err := logging.GetLoggerFromContext(pluginCtx)
+	if err != nil {
+		return nil, err
+	}
+	logger.DebugContext(pluginCtx, "command executed successfully", "stdout", ankaJson.Body)
+	return &AnkaShowOutput{
+		CPU:      int(ankaJson.Body.(map[string]any)["cpu_cores"].(float64)),
+		MEMBytes: uint64(ankaJson.Body.(map[string]any)["ram_size"].(float64)),
+	}, nil
 }
 
 func (cli *Cli) AnkaRegistryPull(workerCtx context.Context, pluginCtx context.Context, template string, tag string) (*AnkaJson, error) {
@@ -268,6 +289,7 @@ func (cli *Cli) ObtainAnkaVM(workerCtx context.Context, pluginCtx context.Contex
 	// Start
 	err = cli.AnkaStart(pluginCtx)
 	if err != nil {
+		logger.DebugContext(pluginCtx, "vm", "vm", vm)
 		logger.ErrorContext(pluginCtx, "error executing anka start", "err", err)
 		return pluginCtx, vm, err
 	}
@@ -326,6 +348,15 @@ func (cli *Cli) AnkaStart(pluginCtx context.Context) error {
 	return nil
 }
 
+func (cli *Cli) AnkaList(pluginCtx context.Context, args ...string) (*AnkaJson, error) {
+	args = append([]string{"anka", "-j", "list"}, args...)
+	output, err := cli.ExecuteParseJson(pluginCtx, args...)
+	if err != nil {
+		return nil, err
+	}
+	return output, nil
+}
+
 func (cli *Cli) AnkaCopyOutOfVM(ctx context.Context, objectToCopyOut string, hostLevelDestination string) error {
 	if ctx.Err() != nil {
 		return fmt.Errorf("context canceled before AnkaCopyOutOfVM")
@@ -370,6 +401,9 @@ func (cli *Cli) AnkaCopyIntoVM(ctx context.Context, filesToCopyIn ...string) err
 			return fmt.Errorf("error evaluating symlink for %s: %w", hostLevelFile, err)
 		}
 		hostLevelFile = realPath
+		if ctx.Err() != nil {
+			return fmt.Errorf("context canceled before AnkaCopyIntoVM executing anka cp")
+		}
 		copyOutput, err := cli.ExecuteParseJson(ctx, "anka", "-j", "cp", "-a", hostLevelFile, fmt.Sprintf("%s:", vm.Name))
 		if err != nil {
 			return err
@@ -431,9 +465,9 @@ func (cli *Cli) EnsureVMTemplateExists(workerCtx context.Context, pluginCtx cont
 		return nil, err
 	}
 	pullTemplate := false
-	list, err := ankaCLI.ExecuteParseJson(pluginCtx, "anka", "-j", "list", targetTemplate)
+	list, err := ankaCLI.AnkaList(pluginCtx, targetTemplate)
 	if err != nil {
-		list, innerErr := ankaCLI.ExecuteParseJson(pluginCtx, "anka", "-j", "list")
+		list, innerErr := ankaCLI.AnkaList(pluginCtx)
 		if innerErr != nil {
 			logger.ErrorContext(pluginCtx, "error executing anka list", "err", innerErr)
 			return nil, innerErr
@@ -452,12 +486,12 @@ func (cli *Cli) EnsureVMTemplateExists(workerCtx context.Context, pluginCtx cont
 		}
 		if list.Status == "OK" {
 			// ensure tag is proper; skip if tag is hard coded and we already have it locally
-			if bodySlice, ok := list.Body.([]interface{}); ok {
-				body, ok := bodySlice[0].(map[string]interface{})
+			if bodySlice, ok := list.Body.([]any); ok {
+				body, ok := bodySlice[0].(map[string]any)
 				if !ok {
 					logger.InfoContext(pluginCtx, "list", "body", list.Body)
-					logger.ErrorContext(pluginCtx, "unable to parse bodySlice[0] to map[string]interface{}")
-					return nil, fmt.Errorf("unable to parse bodySlice[0] to map[string]interface{}")
+					logger.ErrorContext(pluginCtx, "unable to parse bodySlice[0] to map[string]any")
+					return nil, fmt.Errorf("unable to parse bodySlice[0] to map[string]any")
 				}
 				if status, ok := body["status"].(string); ok {
 					if status == "failed" {

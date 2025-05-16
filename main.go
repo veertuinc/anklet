@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -181,11 +182,13 @@ func main() {
 
 	parentLogger.InfoContext(parentCtx, "plugins path", slog.String("pluginsPath", pluginsPath))
 
-	parentCtx = context.WithValue(parentCtx, config.ContextKey("globals"), config.Globals{
+	parentCtx = context.WithValue(parentCtx, config.ContextKey("globals"), &config.Globals{
 		RunOnce:      runOnce,
 		PullLock:     &sync.Mutex{},
 		PluginsPath:  pluginsPath,
 		DebugEnabled: logging.IsDebugEnabled(),
+		IsBlocked:    atomic.Bool{},
+		PrepLock:     &sync.Mutex{},
 	})
 
 	httpTransport := http.DefaultTransport
@@ -484,6 +487,15 @@ func worker(
 						pluginCancel()
 						return
 					default:
+
+						if globals.IsBlockedState() {
+							logging.DevContext(pluginCtx, "pausing due to global block state")
+							// When paused, sleep briefly and continue checking
+							metricsData.SetStatus(pluginCtx, pluginLogger, "paused")
+							time.Sleep(time.Second + 5)
+							continue
+						}
+
 						updatedPluginCtx, err := run.Plugin(
 							workerCtx,
 							pluginCtx,
