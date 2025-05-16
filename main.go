@@ -187,7 +187,7 @@ func main() {
 		PullLock:     &sync.Mutex{},
 		PluginsPath:  pluginsPath,
 		DebugEnabled: logging.IsDebugEnabled(),
-		IsPaused:     atomic.Bool{},
+		IsBlocked:    atomic.Bool{},
 	})
 
 	httpTransport := http.DefaultTransport
@@ -487,8 +487,8 @@ func worker(
 						return
 					default:
 
-						if globals.IsPausedState() {
-							logging.DevContext(pluginCtx, "pausing due to global pause state")
+						if globals.IsBlockedState() {
+							logging.DevContext(pluginCtx, "pausing due to global block state")
 							// When paused, sleep briefly and continue checking
 							metricsData.SetStatus(pluginCtx, pluginLogger, "paused")
 							time.Sleep(time.Second + 5)

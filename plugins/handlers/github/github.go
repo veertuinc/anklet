@@ -14,10 +14,10 @@ import (
 	"github.com/google/go-github/v66/github"
 	"github.com/redis/go-redis/v9"
 	"github.com/veertuinc/anklet/internal/anka"
+	internalAnka "github.com/veertuinc/anklet/internal/anka"
 	"github.com/veertuinc/anklet/internal/config"
 	"github.com/veertuinc/anklet/internal/database"
 	internalGithub "github.com/veertuinc/anklet/internal/github"
-	"github.com/veertuinc/anklet/internal/host"
 	"github.com/veertuinc/anklet/internal/logging"
 	"github.com/veertuinc/anklet/internal/metrics"
 )
@@ -319,10 +319,16 @@ func cleanup(
 	logger *slog.Logger,
 	completedJobChannel chan internalGithub.QueueJob,
 	cleanupMu *sync.Mutex,
+	responsibleForBlocking *bool,
+	globals *config.Globals,
 ) {
 	cleanupMu.Lock()
 	// create an idependent copy of the pluginCtx so we can do cleanup even if pluginCtx got "context canceled"
 	cleanupContext := context.Background()
+	// If we were responsible for blocking, we need to unblock now so other plugins can start working again
+	if responsibleForBlocking != nil && *responsibleForBlocking {
+		globals.Unblock()
+	}
 	pluginConfig, err := config.GetPluginFromContext(pluginCtx)
 	if err != nil {
 		logger.ErrorContext(pluginCtx, "error getting plugin from context", "err", err)
@@ -468,6 +474,11 @@ func Run(
 		metrics.ExportMetricsToDB(pluginCtx, logger)
 	})
 
+	globals, err := config.GetGlobalsFromContext(pluginCtx)
+	if err != nil {
+		return pluginCtx, err
+	}
+
 	configFileName, err := config.GetConfigFileNameFromContext(pluginCtx)
 	if err != nil {
 		return pluginCtx, err
@@ -527,8 +538,10 @@ func Run(
 	cleanupMu := &sync.Mutex{}
 
 	retryChannel := make(chan bool, 1)
-
 	completedJobChannel := make(chan internalGithub.QueueJob, 1)
+
+	responsibleForBlocking := false
+
 	// wait group so we can wait for the goroutine to finish before exiting the service
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -541,7 +554,7 @@ func Run(
 
 	defer func() {
 		wg.Wait()
-		cleanup(workerCtx, pluginCtx, logger, completedJobChannel, cleanupMu)
+		cleanup(workerCtx, pluginCtx, logger, completedJobChannel, cleanupMu, &responsibleForBlocking, globals)
 		close(completedJobChannel)
 	}()
 
@@ -562,7 +575,7 @@ func Run(
 	}()
 	<-ranOnce // wait for the goroutine to run at least once
 	// finalize cleanup if the service crashed mid-cleanup
-	cleanup(workerCtx, pluginCtx, logger, completedJobChannel, cleanupMu)
+	cleanup(workerCtx, pluginCtx, logger, completedJobChannel, cleanupMu, &responsibleForBlocking, globals)
 	select {
 	case <-completedJobChannel:
 		logger.InfoContext(pluginCtx, "completed job found at start")
@@ -624,7 +637,16 @@ func Run(
 
 	// check if the job is already completed, so we don't orphan if there is
 	// a job in anklet/jobs/github/queued and also a anklet/jobs/github/completed
-	CheckForCompletedJobs(workerCtx, pluginCtx, logger, checkForCompletedJobsMu, completedJobChannel, ranOnce, true, retryChannel)
+	CheckForCompletedJobs(
+		workerCtx,
+		pluginCtx,
+		logger,
+		checkForCompletedJobsMu,
+		completedJobChannel,
+		ranOnce,
+		true,
+		retryChannel,
+	)
 	select {
 	case <-completedJobChannel:
 		logger.InfoContext(pluginCtx, "completed job found by CheckForCompletedJobs")
@@ -685,69 +707,34 @@ func Run(
 	}
 
 	// Determine CPU and MEM from the template and tag
-	ankaShowOutput, err := ankaCLI.AnkaShow(pluginCtx, ankaTemplate)
+	vmHasEnoughResources, vmInfo, err := internalAnka.VmHasEnoughResources(pluginCtx, ankaTemplate)
 	if err != nil {
-		logger.ErrorContext(pluginCtx, "error getting anka show output", "err", err)
+		logger.ErrorContext(pluginCtx, "error checking if vm can run", "err", err)
 		retryChannel <- true
-		return pluginCtx, fmt.Errorf("error getting anka show output: %s", err.Error())
+		return pluginCtx, fmt.Errorf("error checking if vm can run: %s", err.Error())
 	}
-
-	logger.DebugContext(pluginCtx, "anka show output", "output", ankaShowOutput)
-	queuedJob.RequiredResources.CPU = ankaShowOutput.CPU
-	queuedJob.RequiredResources.MEMBytes = ankaShowOutput.MEMBytes
+	queuedJob.RequiredResources.CPU = vmInfo.CPU
+	queuedJob.RequiredResources.MEMBytes = vmInfo.MEMBytes
 	logger.DebugContext(pluginCtx, "queuedJob.RequiredResources", "requiredResources", queuedJob.RequiredResources)
 
-	// Determine host level resources
-	hostCPUCount, err := host.GetHostCPUCount(pluginCtx)
-	if err != nil {
-		logger.ErrorContext(pluginCtx, "error getting host cpu count", "err", err)
-		retryChannel <- true
-		return pluginCtx, fmt.Errorf("error getting host cpu count: %s", err.Error())
-	}
-	logger.DebugContext(pluginCtx, "hostCPUCount", "hostCPUCount", hostCPUCount)
-
-	hostMemoryBytes, err := host.GetHostMemoryBytes(pluginCtx)
-	if err != nil {
-		logger.ErrorContext(pluginCtx, "error getting host memory bytes", "err", err)
-		retryChannel <- true
-		return pluginCtx, fmt.Errorf("error getting host memory bytes: %s", err.Error())
-	}
-	logger.DebugContext(pluginCtx, "hostMemoryBytes", "hostMemoryBytes", hostMemoryBytes)
-
-	// Get resource usage of other active VMs on the host
-	ankaListOutput, err := ankaCLI.AnkaList(pluginCtx, "--running")
-	if err != nil {
-		logger.ErrorContext(pluginCtx, "error getting anka list output", "err", err)
-		retryChannel <- true
-		return pluginCtx, fmt.Errorf("error getting anka list output: %s", err.Error())
-	}
-	logger.DebugContext(pluginCtx, "ankaListOutput", "ankaListOutput", ankaListOutput)
-	totalVMCPUUsed := 0
-	totalVMMEMBytesUsed := uint64(0)
-	for _, vm := range ankaListOutput.Body.([]any) {
-		vmMap := vm.(map[string]any)
-		vmName := vmMap["name"].(string)
-		ankaShowOutput, err := ankaCLI.AnkaShow(pluginCtx, vmName)
-		if err != nil {
-			logger.ErrorContext(pluginCtx, "error getting anka show output", "err", err)
-			retryChannel <- true
-			return pluginCtx, fmt.Errorf("error getting anka show output: %s", err.Error())
+	if !vmHasEnoughResources {
+		responsibleForBlocking = true
+		globals.Block()
+		logger.WarnContext(pluginCtx, "cannot run vm yet, waiting for enough resources to be available...")
+		for !vmHasEnoughResources {
+			logger.WarnContext(pluginCtx, "waiting for enough resources to be available...")
+			time.Sleep(5 * time.Second)
+			vmHasEnoughResources, vmInfo, err = internalAnka.VmHasEnoughResources(pluginCtx, ankaTemplate)
+			if err != nil {
+				logger.ErrorContext(pluginCtx, "error checking if vm can run", "err", err)
+				retryChannel <- true
+				return pluginCtx, fmt.Errorf("error checking if vm can run: %s", err.Error())
+			}
+			if pluginCtx.Err() != nil {
+				retryChannel <- true
+				return pluginCtx, fmt.Errorf("context canceled while waiting for resources")
+			}
 		}
-		totalVMCPUUsed += ankaShowOutput.CPU
-		totalVMMEMBytesUsed += ankaShowOutput.MEMBytes
-	}
-	// See if host has enough resources to run VM
-	logger.DebugContext(pluginCtx, "totalVMCPUUsed", "totalVMCPUUsed", totalVMCPUUsed)
-	logger.DebugContext(pluginCtx, "totalVMMEMBytesUsed", "totalVMMEMBytesUsed", totalVMMEMBytesUsed)
-	if (queuedJob.RequiredResources.CPU + totalVMCPUUsed) > hostCPUCount {
-		logger.ErrorContext(pluginCtx, "host does not have enough CPU cores to run VM", "requiredResources", queuedJob.RequiredResources, "totalVMCPUUsed", totalVMCPUUsed, "hostCPUCount", hostCPUCount)
-		retryChannel <- true
-		return pluginCtx, fmt.Errorf("host does not have enough CPU cores to run VM")
-	}
-	if (queuedJob.RequiredResources.MEMBytes + totalVMMEMBytesUsed) > hostMemoryBytes {
-		logger.ErrorContext(pluginCtx, "host does not have enough memory to run VM", "requiredResources", queuedJob.RequiredResources, "totalVMMEMBytesUsed", totalVMMEMBytesUsed, "hostMemoryBytes", hostMemoryBytes)
-		retryChannel <- true
-		return pluginCtx, fmt.Errorf("host does not have enough memory to run VM")
 	}
 
 	if !skipPrep {
@@ -809,6 +796,11 @@ func Run(
 			return pluginCtx, fmt.Errorf("context canceled after ObtainAnkaVM")
 		}
 
+		// If we were responsible for blocking, we need to unblock now so other plugins can start working again
+		if responsibleForBlocking {
+			globals.Unblock()
+		}
+
 		dbErr := databaseContainer.Client.RPush(pluginCtx, "anklet/jobs/github/queued/"+pluginConfig.Owner+"/"+pluginConfig.Name, wrappedVmJSON).Err()
 		if dbErr != nil {
 			// logger.ErrorContext(pluginCtx, "error pushing vm data to database", "err", dbErr)
@@ -830,10 +822,6 @@ func Run(
 		}
 
 		// Install runner
-		globals, err := config.GetGlobalsFromContext(pluginCtx)
-		if err != nil {
-			return pluginCtx, err
-		}
 		installRunnerPath := filepath.Join(globals.PluginsPath, "handlers", "github", "install-runner.bash")
 		registerRunnerPath := filepath.Join(globals.PluginsPath, "handlers", "github", "register-runner.bash")
 		startRunnerPath := filepath.Join(globals.PluginsPath, "handlers", "github", "start-runner.bash")

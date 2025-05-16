@@ -213,7 +213,7 @@ type Globals struct {
 	PullLock     *sync.Mutex
 	PluginsPath  string
 	DebugEnabled bool
-	IsPaused     atomic.Bool
+	IsBlocked    atomic.Bool
 }
 
 func GetGlobalsFromContext(ctx context.Context) (*Globals, error) {
@@ -224,16 +224,16 @@ func GetGlobalsFromContext(ctx context.Context) (*Globals, error) {
 	return globals, nil
 }
 
-func (g *Globals) Pause() {
-	g.IsPaused.Store(true)
+func (g *Globals) Block() {
+	g.IsBlocked.Store(true)
 }
 
-func (g *Globals) Unpause() {
-	g.IsPaused.Store(false)
+func (g *Globals) Unblock() {
+	g.IsBlocked.Store(false)
 }
 
-func (g *Globals) IsPausedState() bool {
-	return g.IsPaused.Load()
+func (g *Globals) IsBlockedState() bool {
+	return g.IsBlocked.Load()
 }
 
 func GetLoadedConfigFromContext(ctx context.Context) (*Config, error) {
