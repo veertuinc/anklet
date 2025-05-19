@@ -5,6 +5,7 @@ import (
 	"os"
 	"strconv"
 	"sync"
+	"sync/atomic"
 
 	"context"
 
@@ -54,6 +55,11 @@ type Database struct {
 type Workflow struct {
 	Include []string `yaml:"include"`
 	Exclude []string `yaml:"exclude"`
+}
+
+type RequiredResources struct {
+	CPU int `yaml:"cpu"`
+	MEM int `yaml:"mem"`
 }
 
 type Plugin struct {
@@ -205,16 +211,30 @@ func GetPluginFromContext(ctx context.Context) (Plugin, error) {
 type Globals struct {
 	RunOnce      string
 	PullLock     *sync.Mutex
+	PrepLock     *sync.Mutex
 	PluginsPath  string
 	DebugEnabled bool
+	IsBlocked    atomic.Bool
 }
 
-func GetGlobalsFromContext(ctx context.Context) (Globals, error) {
-	globals, ok := ctx.Value(ContextKey("globals")).(Globals)
+func GetGlobalsFromContext(ctx context.Context) (*Globals, error) {
+	globals, ok := ctx.Value(ContextKey("globals")).(*Globals)
 	if !ok {
-		return Globals{}, fmt.Errorf("GetGlobalsFromContext failed")
+		return nil, fmt.Errorf("GetGlobalsFromContext failed")
 	}
 	return globals, nil
+}
+
+func (g *Globals) Block() {
+	g.IsBlocked.Store(true)
+}
+
+func (g *Globals) Unblock() {
+	g.IsBlocked.Store(false)
+}
+
+func (g *Globals) IsBlockedState() bool {
+	return g.IsBlocked.Load()
 }
 
 func GetLoadedConfigFromContext(ctx context.Context) (*Config, error) {

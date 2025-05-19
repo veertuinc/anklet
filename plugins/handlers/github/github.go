@@ -14,25 +14,13 @@ import (
 	"github.com/google/go-github/v66/github"
 	"github.com/redis/go-redis/v9"
 	"github.com/veertuinc/anklet/internal/anka"
+	internalAnka "github.com/veertuinc/anklet/internal/anka"
 	"github.com/veertuinc/anklet/internal/config"
 	"github.com/veertuinc/anklet/internal/database"
 	internalGithub "github.com/veertuinc/anklet/internal/github"
 	"github.com/veertuinc/anklet/internal/logging"
 	"github.com/veertuinc/anklet/internal/metrics"
 )
-
-type WorkflowRunJobDetail struct {
-	JobID           int64
-	JobName         string
-	JobURL          string
-	WorkflowName    string
-	AnkaTemplate    string
-	AnkaTemplateTag string
-	RunID           int64
-	Labels          []string
-	Repo            string
-	Conclusion      string
-}
 
 var once sync.Once
 
@@ -112,66 +100,6 @@ var once sync.Once
 // 	return true
 // }
 
-func DeleteFromQueue(pluginCtx context.Context, logger *slog.Logger, jobID int64, queue string) error {
-	databaseContainer, err := database.GetDatabaseFromContext(pluginCtx)
-	if err != nil {
-		logging.Panic(pluginCtx, pluginCtx, "error getting database client from context: "+err.Error())
-	}
-	queued, err := databaseContainer.Client.LRange(pluginCtx, queue, 0, -1).Result()
-	if err != nil {
-		logger.ErrorContext(pluginCtx, "error getting list of queued jobs", "err", err)
-		return err
-	}
-	for _, queueItem := range queued {
-		workflowJobEvent, err, typeErr := database.UnwrapPayload[github.WorkflowJobEvent](queueItem)
-		if err != nil {
-			logger.ErrorContext(pluginCtx, "error unmarshalling job", "err", err)
-			return err
-		}
-		if typeErr != nil { // not the type we want
-			continue
-		}
-		if *workflowJobEvent.WorkflowJob.ID == jobID {
-			// logger.WarnContext(pluginCtx, "WorkflowJob.ID already in queue", "WorkflowJob.ID", jobID)
-			_, err = databaseContainer.Client.LRem(pluginCtx, queue, 1, queueItem).Result()
-			if err != nil {
-				logger.ErrorContext(pluginCtx, "error removing job from queue", "err", err)
-				return err
-			}
-			return nil
-		}
-	}
-	return nil
-}
-
-// passing the the queue and ID to check for
-func InQueue(pluginCtx context.Context, logger *slog.Logger, jobID int64, queue string) (bool, error) {
-	databaseContainer, err := database.GetDatabaseFromContext(pluginCtx)
-	if err != nil {
-		return false, err
-	}
-	queued, err := databaseContainer.Client.LRange(pluginCtx, queue, 0, -1).Result()
-	if err != nil {
-		logger.ErrorContext(pluginCtx, "error getting list of queued jobs", "err", err)
-		return false, err
-	}
-	for _, queueItem := range queued {
-		workflowJobEvent, err, typeErr := database.UnwrapPayload[github.WorkflowJobEvent](queueItem)
-		if err != nil {
-			logger.ErrorContext(pluginCtx, "error unmarshalling job", "err", err)
-			return false, err
-		}
-		if typeErr != nil { // not the type we want
-			continue
-		}
-		if *workflowJobEvent.WorkflowJob.ID == jobID {
-			// logger.WarnContext(pluginCtx, "WorkflowJob.ID already in queue", "WorkflowJob.ID", jobID)
-			return true, nil
-		}
-	}
-	return false, nil
-}
-
 func extractLabelValue(labels []string, prefix string) string {
 	for _, label := range labels {
 		if strings.HasPrefix(label, prefix) {
@@ -185,7 +113,7 @@ func sendCancelWorkflowRun(
 	workerCtx context.Context,
 	pluginCtx context.Context,
 	logger *slog.Logger,
-	workflow WorkflowRunJobDetail,
+	queuedJob internalGithub.QueueJob,
 	metricsData *metrics.MetricsDataLock,
 ) error {
 	githubClient, err := internalGithub.GetGitHubClientFromContext(pluginCtx)
@@ -199,7 +127,7 @@ func sendCancelWorkflowRun(
 	cancelSent := false
 	for {
 		newPluginCtx, workflowRun, _, err := internalGithub.ExecuteGitHubClientFunction(workerCtx, pluginCtx, logger, func() (*github.WorkflowRun, *github.Response, error) {
-			workflowRun, resp, err := githubClient.Actions.GetWorkflowRunByID(context.Background(), pluginConfig.Owner, workflow.Repo, workflow.RunID)
+			workflowRun, resp, err := githubClient.Actions.GetWorkflowRunByID(context.Background(), pluginConfig.Owner, *queuedJob.Repository.Name, *queuedJob.WorkflowJob.RunID)
 			return workflowRun, resp, err
 		})
 		if err != nil {
@@ -216,14 +144,14 @@ func sendCancelWorkflowRun(
 					Name: pluginConfig.Name,
 				},
 				LastCanceledRun:       time.Now(),
-				LastCanceledRunJobUrl: workflow.JobURL,
+				LastCanceledRunJobUrl: *queuedJob.WorkflowJob.HTMLURL,
 			})
 			break
 		} else {
-			logger.WarnContext(pluginCtx, "workflow run is still active... waiting for cancellation so we can clean up...", "workflow_run_id", workflow.RunID)
+			logger.WarnContext(pluginCtx, "workflow run is still active... waiting for cancellation so we can clean up...", "workflow_run_id", *queuedJob.WorkflowJob.RunID)
 			if !cancelSent { // this has to happen here so that it doesn't error with "409 Cannot cancel a workflow run that is completed. " if the job is already cancelled
 				newPluginCtx, cancelResponse, _, cancelErr := internalGithub.ExecuteGitHubClientFunction(workerCtx, pluginCtx, logger, func() (*github.Response, *github.Response, error) {
-					resp, err := githubClient.Actions.CancelWorkflowRunByID(context.Background(), pluginConfig.Owner, workflow.Repo, workflow.RunID)
+					resp, err := githubClient.Actions.CancelWorkflowRunByID(context.Background(), pluginConfig.Owner, *queuedJob.Repository.Name, *queuedJob.WorkflowJob.RunID)
 					return resp, nil, err
 				})
 				// don't use cancelResponse.Response.StatusCode or else it'll error with SIGSEV
@@ -233,7 +161,7 @@ func sendCancelWorkflowRun(
 				}
 				pluginCtx = newPluginCtx
 				cancelSent = true
-				logger.WarnContext(pluginCtx, "sent cancel workflow run", "workflow_run_id", workflow.RunID)
+				logger.WarnContext(pluginCtx, "sent cancel workflow run", "workflow_run_id", *queuedJob.WorkflowJob.RunID)
 			}
 			time.Sleep(10 * time.Second)
 		}
@@ -246,7 +174,7 @@ func CheckForCompletedJobs(
 	pluginCtx context.Context,
 	logger *slog.Logger,
 	checkForCompletedJobsMu *sync.Mutex,
-	completedJobChannel chan github.WorkflowJobEvent,
+	completedJobChannel chan internalGithub.QueueJob,
 	ranOnce chan struct{},
 	runOnce bool,
 	retryChannel chan bool,
@@ -295,7 +223,7 @@ func CheckForCompletedJobs(
 		default:
 		}
 		// get the job ID
-		existingJobString, err := databaseContainer.Client.LIndex(pluginCtx, "anklet/jobs/github/queued/"+pluginConfig.Owner+"/"+pluginConfig.Name, 0).Result()
+		existingJob, err := databaseContainer.Client.LIndex(pluginCtx, "anklet/jobs/github/queued/"+pluginConfig.Owner+"/"+pluginConfig.Name, 0).Result()
 		if runOnce && err == redis.Nil { // handle no job for service; needed so the github plugin resets and looks for new jobs again
 			logger.ErrorContext(pluginCtx, "CheckForCompletedJobs"+pluginConfig.Name+" err == redis.Nil")
 			return
@@ -308,14 +236,14 @@ func CheckForCompletedJobs(
 					logger.ErrorContext(pluginCtx, "error getting count of objects in anklet/jobs/github/completed/"+pluginConfig.Owner+"/"+pluginConfig.Name, "err", err)
 					return
 				}
-				existingJobEvent, err, typeErr := database.UnwrapPayload[github.WorkflowJobEvent](existingJobString)
+				existingJob, err, typeErr := database.Unwrap[internalGithub.QueueJob](existingJob)
 				if err != nil || typeErr != nil {
 					logger.ErrorContext(pluginCtx, "error unmarshalling job", "err", err)
 					return
 				}
 				if count > 0 {
 					select {
-					case completedJobChannel <- existingJobEvent:
+					case completedJobChannel <- existingJob:
 					default:
 						// remove the completed job we found
 						_, err = databaseContainer.Client.Del(pluginCtx, "anklet/jobs/github/completed/"+pluginConfig.Owner+"/"+pluginConfig.Name).Result()
@@ -330,21 +258,21 @@ func CheckForCompletedJobs(
 						logger.ErrorContext(pluginCtx, "error getting list of completed jobs", "err", err)
 						return
 					}
-					if existingJobEvent.WorkflowJob == nil {
-						logger.ErrorContext(pluginCtx, "existingJobEvent.WorkflowJob is nil")
+					if existingJob.WorkflowJob.ID == nil {
+						logger.ErrorContext(pluginCtx, "existingJob.WorkflowJob.ID is nil")
 						return
 					}
 					for _, completedJob := range completedJobs {
-						completedJobWebhookEvent, err, typeErr := database.UnwrapPayload[github.WorkflowJobEvent](completedJob)
+						completedQueueJob, err, typeErr := database.Unwrap[internalGithub.QueueJob](completedJob)
 						if err != nil || typeErr != nil {
 							logger.ErrorContext(pluginCtx, "error unmarshalling job", "err", err)
 							return
 						}
-						if *completedJobWebhookEvent.WorkflowJob.ID == *existingJobEvent.WorkflowJob.ID {
+						if *completedQueueJob.WorkflowJob.ID == *existingJob.WorkflowJob.ID {
 							// remove the completed job we found
 							_, err = databaseContainer.Client.LRem(pluginCtx, "anklet/jobs/github/completed/"+pluginConfig.Owner, 1, completedJob).Result()
 							if err != nil {
-								logger.ErrorContext(pluginCtx, "error removing completedJob from anklet/jobs/github/completed/"+pluginConfig.Owner, "err", err, "completedJob", completedJobWebhookEvent)
+								logger.ErrorContext(pluginCtx, "error removing completedJob from anklet/jobs/github/completed/"+pluginConfig.Owner, "err", err, "completedJob", completedJob)
 								return
 							}
 							// delete the existing service task
@@ -359,7 +287,7 @@ func CheckForCompletedJobs(
 								logger.ErrorContext(pluginCtx, "error inserting completed job into list", "err", err)
 								return
 							}
-							completedJobChannel <- completedJobWebhookEvent
+							completedJobChannel <- completedQueueJob
 							return
 						}
 					}
@@ -389,12 +317,23 @@ func cleanup(
 	workerCtx context.Context,
 	pluginCtx context.Context,
 	logger *slog.Logger,
-	completedJobChannel chan github.WorkflowJobEvent,
+	completedJobChannel chan internalGithub.QueueJob,
 	cleanupMu *sync.Mutex,
+	responsibleForBlocking *bool,
+	globals *config.Globals,
+	responsibleForPrepLock *bool,
 ) {
 	cleanupMu.Lock()
 	// create an idependent copy of the pluginCtx so we can do cleanup even if pluginCtx got "context canceled"
 	cleanupContext := context.Background()
+	// If we were responsible for blocking, we need to unblock now so other plugins can start working again
+	if responsibleForBlocking != nil && *responsibleForBlocking {
+		globals.Unblock()
+	}
+	// make sure the prep lock is unlocked, always
+	if responsibleForPrepLock != nil && *responsibleForPrepLock {
+		globals.PrepLock.Unlock()
+	}
 	pluginConfig, err := config.GetPluginFromContext(pluginCtx)
 	if err != nil {
 		logger.ErrorContext(pluginCtx, "error getting plugin from context", "err", err)
@@ -446,58 +385,31 @@ func cleanup(
 				return
 			}
 		}
-		var typedJob map[string]interface{}
-		if err := json.Unmarshal([]byte(jobJSON), &typedJob); err != nil {
+		var queuedJob internalGithub.QueueJob
+		err = json.Unmarshal([]byte(jobJSON), &queuedJob)
+		if err != nil {
 			logger.ErrorContext(pluginCtx, "error unmarshalling job", "err", err)
 			return
 		}
-
-		var payload map[string]interface{}
-		payloadJSON, err := json.Marshal(typedJob)
-		if err != nil {
-			logger.ErrorContext(pluginCtx, "error marshalling payload", "err", err)
-			return
-		}
-		if err := json.Unmarshal(payloadJSON, &payload); err != nil {
-			logger.ErrorContext(pluginCtx, "error unmarshalling job", "err", err)
-			return
-		}
-		payloadBytes, err := json.Marshal(payload["payload"])
-		if err != nil {
-			logger.ErrorContext(pluginCtx, "error marshalling payload", "err", err)
-			return
-		}
-		switch typedJob["type"] {
+		switch queuedJob.Type {
 		case "anka.VM":
-			var vm anka.VM
-			err = json.Unmarshal(payloadBytes, &vm)
-			if err != nil {
-				logger.ErrorContext(pluginCtx, "error unmarshalling payload to webhook.WorkflowJobPayload", "err", err)
-				return
-			}
 			ankaCLI, err := anka.GetAnkaCLIFromContext(pluginCtx)
 			if err != nil {
 				logger.ErrorContext(pluginCtx, "error getting ankaCLI from context", "err", err)
 				return
 			}
 			if strings.ToUpper(os.Getenv("LOG_LEVEL")) == "DEBUG" || strings.ToUpper(os.Getenv("LOG_LEVEL")) == "DEV" {
-				err = ankaCLI.AnkaCopyOutOfVM(pluginCtx, "/Users/anka/actions-runner/_diag", "/tmp/"+vm.Name)
+				err = ankaCLI.AnkaCopyOutOfVM(pluginCtx, "/Users/anka/actions-runner/_diag", "/tmp/"+queuedJob.AnkaVM.Name)
 				if err != nil {
 					logger.ErrorContext(pluginCtx, "error copying actions runner out of vm", "err", err)
 				}
 			}
-			ankaCLI.AnkaDelete(workerCtx, pluginCtx, &vm)
+			ankaCLI.AnkaDelete(workerCtx, pluginCtx, &queuedJob.AnkaVM)
 			databaseContainer.Client.Del(cleanupContext, "anklet/jobs/github/queued/"+pluginConfig.Owner+"/"+pluginConfig.Name+"/cleaning")
 			continue // required to keep processing tasks in the db list
 		case "WorkflowJobPayload": // MUST COME LAST
-			var workflowJobEvent github.WorkflowJobEvent
-			err = json.Unmarshal(payloadBytes, &workflowJobEvent)
-			if err != nil {
-				logger.ErrorContext(pluginCtx, "error unmarshalling payload to webhook.WorkflowJobPayload", "err", err)
-				return
-			}
 			// delete the in_progress queue's index that matches the wrkflowJobID
-			err = DeleteFromQueue(pluginCtx, logger, *workflowJobEvent.WorkflowJob.ID, "anklet/jobs/github/in_progress/"+pluginConfig.Owner)
+			err = internalGithub.DeleteFromQueue(pluginCtx, logger, *queuedJob.WorkflowJob.ID, "anklet/jobs/github/in_progress/"+pluginConfig.Owner)
 			if err != nil {
 				logger.ErrorContext(pluginCtx, "error deleting from in_progress queue", "err", err)
 			}
@@ -529,7 +441,7 @@ func cleanup(
 				}
 			}
 		default:
-			logger.ErrorContext(pluginCtx, "unknown job type", "job", typedJob)
+			logger.ErrorContext(pluginCtx, "unknown job type", "job", queuedJob)
 			return
 		}
 		return // don't delete the queued/servicename
@@ -566,6 +478,11 @@ func Run(
 	once.Do(func() {
 		metrics.ExportMetricsToDB(pluginCtx, logger)
 	})
+
+	globals, err := config.GetGlobalsFromContext(pluginCtx)
+	if err != nil {
+		return pluginCtx, err
+	}
 
 	configFileName, err := config.GetConfigFileNameFromContext(pluginCtx)
 	if err != nil {
@@ -626,8 +543,11 @@ func Run(
 	cleanupMu := &sync.Mutex{}
 
 	retryChannel := make(chan bool, 1)
+	completedJobChannel := make(chan internalGithub.QueueJob, 1)
 
-	completedJobChannel := make(chan github.WorkflowJobEvent, 1)
+	responsibleForBlocking := false
+	responsibleForPrepLock := false
+
 	// wait group so we can wait for the goroutine to finish before exiting the service
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -640,7 +560,7 @@ func Run(
 
 	defer func() {
 		wg.Wait()
-		cleanup(workerCtx, pluginCtx, logger, completedJobChannel, cleanupMu)
+		cleanup(workerCtx, pluginCtx, logger, completedJobChannel, cleanupMu, &responsibleForBlocking, globals, &responsibleForPrepLock)
 		close(completedJobChannel)
 	}()
 
@@ -661,16 +581,34 @@ func Run(
 	}()
 	<-ranOnce // wait for the goroutine to run at least once
 	// finalize cleanup if the service crashed mid-cleanup
-	cleanup(workerCtx, pluginCtx, logger, completedJobChannel, cleanupMu)
+	cleanup(workerCtx, pluginCtx, logger, completedJobChannel, cleanupMu, &responsibleForBlocking, globals, &responsibleForPrepLock)
 	select {
 	case <-completedJobChannel:
 		logger.InfoContext(pluginCtx, "completed job found at start")
-		completedJobChannel <- github.WorkflowJobEvent{}
+		completedJobChannel <- internalGithub.QueueJob{}
 		return pluginCtx, nil
 	case <-pluginCtx.Done():
 		logger.WarnContext(pluginCtx, "context canceled before completed job found")
 		return pluginCtx, nil
 	default:
+	}
+
+	// check if another plugin is already running preparation phase and if it is, wait for it to finish
+	prepLock := globals.PrepLock.TryLock()
+	if prepLock {
+		responsibleForPrepLock = true
+	}
+	for !prepLock {
+		prepLock = globals.PrepLock.TryLock()
+		if prepLock {
+			responsibleForPrepLock = true
+			break
+		}
+		logger.WarnContext(pluginCtx, "cannot run vm yet, another plugin is already preparing a vm, retrying...")
+		time.Sleep(2 * time.Second)
+		if pluginCtx.Err() != nil {
+			return pluginCtx, fmt.Errorf("context canceled while waiting for prep lock")
+		}
 	}
 
 	logger.InfoContext(pluginCtx, "checking for jobs....")
@@ -686,7 +624,7 @@ func Run(
 		eldestQueuedJob, err := databaseContainer.Client.LPop(pluginCtx, "anklet/jobs/github/queued/"+pluginConfig.Owner).Result()
 		if err == redis.Nil {
 			logger.DebugContext(pluginCtx, "no queued jobs found")
-			completedJobChannel <- github.WorkflowJobEvent{} // send true to the channel to stop the check for completed jobs goroutine
+			completedJobChannel <- internalGithub.QueueJob{} // send true to the channel to stop the check for completed jobs goroutine
 			return pluginCtx, nil
 		}
 		if err != nil {
@@ -698,19 +636,19 @@ func Run(
 		wrappedPayloadJSON = eldestQueuedJob
 	}
 
-	queuedJob, err, typeErr := database.UnwrapPayload[github.WorkflowJobEvent](wrappedPayloadJSON)
+	queuedJob, err, typeErr := database.Unwrap[internalGithub.QueueJob](wrappedPayloadJSON)
 	if err != nil || typeErr != nil {
 		// logger.ErrorContext(pluginCtx, "error unmarshalling job", "err", err)
 		return pluginCtx, fmt.Errorf("error unmarshalling job: %s", err.Error())
 	}
 	if !isRepoSet {
-		pluginCtx = logging.AppendCtx(pluginCtx, slog.String("repo", *queuedJob.Repo.Name))
+		pluginCtx = logging.AppendCtx(pluginCtx, slog.String("repo", *queuedJob.Repository.Name))
 	}
-	pluginCtx = logging.AppendCtx(pluginCtx, slog.Int64("workflowJobID", *queuedJob.WorkflowJob.ID))
-	pluginCtx = logging.AppendCtx(pluginCtx, slog.String("workflowJobName", *queuedJob.WorkflowJob.Name))
-	pluginCtx = logging.AppendCtx(pluginCtx, slog.Int64("workflowJobRunID", *queuedJob.WorkflowJob.RunID))
-	pluginCtx = logging.AppendCtx(pluginCtx, slog.String("workflowName", *queuedJob.WorkflowJob.WorkflowName))
-	pluginCtx = logging.AppendCtx(pluginCtx, slog.String("jobURL", *queuedJob.WorkflowJob.HTMLURL))
+	// pluginCtx = logging.AppendCtx(pluginCtx, slog.Int64("workflowJobID", *queuedJob.WorkflowJob.ID))
+	// pluginCtx = logging.AppendCtx(pluginCtx, slog.String("workflowJobName", *queuedJob.WorkflowJob.Name))
+	// pluginCtx = logging.AppendCtx(pluginCtx, slog.Int64("workflowJobRunID", *queuedJob.WorkflowJob.RunID))
+	// pluginCtx = logging.AppendCtx(pluginCtx, slog.String("workflowName", *queuedJob.WorkflowJob.WorkflowName))
+	// pluginCtx = logging.AppendCtx(pluginCtx, slog.String("jobURL", *queuedJob.WorkflowJob.HTMLURL))
 	logger.InfoContext(
 		pluginCtx,
 		"queued job found",
@@ -719,15 +657,24 @@ func Run(
 		"workflowJobID", queuedJob.WorkflowJob.ID,
 		"workflowJobRunID", queuedJob.WorkflowJob.RunID,
 	)
-	logger.DebugContext(pluginCtx, "queued job found (debug)", "queuedJob", queuedJob.Action)
+	logger.DebugContext(pluginCtx, fmt.Sprintf("%+v", queuedJob))
 
 	// check if the job is already completed, so we don't orphan if there is
 	// a job in anklet/jobs/github/queued and also a anklet/jobs/github/completed
-	CheckForCompletedJobs(workerCtx, pluginCtx, logger, checkForCompletedJobsMu, completedJobChannel, ranOnce, true, retryChannel)
+	CheckForCompletedJobs(
+		workerCtx,
+		pluginCtx,
+		logger,
+		checkForCompletedJobsMu,
+		completedJobChannel,
+		ranOnce,
+		true,
+		retryChannel,
+	)
 	select {
 	case <-completedJobChannel:
 		logger.InfoContext(pluginCtx, "completed job found by CheckForCompletedJobs")
-		completedJobChannel <- github.WorkflowJobEvent{} // send true to the channel to stop the check for completed jobs goroutine
+		completedJobChannel <- internalGithub.QueueJob{} // send true to the channel to stop the check for completed jobs goroutine
 		return pluginCtx, nil
 	case <-pluginCtx.Done():
 		logger.WarnContext(pluginCtx, "context canceled before completed job found")
@@ -747,18 +694,6 @@ func Run(
 	}
 	pluginCtx = logging.AppendCtx(pluginCtx, slog.String("ankaTemplateTag", ankaTemplateTag))
 
-	workflowJob := WorkflowRunJobDetail{
-		JobID:           *queuedJob.WorkflowJob.ID,
-		JobName:         *queuedJob.WorkflowJob.Name,
-		JobURL:          *queuedJob.WorkflowJob.HTMLURL,
-		WorkflowName:    *queuedJob.WorkflowJob.WorkflowName,
-		AnkaTemplate:    ankaTemplate,
-		AnkaTemplateTag: ankaTemplateTag,
-		RunID:           *queuedJob.WorkflowJob.RunID,
-		Labels:          queuedJob.WorkflowJob.Labels,
-		Repo:            *queuedJob.Repo.Name,
-	}
-
 	// get anka CLI
 	ankaCLI, err := anka.GetAnkaCLIFromContext(pluginCtx)
 	if err != nil {
@@ -772,7 +707,7 @@ func Run(
 
 	// See if VM Template existing already
 	if !pluginConfig.SkipPull {
-		noTemplateTagExistsError, templateExistsError := ankaCLI.EnsureVMTemplateExists(workerCtx, pluginCtx, workflowJob.AnkaTemplate, workflowJob.AnkaTemplateTag)
+		noTemplateTagExistsError, templateExistsError := ankaCLI.EnsureVMTemplateExists(workerCtx, pluginCtx, ankaTemplate, ankaTemplateTag)
 		if templateExistsError != nil {
 			// DO NOT RETURN AN ERROR TO MAIN. It will cause the other job on this node to be cancelled.
 			logger.WarnContext(pluginCtx, "problem ensuring vm template exists on host", "err", templateExistsError)
@@ -781,7 +716,7 @@ func Run(
 		}
 		if noTemplateTagExistsError != nil {
 			logger.ErrorContext(pluginCtx, "error ensuring vm template exists on host", "err", noTemplateTagExistsError)
-			err := sendCancelWorkflowRun(workerCtx, pluginCtx, logger, workflowJob, metricsData)
+			err := sendCancelWorkflowRun(workerCtx, pluginCtx, logger, queuedJob, metricsData)
 			if err != nil {
 				logger.ErrorContext(pluginCtx, "error sending cancel workflow run", "err", err)
 			}
@@ -793,6 +728,36 @@ func Run(
 		// logger.WarnContext(pluginCtx, "context canceled during vm template check")
 		retryChannel <- true
 		return pluginCtx, fmt.Errorf("context canceled during vm template check")
+	}
+
+	// Determine CPU and MEM from the template and tag
+	vmHasEnoughResources, vmInfo, err := internalAnka.VmHasEnoughResources(pluginCtx, ankaTemplate)
+	if err != nil {
+		logger.WarnContext(pluginCtx, "error checking if host has enough resources", "err", err)
+		retryChannel <- true
+		return pluginCtx, nil
+	}
+	queuedJob.RequiredResources.CPU = vmInfo.CPU
+	queuedJob.RequiredResources.MEMBytes = vmInfo.MEMBytes
+	logger.DebugContext(pluginCtx, "queuedJob.RequiredResources", "requiredResources", queuedJob.RequiredResources)
+	if !vmHasEnoughResources {
+		responsibleForBlocking = true
+		globals.Block()
+		logger.WarnContext(pluginCtx, "cannot run vm yet, waiting for enough resources to be available...")
+		for !vmHasEnoughResources {
+			logger.WarnContext(pluginCtx, "waiting for enough resources to be available...")
+			time.Sleep(5 * time.Second)
+			vmHasEnoughResources, vmInfo, err = internalAnka.VmHasEnoughResources(pluginCtx, ankaTemplate)
+			if err != nil {
+				logger.ErrorContext(pluginCtx, "error checking if vm can run", "err", err)
+				retryChannel <- true
+				return pluginCtx, nil
+			}
+			if pluginCtx.Err() != nil {
+				retryChannel <- true
+				return pluginCtx, fmt.Errorf("context canceled while waiting for resources")
+			}
+		}
 	}
 
 	if !skipPrep {
@@ -813,15 +778,15 @@ func Run(
 			})
 		}
 		if err != nil {
-			logger.DebugContext(pluginCtx, "error creating registration token", "err", err, "response", response)
+			logger.ErrorContext(pluginCtx, "error creating registration token", "err", err, "response", response)
 			metricsData.IncrementTotalFailedRunsSinceStart(workerCtx, pluginCtx, logger)
 			retryChannel <- true
-			return pluginCtx, fmt.Errorf("error creating registration token: %s", err.Error())
+			return pluginCtx, nil
 		}
 		if *runnerRegistration.Token == "" {
-			logger.DebugContext(pluginCtx, "registration token is empty; something wrong with github or your service token", "response", response)
+			logger.ErrorContext(pluginCtx, "registration token is empty; something wrong with github or your service token", "response", response)
 			retryChannel <- true
-			return pluginCtx, fmt.Errorf("registration token is empty; something wrong with github or your service token")
+			return pluginCtx, nil
 		}
 
 		if pluginCtx.Err() != nil {
@@ -831,13 +796,13 @@ func Run(
 		}
 
 		// Obtain Anka VM (and name)
-		newPluginCtx, vm, err := ankaCLI.ObtainAnkaVM(workerCtx, pluginCtx, workflowJob.AnkaTemplate)
+		newPluginCtx, vm, err := ankaCLI.ObtainAnkaVM(workerCtx, pluginCtx, ankaTemplate)
 		var wrappedVmJSON []byte
 		var wrappedVmErr error
 		if vm != nil {
-			wrappedVM := map[string]interface{}{
-				"type":    "anka.VM",
-				"payload": vm,
+			wrappedVM := internalGithub.QueueJob{
+				Type:   "anka.VM",
+				AnkaVM: *vm,
 			}
 			wrappedVmJSON, wrappedVmErr = json.Marshal(wrappedVM)
 			if wrappedVmErr != nil {
@@ -849,6 +814,19 @@ func Run(
 			newPluginCtx = logging.AppendCtx(newPluginCtx, slog.String("vmName", vm.Name))
 		}
 		pluginCtx = newPluginCtx
+		if pluginCtx.Err() != nil {
+			ankaCLI.AnkaDelete(workerCtx, pluginCtx, vm)
+			return pluginCtx, fmt.Errorf("context canceled after ObtainAnkaVM")
+		}
+
+		// If we were responsible for blocking, we need to unblock now so other plugins can start working again
+		if responsibleForBlocking {
+			globals.Unblock()
+		}
+		if responsibleForPrepLock {
+			globals.PrepLock.Unlock()
+			responsibleForPrepLock = false // prevent fatal error: sync: unlock of unlocked mutex
+		}
 
 		dbErr := databaseContainer.Client.RPush(pluginCtx, "anklet/jobs/github/queued/"+pluginConfig.Owner+"/"+pluginConfig.Name, wrappedVmJSON).Err()
 		if dbErr != nil {
@@ -871,10 +849,6 @@ func Run(
 		}
 
 		// Install runner
-		globals, err := config.GetGlobalsFromContext(pluginCtx)
-		if err != nil {
-			return pluginCtx, err
-		}
 		installRunnerPath := filepath.Join(globals.PluginsPath, "handlers", "github", "install-runner.bash")
 		registerRunnerPath := filepath.Join(globals.PluginsPath, "handlers", "github", "register-runner.bash")
 		startRunnerPath := filepath.Join(globals.PluginsPath, "handlers", "github", "start-runner.bash")
@@ -883,7 +857,7 @@ func Run(
 		_, startRunnerErr := os.Stat(startRunnerPath)
 		if installRunnerErr != nil || registerRunnerErr != nil || startRunnerErr != nil {
 			// logger.ErrorContext(pluginCtx, "must include install-runner.bash, register-runner.bash, and start-runner.bash in "+globals.PluginsPath+"/handlers/github/", "err", err)
-			err := sendCancelWorkflowRun(workerCtx, pluginCtx, logger, workflowJob, metricsData)
+			err := sendCancelWorkflowRun(workerCtx, pluginCtx, logger, queuedJob, metricsData)
 			if err != nil {
 				logger.ErrorContext(pluginCtx, "error sending cancel workflow run", "err", err)
 			}
@@ -906,7 +880,7 @@ func Run(
 		select {
 		case <-completedJobChannel:
 			logger.WarnContext(pluginCtx, "completed job found before installing runner")
-			completedJobChannel <- github.WorkflowJobEvent{} // send true to the channel to stop the check for completed jobs goroutine
+			completedJobChannel <- internalGithub.QueueJob{} // send true to the channel to stop the check for completed jobs goroutine
 			return pluginCtx, nil
 		case <-pluginCtx.Done():
 			logger.WarnContext(pluginCtx, "context canceled before install runner")
@@ -926,7 +900,7 @@ func Run(
 		select {
 		case <-completedJobChannel:
 			logger.InfoContext(pluginCtx, "completed job found before registering runner")
-			completedJobChannel <- github.WorkflowJobEvent{} // send true to the channel to stop the check for completed jobs goroutine
+			completedJobChannel <- internalGithub.QueueJob{} // send true to the channel to stop the check for completed jobs goroutine
 			return pluginCtx, nil
 		case <-pluginCtx.Done():
 			logger.WarnContext(pluginCtx, "context canceled before register runner")
@@ -939,7 +913,7 @@ func Run(
 			vm.Name,
 			*runnerRegistration.Token,
 			repositoryURL,
-			strings.Join(workflowJob.Labels, ","),
+			strings.Join(queuedJob.WorkflowJob.Labels, ","),
 			pluginConfig.RunnerGroup,
 		)
 		if registerRunnerErr != nil {
@@ -947,12 +921,12 @@ func Run(
 			retryChannel <- true
 			return pluginCtx, fmt.Errorf("error executing register-runner.bash: %s", registerRunnerErr.Error())
 		}
-		defer removeSelfHostedRunner(workerCtx, pluginCtx, *vm, &workflowJob, metricsData)
+		defer removeSelfHostedRunner(workerCtx, pluginCtx, *vm, &queuedJob, metricsData)
 		// Start runner
 		select {
 		case <-completedJobChannel:
 			logger.InfoContext(pluginCtx, "completed job found before starting runner")
-			completedJobChannel <- github.WorkflowJobEvent{} // send true to the channel to stop the check for completed jobs goroutine
+			completedJobChannel <- internalGithub.QueueJob{} // send true to the channel to stop the check for completed jobs goroutine
 			return pluginCtx, nil
 		case <-pluginCtx.Done():
 			logger.WarnContext(pluginCtx, "context canceled before start runner")
@@ -970,7 +944,7 @@ func Run(
 		select {
 		case <-completedJobChannel:
 			logger.InfoContext(pluginCtx, "completed job found before jobCompleted checks")
-			completedJobChannel <- github.WorkflowJobEvent{} // send true to the channel to stop the check for completed jobs goroutine
+			completedJobChannel <- internalGithub.QueueJob{} // send true to the channel to stop the check for completed jobs goroutine
 			return pluginCtx, nil
 		case <-pluginCtx.Done():
 			logger.WarnContext(pluginCtx, "context canceled before jobCompleted checks")
@@ -988,7 +962,7 @@ func Run(
 	for {
 		select {
 		case completedJobEvent := <-completedJobChannel:
-			if *completedJobEvent.Action == "completed" {
+			if completedJobEvent.Action == "completed" {
 				pluginCtx = logging.AppendCtx(pluginCtx, slog.String("conclusion", *completedJobEvent.WorkflowJob.Conclusion))
 				logger.InfoContext(pluginCtx, "job completed",
 					"job_id", completedJobEvent.WorkflowJob.ID,
@@ -1020,7 +994,7 @@ func Run(
 						LastFailedRun:       time.Now(),
 						LastFailedRunJobUrl: *completedJobEvent.WorkflowJob.HTMLURL,
 					})
-					workflowJob.Conclusion = "failure" // support removeSelfHostedRunner
+					queuedJob.WorkflowJob.Conclusion = github.String("failure") // support removeSelfHostedRunner
 				}
 			} else if logCounter%2 == 0 {
 				if pluginCtx.Err() != nil {
@@ -1028,24 +1002,24 @@ func Run(
 					return pluginCtx, nil
 				}
 			}
-			completedJobChannel <- github.WorkflowJobEvent{} // so cleanup can also see it as completed
+			completedJobChannel <- internalGithub.QueueJob{} // so cleanup can also see it as completed
 			return pluginCtx, nil
 		case <-pluginCtx.Done():
 			logger.WarnContext(pluginCtx, "context canceled while watching for job completion")
 			return pluginCtx, nil
 		default:
 			time.Sleep(time.Duration(jobStatusCheckIntervalSeconds) * time.Second)
-			inProgressQueue, err := InQueue(pluginCtx, logger, workflowJob.JobID, "anklet/jobs/github/in_progress/"+pluginConfig.Owner)
+			inProgressQueue, err := internalGithub.InQueue(pluginCtx, logger, *queuedJob.WorkflowJob.ID, "anklet/jobs/github/in_progress/"+pluginConfig.Owner)
 			if err != nil {
 				logger.ErrorContext(pluginCtx, "error searching in queue", "error", err)
 			}
 			if inProgressQueue {
 				if logCounter%2 == 0 {
-					logger.InfoContext(pluginCtx, "job found registered runner and is now in progress", "job_id", workflowJob.JobID)
+					logger.InfoContext(pluginCtx, "job found registered runner and is now in progress", "job_id", *queuedJob.WorkflowJob.ID)
 				}
 			} else {
 				if !alreadyLogged {
-					logger.InfoContext(pluginCtx, "job is waiting for registered runner", "job_id", workflowJob.JobID)
+					logger.InfoContext(pluginCtx, "job is waiting for registered runner", "job_id", *queuedJob.WorkflowJob.ID)
 					alreadyLogged = true
 				}
 			}
@@ -1060,7 +1034,7 @@ func Run(
 				// if not, then the runner registration failed
 				if !inProgressQueue {
 					logger.ErrorContext(pluginCtx, "waiting for runner registration timed out, will retry")
-					workflowJob.Conclusion = "failure" // support removeSelfHostedRunner
+					queuedJob.WorkflowJob.Conclusion = github.String("failure") // support removeSelfHostedRunner
 					retryChannel <- true
 					return pluginCtx, nil
 				}
@@ -1113,7 +1087,7 @@ func removeSelfHostedRunner(
 	workerCtx context.Context,
 	pluginCtx context.Context,
 	vm anka.VM,
-	workflow *WorkflowRunJobDetail,
+	queuedJob *internalGithub.QueueJob,
 	metricsData *metrics.MetricsDataLock,
 ) {
 	var err error
@@ -1135,7 +1109,7 @@ func removeSelfHostedRunner(
 	if err != nil {
 		logger.ErrorContext(pluginCtx, "error getting isRepoSet from context", "err", err)
 	}
-	if workflow.Conclusion == "failure" {
+	if queuedJob.WorkflowJob.Conclusion != nil && *queuedJob.WorkflowJob.Conclusion == "failure" {
 		if isRepoSet {
 			pluginCtx, runnersList, response, err = internalGithub.ExecuteGitHubClientFunction(workerCtx, pluginCtx, logger, func() (*github.Runners, *github.Response, error) {
 				runnersList, resp, err := githubClient.Actions.ListRunners(context.Background(), pluginConfig.Owner, pluginConfig.Repo, &github.ListRunnersOptions{})
@@ -1165,7 +1139,7 @@ func removeSelfHostedRunner(
 						"ankaTemplateTag": "(using latest)",
 						"err": "DELETE https://api.github.com/repos/veertuinc/anklet/actions/runners/142: 422 Bad request - Runner \"anklet-vm-\u003cuuid\u003e\" is still running a job\" []",
 					*/
-					err := sendCancelWorkflowRun(workerCtx, pluginCtx, logger, *workflow, metricsData)
+					err := sendCancelWorkflowRun(workerCtx, pluginCtx, logger, *queuedJob, metricsData)
 					if err != nil {
 						logger.ErrorContext(pluginCtx, "error sending cancel workflow run", "err", err)
 						return
