@@ -733,9 +733,9 @@ func Run(
 	// Determine CPU and MEM from the template and tag
 	vmHasEnoughResources, vmInfo, err := internalAnka.VmHasEnoughResources(pluginCtx, ankaTemplate)
 	if err != nil {
-		logger.ErrorContext(pluginCtx, "error checking if vm can run", "err", err)
+		logger.WarnContext(pluginCtx, "error checking if host has enough resources", "err", err)
 		retryChannel <- true
-		return pluginCtx, fmt.Errorf("error checking if vm can run: %s", err.Error())
+		return pluginCtx, nil
 	}
 	queuedJob.RequiredResources.CPU = vmInfo.CPU
 	queuedJob.RequiredResources.MEMBytes = vmInfo.MEMBytes
@@ -751,7 +751,7 @@ func Run(
 			if err != nil {
 				logger.ErrorContext(pluginCtx, "error checking if vm can run", "err", err)
 				retryChannel <- true
-				return pluginCtx, fmt.Errorf("error checking if vm can run: %s", err.Error())
+				return pluginCtx, nil
 			}
 			if pluginCtx.Err() != nil {
 				retryChannel <- true
@@ -778,15 +778,15 @@ func Run(
 			})
 		}
 		if err != nil {
-			logger.DebugContext(pluginCtx, "error creating registration token", "err", err, "response", response)
+			logger.ErrorContext(pluginCtx, "error creating registration token", "err", err, "response", response)
 			metricsData.IncrementTotalFailedRunsSinceStart(workerCtx, pluginCtx, logger)
 			retryChannel <- true
-			return pluginCtx, fmt.Errorf("error creating registration token: %s", err.Error())
+			return pluginCtx, nil
 		}
 		if *runnerRegistration.Token == "" {
-			logger.DebugContext(pluginCtx, "registration token is empty; something wrong with github or your service token", "response", response)
+			logger.ErrorContext(pluginCtx, "registration token is empty; something wrong with github or your service token", "response", response)
 			retryChannel <- true
-			return pluginCtx, fmt.Errorf("registration token is empty; something wrong with github or your service token")
+			return pluginCtx, nil
 		}
 
 		if pluginCtx.Err() != nil {
