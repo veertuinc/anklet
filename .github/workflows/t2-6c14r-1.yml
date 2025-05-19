@@ -17,4 +17,5 @@ jobs:
           hostname
           echo "123"
           sysctl -n hw.ncpu
+          sleep 30
       - run: whoami
