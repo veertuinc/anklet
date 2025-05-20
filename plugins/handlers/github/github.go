@@ -604,7 +604,7 @@ func Run(
 			responsibleForPrepLock = true
 			break
 		}
-		logger.WarnContext(pluginCtx, "cannot run vm yet, another plugin is already preparing a vm, retrying...")
+		logger.WarnContext(pluginCtx, "another plugin is still preparing, retrying...")
 		time.Sleep(2 * time.Second)
 		if pluginCtx.Err() != nil {
 			return pluginCtx, fmt.Errorf("context canceled while waiting for prep lock")
@@ -732,13 +732,15 @@ func Run(
 
 	// Determine CPU and MEM from the template and tag
 	vmHasEnoughResources, vmInfo, err := internalAnka.VmHasEnoughResources(pluginCtx, ankaTemplate)
+	queuedJob.RequiredResources.CPU = vmInfo.CPU
+	queuedJob.RequiredResources.MEMBytes = vmInfo.MEMBytes
 	if err != nil {
-		logger.WarnContext(pluginCtx, "error checking if host has enough resources", "err", err)
+		logger.WarnContext(pluginCtx, "problem checking if host has enough resources", "err", err)
+		// set the CPU and MEM so that we don't try to run the job again
+		internalGithub.UpdateJobInDB(pluginCtx, "anklet/jobs/github/queued/"+pluginConfig.Owner+"/"+pluginConfig.Name, &queuedJob)
 		retryChannel <- true
 		return pluginCtx, nil
 	}
-	queuedJob.RequiredResources.CPU = vmInfo.CPU
-	queuedJob.RequiredResources.MEMBytes = vmInfo.MEMBytes
 	logger.DebugContext(pluginCtx, "queuedJob.RequiredResources", "requiredResources", queuedJob.RequiredResources)
 	if !vmHasEnoughResources {
 		responsibleForBlocking = true
@@ -959,6 +961,7 @@ func Run(
 	logCounter := 0
 	alreadyLogged := false
 	jobStatusCheckIntervalSeconds := 10
+	firstLog := true
 	for {
 		select {
 		case completedJobEvent := <-completedJobChannel:
@@ -1015,7 +1018,12 @@ func Run(
 			}
 			if inProgressQueue {
 				if logCounter%2 == 0 {
-					logger.InfoContext(pluginCtx, "job found registered runner and is now in progress", "job_id", *queuedJob.WorkflowJob.ID)
+					if firstLog {
+						logger.InfoContext(pluginCtx, "job found registered runner and is now in progress", "job_id", *queuedJob.WorkflowJob.ID)
+						firstLog = false
+					} else {
+						logger.InfoContext(pluginCtx, "job is still in progress", "job_id", *queuedJob.WorkflowJob.ID)
+					}
 				}
 			} else {
 				if !alreadyLogged {
@@ -1082,7 +1090,7 @@ func Run(
 }
 
 // removeSelfHostedRunner handles removing a registered runner if the registered runner was orphaned somehow
-// it's extra safety should the runner not be registered with --ephemeral
+// it's extra safety should the runner not be registered with --ephemera
 func removeSelfHostedRunner(
 	workerCtx context.Context,
 	pluginCtx context.Context,
@@ -1109,7 +1117,8 @@ func removeSelfHostedRunner(
 	if err != nil {
 		logger.ErrorContext(pluginCtx, "error getting isRepoSet from context", "err", err)
 	}
-	if queuedJob.WorkflowJob.Conclusion != nil && *queuedJob.WorkflowJob.Conclusion == "failure" {
+	if queuedJob.WorkflowJob.Conclusion != nil && (*queuedJob.WorkflowJob.Conclusion == "failure" || *queuedJob.WorkflowJob.Conclusion == "cancelled") {
+		logger.InfoContext(pluginCtx, "attempting to remove self-hosted runner", "job_id", *queuedJob.WorkflowJob.ID)
 		if isRepoSet {
 			pluginCtx, runnersList, response, err = internalGithub.ExecuteGitHubClientFunction(workerCtx, pluginCtx, logger, func() (*github.Runners, *github.Response, error) {
 				runnersList, resp, err := githubClient.Actions.ListRunners(context.Background(), pluginConfig.Owner, pluginConfig.Repo, &github.ListRunnersOptions{})
@@ -1168,5 +1177,7 @@ func removeSelfHostedRunner(
 			// 	logger.InfoContext(pluginCtx, "no matching runner found")
 			// }
 		}
+	} else {
+		logger.WarnContext(pluginCtx, "job is not in failure or cancelled state, skipping runner removal")
 	}
 }

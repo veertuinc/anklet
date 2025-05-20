@@ -256,15 +256,18 @@ func worker(
 	go func() {
 		defer signal.Stop(sigChan)
 		defer close(sigChan)
+		var sigCount int
 		for sig := range sigChan {
 			switch sig {
-			// case syscall.SIGTERM:
-			// 	logger.WarnContext(workerCtx, "best effort graceful shutdown, interrupting the job as soon as possible...")
-			// 	workerCancel()
 			case syscall.SIGQUIT: // doesn't work for receivers since they don't loop
 				parentLogger.WarnContext(workerCtx, "graceful shutdown, waiting for jobs to finish...")
 				toRunOnce = "true"
 			default:
+				sigCount++
+				if sigCount >= 2 {
+					parentLogger.WarnContext(workerCtx, "forceful shutdown after second interrupt... be sure to clean up any self-hosted runners and VMs!")
+					os.Exit(1)
+				}
 				parentLogger.WarnContext(workerCtx, "best effort graceful shutdown, interrupting the job as soon as possible...")
 				workerCancel()
 				returnToMainQueue <- true

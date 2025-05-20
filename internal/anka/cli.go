@@ -358,9 +358,9 @@ func (cli *Cli) AnkaList(pluginCtx context.Context, args ...string) (*AnkaJson, 
 }
 
 func (cli *Cli) AnkaCopyOutOfVM(ctx context.Context, objectToCopyOut string, hostLevelDestination string) error {
-	if ctx.Err() != nil {
-		return fmt.Errorf("context canceled before AnkaCopyOutOfVM")
-	}
+	// if ctx.Err() != nil {
+	// 	return fmt.Errorf("context canceled before AnkaCopyOutOfVM")
+	// }
 	logger, err := logging.GetLoggerFromContext(ctx)
 	if err != nil {
 		return err
