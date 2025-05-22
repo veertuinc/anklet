@@ -57,11 +57,6 @@ type Workflow struct {
 	Exclude []string `yaml:"exclude"`
 }
 
-type RequiredResources struct {
-	CPU int `yaml:"cpu"`
-	MEM int `yaml:"mem"`
-}
-
 type Plugin struct {
 	SleepInterval              int      `yaml:"sleep_interval"`
 	Name                       string   `yaml:"name"`
@@ -209,12 +204,14 @@ func GetPluginFromContext(ctx context.Context) (Plugin, error) {
 }
 
 type Globals struct {
-	RunOnce      string
-	PullLock     *sync.Mutex
-	PrepLock     *sync.Mutex
-	PluginsPath  string
-	DebugEnabled bool
-	IsBlocked    atomic.Bool
+	RunOnce         string
+	PullLock        *sync.Mutex
+	PrepLock        *sync.Mutex
+	PluginsPath     string
+	DebugEnabled    bool
+	IsBlocked       atomic.Bool
+	HostCPUCount    int
+	HostMemoryBytes uint64
 }
 
 func GetGlobalsFromContext(ctx context.Context) (*Globals, error) {

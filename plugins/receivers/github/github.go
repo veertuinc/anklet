@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/google/go-github/v66/github"
+	"github.com/veertuinc/anklet/internal/anka"
 	"github.com/veertuinc/anklet/internal/config"
 	"github.com/veertuinc/anklet/internal/database"
 	internalGithub "github.com/veertuinc/anklet/internal/github"
@@ -166,10 +167,7 @@ func Run(
 				Repository: internalGithub.Repository{
 					Name: workflowJob.Repo.Name,
 				},
-				RequiredResources: internalGithub.RequiredResources{
-					CPU:      0,
-					MEMBytes: 0,
-				},
+				AnkaVM: anka.VM{},
 			}
 			logger.InfoContext(pluginCtx, "received workflow job to consider",
 				"workflowJob.WorkflowJob.Labels", simplifiedWorkflowJobEvent.WorkflowJob.Labels,
@@ -184,6 +182,7 @@ func Run(
 				"workflowJob.Action", simplifiedWorkflowJobEvent.Action,
 				"workflowJob.WorkflowJob.WorkflowName", simplifiedWorkflowJobEvent.WorkflowJob.WorkflowName,
 				"workflowJob.Repository.Name", simplifiedWorkflowJobEvent.Repository.Name,
+				"workflowJob.AnkaVM", simplifiedWorkflowJobEvent.AnkaVM,
 			)
 			if *workflowJob.Action == "queued" {
 				if exists_in_array_partial(simplifiedWorkflowJobEvent.WorkflowJob.Labels, []string{"anka-template"}) {
@@ -214,13 +213,16 @@ func Run(
 							"conclusion", simplifiedWorkflowJobEvent.WorkflowJob.Conclusion,
 							"started_at", simplifiedWorkflowJobEvent.WorkflowJob.StartedAt,
 							"completed_at", simplifiedWorkflowJobEvent.WorkflowJob.CompletedAt,
-							"required_resources", simplifiedWorkflowJobEvent.RequiredResources,
 							"repository", simplifiedWorkflowJobEvent.Repository,
 							"action", simplifiedWorkflowJobEvent.Action,
+							"anka_vm", simplifiedWorkflowJobEvent.AnkaVM,
 						)
 					}
 				}
 			} else if *workflowJob.Action == "in_progress" {
+				if workflowJob.WorkflowJob.Conclusion != nil && *workflowJob.WorkflowJob.Conclusion == "cancelled" {
+					return
+				}
 				// store in_progress so we can know if the registration failed
 				if exists_in_array_partial(simplifiedWorkflowJobEvent.WorkflowJob.Labels, []string{"anka-template"}) {
 					// make sure it doesn't already exist

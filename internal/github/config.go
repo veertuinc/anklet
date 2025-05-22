@@ -6,21 +6,15 @@ import (
 )
 
 type QueueJob struct {
-	Type              string                `json:"type"`
-	WorkflowJob       SimplifiedWorkflowJob `json:"workflow_job"`
-	AnkaVM            anka.VM               `json:"anka_vm"`
-	RequiredResources RequiredResources     `json:"required_resources"`
-	Repository        Repository            `json:"repository"`
-	Action            string                `json:"action"`
+	Type        string                `json:"type"`
+	WorkflowJob SimplifiedWorkflowJob `json:"workflow_job"`
+	AnkaVM      anka.VM               `json:"anka_vm"`
+	Repository  Repository            `json:"repository"`
+	Action      string                `json:"action"`
 }
 
 type Repository struct {
 	Name *string `json:"name"`
-}
-
-type RequiredResources struct {
-	CPU      int    `json:"CPU"`
-	MEMBytes uint64 `json:"MEMBytes"`
 }
 
 type SimplifiedWorkflowJob struct {

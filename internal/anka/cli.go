@@ -474,6 +474,7 @@ func (cli *Cli) EnsureVMTemplateExists(workerCtx context.Context, pluginCtx cont
 		}
 		logger.DebugContext(pluginCtx, "list", "stdout", list.Body)
 	}
+	logger.InfoContext(pluginCtx, "ensuring vm template exists on host", "targetTemplate", targetTemplate, "targetTag", targetTag)
 	logger.DebugContext(pluginCtx, "list output", "json", list)
 	if list != nil {
 		if list.Status == "ERROR" {

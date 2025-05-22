@@ -75,6 +75,10 @@ func DeleteFromQueue(pluginCtx context.Context, logger *slog.Logger, jobID int64
 }
 
 func UpdateJobInDB(pluginCtx context.Context, queue string, upToDateJob *QueueJob) error {
+	logger, err := logging.GetLoggerFromContext(pluginCtx)
+	if err != nil {
+		return err
+	}
 	databaseContainer, err := database.GetDatabaseFromContext(pluginCtx)
 	if err != nil {
 		return err
@@ -84,15 +88,17 @@ func UpdateJobInDB(pluginCtx context.Context, queue string, upToDateJob *QueueJo
 	if err != nil {
 		return fmt.Errorf("error getting job list: %w", err)
 	}
+	logger.DebugContext(pluginCtx, "jobList", "jobList", jobList)
 	// Find the matching job
 	for i, jobStr := range jobList {
-		var existingJob QueueJob
-		_, err, typeErr := database.Unwrap[QueueJob](jobStr)
+		existingJob, err, typeErr := database.Unwrap[QueueJob](jobStr)
 		if err != nil || typeErr != nil {
 			continue
 		}
-		if existingJob.WorkflowJob.ID == upToDateJob.WorkflowJob.ID &&
-			existingJob.WorkflowJob.RunID == upToDateJob.WorkflowJob.RunID {
+		logger.DebugContext(pluginCtx, "existingJob", "existingJob", existingJob)
+		logger.DebugContext(pluginCtx, "upToDateJob", "upToDateJob", upToDateJob)
+		if *existingJob.WorkflowJob.ID == *upToDateJob.WorkflowJob.ID &&
+			*existingJob.WorkflowJob.RunID == *upToDateJob.WorkflowJob.RunID {
 			// Update the job at this index
 			updatedJob, err := json.Marshal(upToDateJob)
 			if err != nil {
@@ -102,9 +108,15 @@ func UpdateJobInDB(pluginCtx context.Context, queue string, upToDateJob *QueueJo
 			if err != nil {
 				return fmt.Errorf("error updating job in database: %w", err)
 			}
+			logger.InfoContext(pluginCtx, "job updated in database", "job", upToDateJob)
+			// Find the job in the database by ID and run_id within the plugin queue
+			jobList, err := databaseContainer.Client.LRange(pluginCtx, queue, 0, -1).Result()
+			if err != nil {
+				return fmt.Errorf("error getting job list: %w", err)
+			}
+			logger.DebugContext(pluginCtx, "jobList", "jobList", jobList)
 			return nil
 		}
 	}
-
 	return fmt.Errorf("job not found in database")
 }

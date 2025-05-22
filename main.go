@@ -21,6 +21,7 @@ import (
 	"github.com/veertuinc/anklet/internal/anka"
 	"github.com/veertuinc/anklet/internal/config"
 	"github.com/veertuinc/anklet/internal/database"
+	"github.com/veertuinc/anklet/internal/host"
 	"github.com/veertuinc/anklet/internal/logging"
 	"github.com/veertuinc/anklet/internal/metrics"
 	"github.com/veertuinc/anklet/internal/run"
@@ -102,7 +103,7 @@ func main() {
 	}
 	parentLogger.InfoContext(parentCtx, "loaded config", slog.Any("config", loadedConfig))
 
-	parentCtx = logging.AppendCtx(parentCtx, slog.String("ankletVersion", version))
+	parentCtx = logging.AppendCtx(parentCtx, slog.String("version", version))
 
 	var suffix string
 	if loadedConfig.Metrics.Aggregator {
@@ -182,13 +183,28 @@ func main() {
 
 	parentLogger.InfoContext(parentCtx, "plugins path", slog.String("pluginsPath", pluginsPath))
 
+	hostCPUCount, err := host.GetHostCPUCount(parentCtx)
+	if err != nil {
+		parentLogger.ErrorContext(parentCtx, "error getting host cpu count", "error", err)
+		os.Exit(1)
+	}
+	parentCtx = logging.AppendCtx(parentCtx, slog.Int("hostCPUCount", hostCPUCount))
+	hostMemoryBytes, err := host.GetHostMemoryBytes(parentCtx)
+	if err != nil {
+		parentLogger.ErrorContext(parentCtx, "error getting host memory bytes", "error", err)
+		os.Exit(1)
+	}
+	parentCtx = logging.AppendCtx(parentCtx, slog.Uint64("hostMemoryBytes", hostMemoryBytes))
+
 	parentCtx = context.WithValue(parentCtx, config.ContextKey("globals"), &config.Globals{
-		RunOnce:      runOnce,
-		PullLock:     &sync.Mutex{},
-		PluginsPath:  pluginsPath,
-		DebugEnabled: logging.IsDebugEnabled(),
-		IsBlocked:    atomic.Bool{},
-		PrepLock:     &sync.Mutex{},
+		RunOnce:         runOnce,
+		PullLock:        &sync.Mutex{},
+		PluginsPath:     pluginsPath,
+		DebugEnabled:    logging.IsDebugEnabled(),
+		IsBlocked:       atomic.Bool{},
+		PrepLock:        &sync.Mutex{},
+		HostCPUCount:    hostCPUCount,
+		HostMemoryBytes: hostMemoryBytes,
 	})
 
 	httpTransport := http.DefaultTransport
