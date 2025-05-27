@@ -204,14 +204,15 @@ func GetPluginFromContext(ctx context.Context) (Plugin, error) {
 }
 
 type Globals struct {
-	RunOnce         string
-	PullLock        *sync.Mutex
-	PrepLock        *sync.Mutex
-	PluginsPath     string
-	DebugEnabled    bool
-	IsBlocked       atomic.Bool
-	HostCPUCount    int
-	HostMemoryBytes uint64
+	RunOnce          string
+	PullLock         *sync.Mutex
+	PrepLock         *sync.Mutex
+	PluginsPath      string
+	DebugEnabled     bool
+	IsBlocked        atomic.Bool
+	HostCPUCount     int
+	HostMemoryBytes  uint64
+	QueueTargetIndex int64
 }
 
 func GetGlobalsFromContext(ctx context.Context) (*Globals, error) {
@@ -232,6 +233,20 @@ func (g *Globals) Unblock() {
 
 func (g *Globals) IsBlockedState() bool {
 	return g.IsBlocked.Load()
+}
+
+func (g *Globals) IncrementQueueTargetIndex() {
+	g.QueueTargetIndex++
+}
+
+func (g *Globals) DecrementQueueTargetIndex() {
+	if g.QueueTargetIndex > 0 {
+		g.QueueTargetIndex--
+	}
+}
+
+func (g *Globals) ResetQueueTargetIndex() {
+	g.QueueTargetIndex = 0
 }
 
 func GetLoadedConfigFromContext(ctx context.Context) (*Config, error) {

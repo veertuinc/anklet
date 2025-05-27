@@ -3,9 +3,9 @@ package github
 import (
 	"context"
 	"fmt"
+	"reflect"
 
 	"github.com/redis/go-redis/v9"
-	"github.com/veertuinc/anklet/internal/anka"
 	"github.com/veertuinc/anklet/internal/database"
 )
 
@@ -17,66 +17,62 @@ func GetQueueSize(pluginCtx context.Context, queueName string) (int64, error) {
 	return databaseContainer.Client.LLen(pluginCtx, queueName).Result()
 }
 
-func GetQueuedJob(pluginCtx context.Context, mainQueueName string, pausedQueueName string) (string, error) {
+func GetQueuedJob(
+	pluginCtx context.Context,
+	queueName string,
+	queueTargetIndex int64,
+) (string, error) {
 	databaseContainer, err := database.GetDatabaseFromContext(pluginCtx)
 	if err != nil {
 		return "", fmt.Errorf("error getting database client from context: %s", err.Error())
 	}
-	var queuedJobString string
-	// get the next job from the resource specific queue; they get priority for this host
-	for {
-		// Check if there are any paused jobs that can be resumed
-		// Check the length of the paused queue
-		pausedQueueLength, err := databaseContainer.Client.LLen(pluginCtx, pausedQueueName).Result()
-		if err != nil {
-			return "", fmt.Errorf("error getting paused queue length: %s", err.Error())
-		}
-		if pausedQueueLength == 0 {
-			break
-		}
-		pausedJobString, err := databaseContainer.Client.LPop(pluginCtx, pausedQueueName).Result()
-		if err == redis.Nil {
-			break
-		}
-		if err != nil {
-			return "", fmt.Errorf("error getting paused jobs: %s", err.Error())
-		}
+	// we use Range here + Rem instead of Pop so we can use QueueTargetIndex.
+	// QueueTargetIndex is the index we want to start at, allowing us to push
+	// past the jobs we can't run due to host limits but are still in the main queue.
+	queuedJobsString, err := databaseContainer.Client.LRange(pluginCtx, queueName, queueTargetIndex, -1).Result()
+	if err == redis.Nil {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("error getting queued job: %s", err.Error())
+	}
+	targetElement := queuedJobsString[0]
+	// we use LRem to target removal of the element. If something else got the element already, we just return nothing and retry
+	success, err := databaseContainer.Client.LRem(pluginCtx, queueName, 1, targetElement).Result()
+	if err != nil {
+		return "", fmt.Errorf("error removing queued job: %s", err.Error())
+	}
+	if success == 1 {
+		return targetElement, nil
+	}
+	return "", nil
+}
 
-		// Process each paused job
-		var typeErr error
-		pausedJob, err, typeErr := database.Unwrap[QueueJob](pausedJobString)
+func GetJobFromQueueByKeyAndValue(
+	pluginCtx context.Context,
+	queueName string,
+	key string,
+	value string,
+) (QueueJob, error) {
+	databaseContainer, err := database.GetDatabaseFromContext(pluginCtx)
+	if err != nil {
+		return QueueJob{}, fmt.Errorf("error getting database client from context: %s", err.Error())
+	}
+	queuedJobsString, err := databaseContainer.Client.LRange(pluginCtx, queueName, 0, -1).Result()
+	if err != nil {
+		return QueueJob{}, fmt.Errorf("error getting queued jobs: %s", err.Error())
+	}
+	for _, job := range queuedJobsString {
+		queuedJob, err, typeErr := database.Unwrap[QueueJob](job)
 		if err != nil || typeErr != nil {
-			return "", fmt.Errorf("error unmarshalling job: %s", err.Error())
+			return QueueJob{}, fmt.Errorf("error unmarshalling job: %s", err.Error())
 		}
-		err = anka.VmHasEnoughHostResources(pluginCtx, pausedJob.AnkaVM)
-		if err != nil {
-			databaseContainer.Client.RPush(pluginCtx, pausedQueueName, pausedJobString)
-			if pausedQueueLength == 1 { // don't go into a forever loop
-				break
-			}
-			continue
-		}
-		err = anka.VmHasEnoughResources(pluginCtx, pausedJob.AnkaVM)
-		if err != nil {
-			databaseContainer.Client.RPush(pluginCtx, pausedQueueName, pausedJobString)
-			if pausedQueueLength == 1 { // don't go into a forever loop
-				break
-			}
-			continue
-		}
-		queuedJobString = pausedJobString
-		break
-	}
-	// get the next job from the main queue if nothing in hostResourceQueue
-	if queuedJobString == "" {
-		queuedJobString, err = databaseContainer.Client.LPop(pluginCtx, mainQueueName).Result()
-		if err == redis.Nil {
-			return "", nil
-		}
-		if err != nil {
-			databaseContainer.Client.RPush(pluginCtx, mainQueueName, queuedJobString)
-			return "", fmt.Errorf("error getting queued jobs: %s", err.Error())
+		// Dynamically access the field using reflection
+		val := reflect.ValueOf(queuedJob)
+		field := val.FieldByName(key)
+		if field.IsValid() && field.Kind() == reflect.String && field.String() == value {
+			return queuedJob, nil
 		}
 	}
-	return queuedJobString, nil
+	return QueueJob{}, nil
 }

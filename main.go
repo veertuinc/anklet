@@ -264,10 +264,9 @@ func worker(
 	workerCtx, workerCancel := context.WithCancel(parentCtx)
 	suffix := parentCtx.Value(config.ContextKey("suffix")).(string)
 	parentLogger.InfoContext(workerCtx, "starting anklet"+suffix)
+	// returnToMainQueue needs to be worker level so a user graceful shutdown can return jobs to the queue
 	returnToMainQueue := make(chan bool, 1)
-	jobFailureChannel := make(chan bool, 1)
 	workerCtx = context.WithValue(workerCtx, config.ContextKey("returnToMainQueue"), returnToMainQueue)
-	workerCtx = context.WithValue(workerCtx, config.ContextKey("jobFailureChannel"), jobFailureChannel)
 	var wg sync.WaitGroup
 	go func() {
 		defer signal.Stop(sigChan)

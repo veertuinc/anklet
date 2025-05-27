@@ -11,6 +11,7 @@ type QueueJob struct {
 	AnkaVM      anka.VM               `json:"anka_vm"`
 	Repository  Repository            `json:"repository"`
 	Action      string                `json:"action"`
+	PausedOn    string                `json:"paused_on"`
 }
 
 type Repository struct {
