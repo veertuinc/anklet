@@ -36,6 +36,9 @@ func GetQueuedJob(
 	if err != nil {
 		return "", fmt.Errorf("error getting queued job: %s", err.Error())
 	}
+	if len(queuedJobsString) == 0 {
+		return "", nil
+	}
 	targetElement := queuedJobsString[0]
 	// we use LRem to target removal of the element. If something else got the element already, we just return nothing and retry
 	success, err := databaseContainer.Client.LRem(pluginCtx, queueName, 1, targetElement).Result()

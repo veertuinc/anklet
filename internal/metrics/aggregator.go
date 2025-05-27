@@ -11,7 +11,6 @@ import (
 
 	"github.com/veertuinc/anklet/internal/config"
 	"github.com/veertuinc/anklet/internal/database"
-	"github.com/veertuinc/anklet/internal/logging"
 )
 
 // Start runs the HTTP server
@@ -537,7 +536,7 @@ func ExportMetricsToDB(pluginCtx context.Context, logger *slog.Logger) {
 			case <-pluginCtx.Done():
 				return
 			case <-ticker.C:
-				logging.DevContext(pluginCtx, "Exporting metrics to database")
+				// logging.DevContext(pluginCtx, "Exporting metrics to database")
 				ctxPlugin, err := config.GetPluginFromContext(pluginCtx)
 				if err != nil {
 					logger.ErrorContext(pluginCtx, "error getting plugin from context", "error", err.Error())
@@ -573,16 +572,16 @@ func ExportMetricsToDB(pluginCtx context.Context, logger *slog.Logger) {
 						logger.ErrorContext(pluginCtx, "error storing metrics data in Redis", "error", setting.Err())
 						return
 					}
-					exists, err := databaseContainer.Client.Exists(pluginCtx, "anklet/metrics/"+ctxPlugin.Owner+"/"+ctxPlugin.Name).Result()
+					_, err := databaseContainer.Client.Exists(pluginCtx, "anklet/metrics/"+ctxPlugin.Owner+"/"+ctxPlugin.Name).Result()
 					if err != nil {
 						logger.ErrorContext(pluginCtx, "error checking if key exists in Redis", "key", "anklet/metrics/"+ctxPlugin.Owner+"/"+ctxPlugin.Name, "error", err)
 						return
 					}
-					if exists == 1 {
-						logging.DevContext(pluginCtx, "successfully stored metrics data in Redis, key: anklet/metrics/"+ctxPlugin.Owner+"/"+ctxPlugin.Name+" exists: true")
-					} else {
-						logging.DevContext(pluginCtx, "successfully stored metrics data in Redis, key: anklet/metrics/"+ctxPlugin.Owner+"/"+ctxPlugin.Name+" exists: false")
-					}
+					// if exists == 1 {
+					// 	logging.DevContext(pluginCtx, "successfully stored metrics data in Redis, key: anklet/metrics/"+ctxPlugin.Owner+"/"+ctxPlugin.Name+" exists: true")
+					// } else {
+					// 	logging.DevContext(pluginCtx, "successfully stored metrics data in Redis, key: anklet/metrics/"+ctxPlugin.Owner+"/"+ctxPlugin.Name+" exists: false")
+					// }
 				}
 			}
 		}

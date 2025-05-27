@@ -468,7 +468,7 @@ func cleanup(
 					}
 					databaseContainer.Client.Del(cleanupContext, pluginQueueName+"/cleaning")
 				default:
-					logger.WarnContext(pluginCtx, "pushing job back to"+pluginQueueName)
+					logger.WarnContext(pluginCtx, "pushing job back to "+pluginQueueName)
 					_, err := databaseContainer.Client.RPopLPush(cleanupContext, pluginQueueName+"/cleaning", pluginQueueName).Result()
 					if err != nil {
 						logger.ErrorContext(pluginCtx, "error pushing job back to queued", "err", err)
