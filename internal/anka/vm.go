@@ -40,7 +40,7 @@ func GetAnkaVmInfo(pluginCtx context.Context, name string) (*VM, error) {
 
 	logger.DebugContext(pluginCtx, "anka show output", "output", ankaShowOutput)
 
-	vm.Name = name
+	//vm.Name = name this would end up the template name, which we don't want
 	vm.CPUCount = ankaShowOutput.CPU
 	vm.MEMBytes = ankaShowOutput.MEMBytes
 	return &vm, nil

@@ -900,16 +900,18 @@ func Run(
 
 	if queuedJob.AnkaVM.CPUCount == 0 || queuedJob.AnkaVM.MEMBytes == 0 {
 		// Determine CPU and MEM from the template and tag
-		vmInfo, err := internalAnka.GetAnkaVmInfo(pluginCtx, ankaTemplate)
+		templateInfo, err := internalAnka.GetAnkaVmInfo(pluginCtx, ankaTemplate)
 		if err != nil {
 			logger.ErrorContext(pluginCtx, "error getting vm info", "err", err)
 			retryChannel <- true
 			return pluginCtx, fmt.Errorf("error getting vm info: %s", err.Error())
 		}
-		queuedJob.AnkaVM = *vmInfo
+		queuedJob.AnkaVM = *templateInfo
 		internalGithub.UpdateJobInDB(pluginCtx, pluginQueueName, &queuedJob)
 	}
 	logger.DebugContext(pluginCtx, "vmInfo", "queuedJob.AnkaVM", queuedJob.AnkaVM)
+	pluginCtx = logging.AppendCtx(pluginCtx, slog.Int("vmCPUCount", queuedJob.AnkaVM.CPUCount))
+	pluginCtx = logging.AppendCtx(pluginCtx, slog.Uint64("vmMEMBytes", queuedJob.AnkaVM.MEMBytes))
 
 	if queuedJob.Action != "paused" { // no need to do this, we already did it when we got the paused job
 		// check if the host has enough resources to run this VM
@@ -996,28 +998,32 @@ func Run(
 		}
 
 		// Obtain Anka VM (and name)
-		newPluginCtx, vm, err := ankaCLI.ObtainAnkaVM(workerCtx, pluginCtx, ankaTemplate)
+		pluginCtx, vm, err := ankaCLI.ObtainAnkaVM(workerCtx, pluginCtx, ankaTemplate)
+		if vm != nil {
+			queuedJob.AnkaVM.Name = vm.Name
+			pluginCtx = logging.AppendCtx(pluginCtx, slog.String("vmName", vm.Name))
+		}
 		var wrappedVmJSON []byte
 		var wrappedVmErr error
 		if vm != nil {
 			wrappedVM := internalGithub.QueueJob{
 				Type:   "anka.VM",
-				AnkaVM: *vm,
+				AnkaVM: queuedJob.AnkaVM,
 			}
 			wrappedVmJSON, wrappedVmErr = json.Marshal(wrappedVM)
 			if wrappedVmErr != nil {
 				// logger.ErrorContext(pluginCtx, "error marshalling vm to json", "err", wrappedVmErr)
 				ankaCLI.AnkaDelete(workerCtx, pluginCtx, vm)
 				retryChannel <- true
-				return newPluginCtx, fmt.Errorf("error marshalling vm to json: %s", wrappedVmErr.Error())
+				return pluginCtx, fmt.Errorf("error marshalling vm to json: %s", wrappedVmErr.Error())
 			}
-			newPluginCtx = logging.AppendCtx(newPluginCtx, slog.String("vmName", vm.Name))
 		}
-		pluginCtx = newPluginCtx
 		if pluginCtx.Err() != nil {
 			ankaCLI.AnkaDelete(workerCtx, pluginCtx, vm)
 			return pluginCtx, fmt.Errorf("context canceled after ObtainAnkaVM")
 		}
+
+		pluginCtx = logging.AppendCtx(pluginCtx, slog.String("AnkaVM", fmt.Sprintf("%+v", queuedJob.AnkaVM)))
 
 		// If we were responsible for blocking, we need to unblock now so other plugins can start working again
 		if responsibleForBlocking {
@@ -1032,7 +1038,7 @@ func Run(
 		if dbErr != nil {
 			// logger.ErrorContext(pluginCtx, "error pushing vm data to database", "err", dbErr)
 			retryChannel <- true
-			return newPluginCtx, fmt.Errorf("error pushing vm data to database: %s", dbErr.Error())
+			return pluginCtx, fmt.Errorf("error pushing vm data to database: %s", dbErr.Error())
 		}
 		if err != nil {
 			// this is thrown, for example, when there is no capacity on the host

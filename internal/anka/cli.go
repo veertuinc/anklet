@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -278,7 +277,6 @@ func (cli *Cli) ObtainAnkaVM(workerCtx context.Context, pluginCtx context.Contex
 		return pluginCtx, nil, err
 	}
 	vmName := fmt.Sprintf("anklet-vm-%s", vmID.String())
-	pluginCtx = logging.AppendCtx(pluginCtx, slog.String("vmName", vmName))
 	vm := &VM{Name: vmName}
 	pluginCtx = context.WithValue(pluginCtx, config.ContextKey("ankavm"), vm)
 	err = cli.AnkaClone(pluginCtx, ankaTemplate)
