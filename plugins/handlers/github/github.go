@@ -213,6 +213,7 @@ func CheckForCompletedJobs(
 	for {
 		// BE VERY CAREFUL when you use return here. You could orphan the job if you're not careful.
 		checkForCompletedJobsMu.Lock()
+		// logger.DebugContext(pluginCtx, "checkForCompletedJobsMu locked")
 		// do not use 'continue' in the loop or else the ranOnce won't happen
 		// logging.DevContext(pluginCtx, "CheckForCompletedJobs "+pluginConfig.Name+" | runOnce "+fmt.Sprint(runOnce))
 		select {
@@ -228,6 +229,7 @@ func CheckForCompletedJobs(
 			returnToMainQueue <- true
 			return
 		case <-completedJobChannel:
+			logger.DebugContext(pluginCtx, "completedJobChannel")
 			globals.ResetQueueTargetIndex()
 			return
 		case <-pluginCtx.Done():
@@ -332,8 +334,6 @@ func cleanup(
 	logger *slog.Logger,
 	completedJobChannel chan internalGithub.QueueJob,
 	cleanupMu *sync.Mutex,
-	responsibleForBlocking *bool,
-	responsibleForPrepLock *bool,
 	mainQueueName string,
 	pluginQueueName string,
 	mainInProgressQueueName string,
@@ -343,21 +343,27 @@ func cleanup(
 	pausedCancellation chan bool,
 ) {
 	cleanupMu.Lock()
-	globals, err := config.GetGlobalsFromContext(pluginCtx)
+	workerGlobals, err := config.GetGlobalsFromContext(workerCtx)
 	if err != nil {
 		logger.ErrorContext(pluginCtx, "error getting globals from context", "err", err)
 		return
 	}
+	defer func() {
+		pluginGlobals, err := internalGithub.GetPluginGlobalsFromContext(pluginCtx)
+		if err != nil {
+			logger.ErrorContext(pluginCtx, "error getting plugin global from context", "err", err)
+			return
+		}
+		if pluginGlobals.AlreadyNextedPrepLock != nil && !*pluginGlobals.AlreadyNextedPrepLock {
+			workerGlobals.NextPluginForPrepLock()
+		}
+		if cleanupMu != nil {
+			cleanupMu.Unlock()
+		}
+	}()
 	// create an idependent copy of the pluginCtx so we can do cleanup even if pluginCtx got "context canceled"
 	cleanupContext := context.Background()
-	// If we were responsible for blocking, we need to unblock now so other plugins can start working again
-	if responsibleForBlocking != nil && *responsibleForBlocking {
-		globals.Unblock()
-	}
-	// make sure the prep lock is unlocked, always
-	if responsibleForPrepLock != nil && *responsibleForPrepLock {
-		globals.PrepLock.Unlock()
-	}
+
 	select {
 	case <-pausedCancellation: // no cleanup necessary, it was picked up by another host
 		logger.DebugContext(pluginCtx, "cleanup pausedCancellation")
@@ -377,9 +383,6 @@ func cleanup(
 	cleanupContext = context.WithValue(cleanupContext, config.ContextKey("database"), serviceDatabase)
 	cleanupContext, cancel := context.WithCancel(cleanupContext)
 	defer func() {
-		if cleanupMu != nil {
-			cleanupMu.Unlock()
-		}
 		cancel()
 	}()
 	databaseContainer, err := database.GetDatabaseFromContext(cleanupContext)
@@ -387,6 +390,7 @@ func cleanup(
 		logger.ErrorContext(pluginCtx, "error getting database from context", "err", err)
 		return
 	}
+	logger.DebugContext(pluginCtx, "starting cleanup loop")
 	for {
 		var jobJSON string
 		exists, err := databaseContainer.Client.Exists(cleanupContext, pluginQueueName+"/cleaning").Result()
@@ -492,10 +496,12 @@ func Run(
 	logger *slog.Logger,
 	metricsData *metrics.MetricsDataLock,
 ) (context.Context, error) {
+
 	pluginConfig, err := config.GetPluginFromContext(pluginCtx)
 	if err != nil {
 		return pluginCtx, err
 	}
+	logger.WarnContext(pluginCtx, "pluginConfig", "pluginConfig", pluginConfig)
 	isRepoSet, err := config.GetIsRepoSetFromContext(pluginCtx)
 	if err != nil {
 		return pluginCtx, err
@@ -516,10 +522,16 @@ func Run(
 		metrics.ExportMetricsToDB(pluginCtx, logger)
 	})
 
-	globals, err := config.GetGlobalsFromContext(pluginCtx)
+	workerGlobals, err := config.GetGlobalsFromContext(workerCtx)
 	if err != nil {
 		return pluginCtx, err
 	}
+
+	// must come after first cleanup
+	pluginGlobals := internalGithub.PluginGlobals{
+		AlreadyNextedPrepLock: nil,
+	}
+	pluginCtx = context.WithValue(pluginCtx, config.ContextKey("pluginglobals"), &pluginGlobals)
 
 	configFileName, err := config.GetConfigFileNameFromContext(pluginCtx)
 	if err != nil {
@@ -583,9 +595,6 @@ func Run(
 	completedJobChannel := make(chan internalGithub.QueueJob, 1)
 	pausedCancellation := make(chan bool, 1)
 
-	responsibleForBlocking := false
-	responsibleForPrepLock := false
-
 	queuedJobFromPausedQueue := false
 
 	// wait group so we can wait for the goroutine to finish before exiting the service
@@ -613,8 +622,6 @@ func Run(
 			logger,
 			completedJobChannel,
 			cleanupMu,
-			&responsibleForBlocking,
-			&responsibleForPrepLock,
 			mainQueueName,
 			pluginQueueName,
 			mainInProgressQueueName,
@@ -653,8 +660,6 @@ func Run(
 		logger,
 		completedJobChannel,
 		cleanupMu,
-		&responsibleForBlocking,
-		&responsibleForPrepLock,
 		mainQueueName,
 		pluginQueueName,
 		mainInProgressQueueName,
@@ -674,26 +679,21 @@ func Run(
 	default:
 	}
 
-	// check if another plugin is already running preparation phase and if it is, wait for it to finish
-	// without it, we could cause a race condition between two plugins on the host trying to compete for resources when we try to pick up and run paused jobs
-	prepLock := globals.PrepLock.TryLock()
-	if prepLock {
-		responsibleForPrepLock = true
-	}
-	for !prepLock {
-		prepLock = globals.PrepLock.TryLock()
-		if prepLock {
-			responsibleForPrepLock = true
-			break
-		}
-		logger.WarnContext(pluginCtx, "another plugin is still preparing, retrying...")
+	fmt.Println("before " + pluginConfig.Name + " IsMyTurnForPrepLock")
+	// check if another plugin is already running preparation phase
+	for !workerGlobals.IsMyTurnForPrepLock(pluginConfig.Name) {
+		logger.WarnContext(pluginCtx, "not this plugin's turn for prep, waiting...", "plugin", pluginConfig.Name, "workerGlobals", workerGlobals)
 		time.Sleep(2 * time.Second)
 		if pluginCtx.Err() != nil {
 			return pluginCtx, fmt.Errorf("context canceled while waiting for prep lock")
 		}
 	}
 
+	logger.WarnContext(pluginCtx, "after "+pluginConfig.Name+" IsMyTurnForPrepLock")
+
 	logger.InfoContext(pluginCtx, "checking for jobs....")
+	alreadyNexted := false
+	pluginGlobals.AlreadyNextedPrepLock = &alreadyNexted // important so the next cleanup doesn't advance the prep lock/index
 
 	var existingQueuedJobString string
 	// allow picking up where we left off
@@ -719,7 +719,7 @@ func Run(
 			if pausedQueueLength == 0 {
 				break
 			}
-			pausedQueuedJobString, err := internalGithub.GetQueuedJob(pluginCtx, pausedQueueName, globals.QueueTargetIndex)
+			pausedQueuedJobString, err := internalGithub.GetQueuedJob(pluginCtx, pausedQueueName, workerGlobals.QueueTargetIndex)
 			if err != nil {
 				return pluginCtx, fmt.Errorf("error getting paused jobs: %s", err.Error())
 			}
@@ -734,7 +734,7 @@ func Run(
 			}
 			err = anka.VmHasEnoughHostResources(pluginCtx, pausedQueuedJob.AnkaVM)
 			if err != nil {
-				globals.IncrementQueueTargetIndex()
+				workerGlobals.IncrementQueueTargetIndex()
 				if pausedQueueLength == 1 { // don't go into a forever loop
 					break
 				}
@@ -742,7 +742,7 @@ func Run(
 			}
 			err = anka.VmHasEnoughResources(pluginCtx, pausedQueuedJob.AnkaVM)
 			if err != nil {
-				globals.IncrementQueueTargetIndex()
+				workerGlobals.IncrementQueueTargetIndex()
 				if pausedQueueLength == 1 { // don't go into a forever loop
 					break
 				}
@@ -761,10 +761,10 @@ func Run(
 
 		// If not paused job to get, get a job from the main queue
 		if queuedJobString == "" {
-			queuedJobString, err = internalGithub.GetQueuedJob(pluginCtx, mainQueueName, globals.QueueTargetIndex)
+			queuedJobString, err = internalGithub.GetQueuedJob(pluginCtx, mainQueueName, workerGlobals.QueueTargetIndex)
 			if err != nil {
 				metricsData.IncrementTotalFailedRunsSinceStart(workerCtx, pluginCtx, logger)
-				globals.ResetQueueTargetIndex()
+				workerGlobals.ResetQueueTargetIndex()
 				return pluginCtx, fmt.Errorf("error getting queued jobs: %s", err.Error())
 			}
 			if queuedJobString == "" { // no queued jobs
@@ -918,7 +918,7 @@ func Run(
 		err = internalAnka.VmHasEnoughHostResources(pluginCtx, queuedJob.AnkaVM)
 		if err != nil {
 			logger.WarnContext(pluginCtx, "host does not have enough resources to run vm")
-			globals.IncrementQueueTargetIndex() // prevent trying to run this job again
+			workerGlobals.IncrementQueueTargetIndex() // prevent trying to run this job again
 			retryChannel <- true
 			return pluginCtx, nil
 		}
@@ -928,15 +928,14 @@ func Run(
 			// push to proper queue so other hosts with the same specs can pick it up if available
 			queuedJob.PausedOn = pluginConfig.Name
 			databaseContainer.Client.RPush(pluginCtx, pausedQueueName, queuedJob)
-			responsibleForBlocking = true
-			globals.Block() // block other plugins from picking up other jobs while this one waits, so it can start immediately after the other finishes
 			logger.WarnContext(pluginCtx, "cannot run vm yet, waiting for enough resources to be available...")
-			for err != nil {
-				logger.WarnContext(pluginCtx, "waiting for enough resources to be available...")
+			var innerErr error
+			for innerErr != nil {
+				logger.WarnContext(pluginCtx, "waiting for enough resources to be available...", "err", innerErr)
 				// check if the job was picked up by another host
-				pausedQueueJob, err := internalGithub.GetJobFromQueueByKeyAndValue(pluginCtx, pluginQueueName, "PausedOn", pluginConfig.Name)
-				if err != nil {
-					logger.ErrorContext(pluginCtx, "error getting paused job", "err", err)
+				pausedQueueJob, innerErr := internalGithub.GetJobFromQueueByKeyAndValue(pluginCtx, pluginQueueName, "PausedOn", pluginConfig.Name)
+				if innerErr != nil {
+					logger.ErrorContext(pluginCtx, "error getting paused job", "err", innerErr)
 					retryChannel <- true
 					return pluginCtx, nil
 				}
@@ -946,8 +945,8 @@ func Run(
 					return pluginCtx, nil
 				}
 				time.Sleep(5 * time.Second)
-				err = internalAnka.VmHasEnoughResources(pluginCtx, queuedJob.AnkaVM)
-				if err != nil {
+				innerErr = internalAnka.VmHasEnoughResources(pluginCtx, queuedJob.AnkaVM)
+				if innerErr != nil {
 					logger.ErrorContext(pluginCtx, "error checking if vm can run", "err", err)
 					retryChannel <- true
 					return pluginCtx, nil
@@ -1025,14 +1024,8 @@ func Run(
 
 		pluginCtx = logging.AppendCtx(pluginCtx, slog.String("AnkaVM", fmt.Sprintf("%+v", queuedJob.AnkaVM)))
 
-		// If we were responsible for blocking, we need to unblock now so other plugins can start working again
-		if responsibleForBlocking {
-			globals.Unblock()
-		}
-		if responsibleForPrepLock {
-			globals.PrepLock.Unlock()
-			responsibleForPrepLock = false // prevent fatal error: sync: unlock of unlocked mutex
-		}
+		workerGlobals.NextPluginForPrepLock()
+		*pluginGlobals.AlreadyNextedPrepLock = true
 
 		dbErr := databaseContainer.Client.RPush(pluginCtx, "anklet/jobs/github/queued/"+pluginConfig.Owner+"/"+pluginConfig.Name, wrappedVmJSON).Err()
 		if dbErr != nil {
@@ -1055,9 +1048,9 @@ func Run(
 		}
 
 		// Install runner
-		installRunnerPath := filepath.Join(globals.PluginsPath, "handlers", "github", "install-runner.bash")
-		registerRunnerPath := filepath.Join(globals.PluginsPath, "handlers", "github", "register-runner.bash")
-		startRunnerPath := filepath.Join(globals.PluginsPath, "handlers", "github", "start-runner.bash")
+		installRunnerPath := filepath.Join(workerGlobals.PluginsPath, "handlers", "github", "install-runner.bash")
+		registerRunnerPath := filepath.Join(workerGlobals.PluginsPath, "handlers", "github", "register-runner.bash")
+		startRunnerPath := filepath.Join(workerGlobals.PluginsPath, "handlers", "github", "start-runner.bash")
 		_, installRunnerErr := os.Stat(installRunnerPath)
 		_, registerRunnerErr := os.Stat(registerRunnerPath)
 		_, startRunnerErr := os.Stat(startRunnerPath)
@@ -1067,7 +1060,7 @@ func Run(
 			if err != nil {
 				logger.ErrorContext(pluginCtx, "error sending cancel workflow run", "err", err)
 			}
-			return pluginCtx, fmt.Errorf("must include install-runner.bash, register-runner.bash, and start-runner.bash in " + globals.PluginsPath + "/handlers/github/")
+			return pluginCtx, fmt.Errorf("must include install-runner.bash, register-runner.bash, and start-runner.bash in " + workerGlobals.PluginsPath + "/handlers/github/")
 		}
 
 		// Copy runner scripts to VM

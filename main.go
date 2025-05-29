@@ -202,9 +202,16 @@ func main() {
 		PluginsPath:     pluginsPath,
 		DebugEnabled:    logging.IsDebugEnabled(),
 		IsBlocked:       atomic.Bool{},
-		PrepLock:        &sync.Mutex{},
 		HostCPUCount:    hostCPUCount,
 		HostMemoryBytes: hostMemoryBytes,
+		PluginOrder: func() []string {
+			order := make([]string, 0, len(loadedConfig.Plugins))
+			for _, p := range loadedConfig.Plugins {
+				order = append(order, p.Name)
+			}
+			return order
+		}(),
+		CurrentPluginIndex: 0,
 	})
 
 	httpTransport := http.DefaultTransport
@@ -433,6 +440,7 @@ func worker(
 				pluginCtx = context.WithValue(pluginCtx, config.ContextKey("logger"), pluginLogger)
 
 				pluginCtx = logging.AppendCtx(pluginCtx, slog.String("pluginName", plugin.Name))
+				pluginCtx = logging.AppendCtx(pluginCtx, slog.String("pluginIndex", strconv.Itoa(index)))
 
 				if plugin.Repo == "" {
 					pluginLogger.InfoContext(pluginCtx, "no repo set for plugin; assuming it's an organization level plugin")

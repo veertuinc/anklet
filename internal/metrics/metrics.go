@@ -14,7 +14,6 @@ import (
 	"github.com/shirou/gopsutil/v4/mem"
 	"github.com/veertuinc/anklet/internal/config"
 	"github.com/veertuinc/anklet/internal/database"
-	"github.com/veertuinc/anklet/internal/logging"
 )
 
 // Server defines the structure for the API server
@@ -70,7 +69,7 @@ type MetricsDataLock struct {
 	MetricsData
 }
 
-func (m *MetricsDataLock) AddPlugin(plugin interface{}) error {
+func (m *MetricsDataLock) AddPlugin(plugin any) error {
 	m.Lock()
 	defer m.Unlock()
 	var pluginName string
@@ -772,5 +771,5 @@ func Cleanup(ctx context.Context, logger *slog.Logger, owner string, name string
 	if result.Err() != nil {
 		logger.ErrorContext(ctx, "error deleting metrics data from Redis", "error", result.Err().Error())
 	}
-	logging.DevContext(ctx, "successfully deleted metrics data from Redis, key: anklet/metrics/"+owner+"/"+name)
+	// logging.DevContext(ctx, "successfully deleted metrics data from Redis, key: anklet/metrics/"+owner+"/"+name)
 }
