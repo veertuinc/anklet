@@ -204,14 +204,14 @@ func main() {
 		IsBlocked:       atomic.Bool{},
 		HostCPUCount:    hostCPUCount,
 		HostMemoryBytes: hostMemoryBytes,
-		PluginOrder: func() []string {
-			order := make([]string, 0, len(loadedConfig.Plugins))
-			for _, p := range loadedConfig.Plugins {
-				order = append(order, p.Name)
-			}
-			return order
-		}(),
-		CurrentPluginIndex: 0,
+		// PluginOrder: func() []string {
+		// 	order := make([]string, 0, len(loadedConfig.Plugins))
+		// 	for _, p := range loadedConfig.Plugins {
+		// 		order = append(order, p.Name)
+		// 	}
+		// 	return order
+		// }(),
+		// CurrentPluginIndex: 0,
 	})
 
 	httpTransport := http.DefaultTransport

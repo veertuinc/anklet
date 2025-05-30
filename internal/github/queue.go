@@ -7,6 +7,7 @@ import (
 
 	"github.com/redis/go-redis/v9"
 	"github.com/veertuinc/anklet/internal/database"
+	"github.com/veertuinc/anklet/internal/logging"
 )
 
 func GetQueueSize(pluginCtx context.Context, queueName string) (int64, error) {
@@ -26,6 +27,11 @@ func GetQueuedJob(
 	if err != nil {
 		return "", fmt.Errorf("error getting database client from context: %s", err.Error())
 	}
+	logger, err := logging.GetLoggerFromContext(pluginCtx)
+	if err != nil {
+		return "", fmt.Errorf("error getting logger from context: %s", err.Error())
+	}
+	logger.WarnContext(pluginCtx, "getting queued job at index", "queueTargetIndex", queueTargetIndex)
 	// we use Range here + Rem instead of Pop so we can use QueueTargetIndex.
 	// QueueTargetIndex is the index we want to start at, allowing us to push
 	// past the jobs we can't run due to host limits but are still in the main queue.

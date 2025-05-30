@@ -213,35 +213,35 @@ type Globals struct {
 	HostMemoryBytes  uint64
 	QueueTargetIndex int64
 
-	PluginOrder        []string   // The order in which plugins should acquire the prep lock
-	CurrentPluginIndex int        // The index of the plugin whose turn it is
-	PrepLockMu         sync.Mutex // Mutex to protect PluginOrder/CurrentPluginIndex
+	// PluginOrder        []string   // The order in which plugins should acquire the prep lock
+	// CurrentPluginIndex int        // The index of the plugin whose turn it is
+	PrepLockMu sync.Mutex // Mutex to protect PluginOrder/CurrentPluginIndex
 
 	PluginRunCount atomic.Uint64 // Shared run count across all plugins
 }
 
-// Returns true if it's the given plugin's turn to acquire the prep lock
-func (g *Globals) IsMyTurnForPrepLock(pluginName string) bool {
-	fmt.Println("IsMyTurnForPrepLock", pluginName, g.CurrentPluginIndex, g.PluginOrder, g.PluginOrder[g.CurrentPluginIndex] == pluginName)
-	g.PrepLockMu.Lock()
-	defer g.PrepLockMu.Unlock()
-	if len(g.PluginOrder) == 0 {
-		return true // fallback: allow anyone
-	}
-	return g.PluginOrder[g.CurrentPluginIndex] == pluginName
-}
+// // Returns true if it's the given plugin's turn to acquire the prep lock
+// func (g *Globals) IsMyTurnForPrepLock(pluginName string) bool {
+// 	fmt.Println("IsMyTurnForPrepLock", pluginName, g.CurrentPluginIndex, g.PluginOrder, g.PluginOrder[g.CurrentPluginIndex] == pluginName)
+// 	g.PrepLockMu.Lock()
+// 	defer g.PrepLockMu.Unlock()
+// 	if len(g.PluginOrder) == 0 {
+// 		return true // fallback: allow anyone
+// 	}
+// 	return g.PluginOrder[g.CurrentPluginIndex] == pluginName
+// }
 
-// Advances to the next plugin in the round-robin order
-func (g *Globals) NextPluginForPrepLock() {
-	g.PrepLockMu.Lock()
-	defer g.PrepLockMu.Unlock()
-	if len(g.PluginOrder) == 0 {
-		return
-	}
-	fmt.Println("NextPluginForPrepLock before", g.CurrentPluginIndex, g.PluginOrder)
-	g.CurrentPluginIndex = (g.CurrentPluginIndex + 1) % len(g.PluginOrder)
-	fmt.Println("NextPluginForPrepLock after", g.CurrentPluginIndex, g.PluginOrder)
-}
+// // Advances to the next plugin in the round-robin order
+// func (g *Globals) NextPluginForPrepLock() {
+// 	g.PrepLockMu.Lock()
+// 	defer g.PrepLockMu.Unlock()
+// 	if len(g.PluginOrder) == 0 {
+// 		return
+// 	}
+// 	fmt.Println("NextPluginForPrepLock before", g.CurrentPluginIndex, g.PluginOrder)
+// 	g.CurrentPluginIndex = (g.CurrentPluginIndex + 1) % len(g.PluginOrder)
+// 	fmt.Println("NextPluginForPrepLock after", g.CurrentPluginIndex, g.PluginOrder)
+// }
 
 func GetWorkerGlobalsFromContext(ctx context.Context) (*Globals, error) {
 	globals, ok := ctx.Value(ContextKey("globals")).(*Globals)
