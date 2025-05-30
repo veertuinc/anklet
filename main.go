@@ -262,12 +262,12 @@ func worker(
 	loadedConfig config.Config,
 	sigChan chan os.Signal,
 ) {
-	globals, err := config.GetGlobalsFromContext(parentCtx)
+	workerGlobals, err := config.GetWorkerGlobalsFromContext(parentCtx)
 	if err != nil {
 		parentLogger.ErrorContext(parentCtx, "unable to get globals from context", "error", err)
 		os.Exit(1)
 	}
-	toRunOnce := globals.RunOnce
+	toRunOnce := workerGlobals.RunOnce
 	workerCtx, workerCancel := context.WithCancel(parentCtx)
 	suffix := parentCtx.Value(config.ContextKey("suffix")).(string)
 	parentLogger.InfoContext(workerCtx, "starting anklet"+suffix)
@@ -409,6 +409,14 @@ func worker(
 				defer wg.Done()
 				pluginCtx, pluginCancel := context.WithCancel(workerCtx) // Inherit from parent context
 
+				workerGlobals, err := config.GetWorkerGlobalsFromContext(workerCtx)
+				if err != nil {
+					parentLogger.ErrorContext(pluginCtx, "unable to get globals from context", "error", err)
+					pluginCancel()
+					workerCancel()
+					return
+				}
+
 				if plugin.Name == "" {
 					parentLogger.ErrorContext(pluginCtx, "name is required for plugins")
 					pluginCancel()
@@ -440,7 +448,6 @@ func worker(
 				pluginCtx = context.WithValue(pluginCtx, config.ContextKey("logger"), pluginLogger)
 
 				pluginCtx = logging.AppendCtx(pluginCtx, slog.String("pluginName", plugin.Name))
-				pluginCtx = logging.AppendCtx(pluginCtx, slog.String("pluginIndex", strconv.Itoa(index)))
 
 				if plugin.Repo == "" {
 					pluginLogger.InfoContext(pluginCtx, "no repo set for plugin; assuming it's an organization level plugin")
@@ -514,13 +521,17 @@ func worker(
 						return
 					default:
 
-						if globals.IsBlockedState() {
+						if workerGlobals.IsBlockedState() {
 							logging.DevContext(pluginCtx, "pausing due to global block state")
 							// When paused, sleep briefly and continue checking
 							metricsData.SetStatus(pluginCtx, pluginLogger, "paused")
 							time.Sleep(time.Second + 5)
 							continue
 						}
+
+						pluginRunCount := workerGlobals.IncrementPluginRunCount()
+						pluginCtx = logging.AppendCtx(pluginCtx, slog.String("pluginRunCount", strconv.Itoa(int(pluginRunCount))))
+						pluginCtx = logging.AppendCtx(pluginCtx, slog.String("pluginIndex", strconv.Itoa(index)))
 
 						updatedPluginCtx, err := run.Plugin(
 							workerCtx,

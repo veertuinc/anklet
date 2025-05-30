@@ -458,7 +458,7 @@ func (cli *Cli) EnsureVMTemplateExists(workerCtx context.Context, pluginCtx cont
 	if err != nil {
 		return nil, err
 	}
-	globals, err := config.GetGlobalsFromContext(pluginCtx)
+	workerGlobals, err := config.GetWorkerGlobalsFromContext(pluginCtx)
 	if err != nil {
 		return nil, err
 	}
@@ -515,10 +515,10 @@ func (cli *Cli) EnsureVMTemplateExists(workerCtx context.Context, pluginCtx cont
 		pullTemplate = true
 	}
 	if pullTemplate {
-		if !globals.PullLock.TryLock() {
+		if !workerGlobals.PullLock.TryLock() {
 			return nil, fmt.Errorf("a pull is already running on this host")
 		}
-		defer globals.PullLock.Unlock()
+		defer workerGlobals.PullLock.Unlock()
 		pullJson, err := cli.AnkaRegistryPull(workerCtx, pluginCtx, targetTemplate, targetTag)
 		if pullJson == nil || pullJson.Code == 3 { // registry doesn't have template (or tag)
 			return err, nil

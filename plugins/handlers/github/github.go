@@ -183,7 +183,7 @@ func CheckForCompletedJobs(
 	mainCompletedQueueName string,
 	pausedCancellation chan bool,
 ) {
-	globals, err := config.GetGlobalsFromContext(pluginCtx)
+	workerGlobals, err := config.GetWorkerGlobalsFromContext(pluginCtx)
 	if err != nil {
 		logger.ErrorContext(pluginCtx, "error getting globals from context", "err", err)
 		os.Exit(1)
@@ -230,7 +230,7 @@ func CheckForCompletedJobs(
 			return
 		case <-completedJobChannel:
 			logger.DebugContext(pluginCtx, "completedJobChannel")
-			globals.ResetQueueTargetIndex()
+			workerGlobals.ResetQueueTargetIndex()
 			return
 		case <-pluginCtx.Done():
 			logging.DevContext(pluginCtx, "CheckForCompletedJobs"+pluginConfig.Name+" pluginCtx.Done()")
@@ -343,7 +343,7 @@ func cleanup(
 	pausedCancellation chan bool,
 ) {
 	cleanupMu.Lock()
-	workerGlobals, err := config.GetGlobalsFromContext(workerCtx)
+	workerGlobals, err := config.GetWorkerGlobalsFromContext(pluginCtx)
 	if err != nil {
 		logger.ErrorContext(pluginCtx, "error getting globals from context", "err", err)
 		return
@@ -501,7 +501,6 @@ func Run(
 	if err != nil {
 		return pluginCtx, err
 	}
-	logger.WarnContext(pluginCtx, "pluginConfig", "pluginConfig", pluginConfig)
 	isRepoSet, err := config.GetIsRepoSetFromContext(pluginCtx)
 	if err != nil {
 		return pluginCtx, err
@@ -522,7 +521,7 @@ func Run(
 		metrics.ExportMetricsToDB(pluginCtx, logger)
 	})
 
-	workerGlobals, err := config.GetGlobalsFromContext(workerCtx)
+	workerGlobals, err := config.GetWorkerGlobalsFromContext(pluginCtx)
 	if err != nil {
 		return pluginCtx, err
 	}
@@ -688,10 +687,10 @@ func Run(
 			return pluginCtx, fmt.Errorf("context canceled while waiting for prep lock")
 		}
 	}
-
 	logger.WarnContext(pluginCtx, "after "+pluginConfig.Name+" IsMyTurnForPrepLock")
 
 	logger.InfoContext(pluginCtx, "checking for jobs....")
+
 	alreadyNexted := false
 	pluginGlobals.AlreadyNextedPrepLock = &alreadyNexted // important so the next cleanup doesn't advance the prep lock/index
 

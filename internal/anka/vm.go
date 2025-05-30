@@ -47,14 +47,14 @@ func GetAnkaVmInfo(pluginCtx context.Context, name string) (*VM, error) {
 }
 
 func VmHasEnoughHostResources(pluginCtx context.Context, vm VM) error {
-	globals, err := config.GetGlobalsFromContext(pluginCtx)
+	workerGlobals, err := config.GetWorkerGlobalsFromContext(pluginCtx)
 	if err != nil {
 		return fmt.Errorf("error getting globals from context: %s", err.Error())
 	}
-	if vm.CPUCount > globals.HostCPUCount {
+	if vm.CPUCount > workerGlobals.HostCPUCount {
 		return fmt.Errorf("host does not have enough CPU cores to run VM")
 	}
-	if vm.MEMBytes > globals.HostMemoryBytes {
+	if vm.MEMBytes > workerGlobals.HostMemoryBytes {
 		return fmt.Errorf("host does not have enough memory to run VM")
 	}
 	return nil
@@ -62,7 +62,7 @@ func VmHasEnoughHostResources(pluginCtx context.Context, vm VM) error {
 
 // compared to other VMs potentially running, do we have enough resources to run this VM?
 func VmHasEnoughResources(pluginCtx context.Context, vm VM) error {
-	globals, err := config.GetGlobalsFromContext(pluginCtx)
+	workerGlobals, err := config.GetWorkerGlobalsFromContext(pluginCtx)
 	if err != nil {
 		return fmt.Errorf("error getting globals from context: %s", err.Error())
 	}
@@ -96,12 +96,12 @@ func VmHasEnoughResources(pluginCtx context.Context, vm VM) error {
 	logger.DebugContext(pluginCtx, "totalVMCPUUsed", "totalVMCPUUsed", totalVMCPUUsed)
 	logger.DebugContext(pluginCtx, "totalVMMEMBytesUsed", "totalVMMEMBytesUsed", totalVMMEMBytesUsed)
 	// check if the host has enough resources to run the VM given other VMs already running
-	if (vm.CPUCount + totalVMCPUUsed) > globals.HostCPUCount {
-		logger.WarnContext(pluginCtx, "host does not have enough CPU cores to run VM", "vm.CPUCount", vm.CPUCount, "totalVMCPUUsed", totalVMCPUUsed, "hostCPUCount", globals.HostCPUCount)
+	if (vm.CPUCount + totalVMCPUUsed) > workerGlobals.HostCPUCount {
+		logger.WarnContext(pluginCtx, "host does not have enough CPU cores to run VM", "vm.CPUCount", vm.CPUCount, "totalVMCPUUsed", totalVMCPUUsed, "hostCPUCount", workerGlobals.HostCPUCount)
 		return fmt.Errorf("host does not have enough CPU cores to run VM")
 	}
-	if (vm.MEMBytes + totalVMMEMBytesUsed) > globals.HostMemoryBytes {
-		logger.WarnContext(pluginCtx, "host does not have enough memory to run VM", "vm.MEMBytes", vm.MEMBytes, "totalVMMEMBytesUsed", totalVMMEMBytesUsed, "hostMemoryBytes", globals.HostMemoryBytes)
+	if (vm.MEMBytes + totalVMMEMBytesUsed) > workerGlobals.HostMemoryBytes {
+		logger.WarnContext(pluginCtx, "host does not have enough memory to run VM", "vm.MEMBytes", vm.MEMBytes, "totalVMMEMBytesUsed", totalVMMEMBytesUsed, "hostMemoryBytes", workerGlobals.HostMemoryBytes)
 		return fmt.Errorf("host does not have enough memory to run VM")
 	}
 	return nil

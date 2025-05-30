@@ -216,6 +216,8 @@ type Globals struct {
 	PluginOrder        []string   // The order in which plugins should acquire the prep lock
 	CurrentPluginIndex int        // The index of the plugin whose turn it is
 	PrepLockMu         sync.Mutex // Mutex to protect PluginOrder/CurrentPluginIndex
+
+	PluginRunCount atomic.Uint64 // Shared run count across all plugins
 }
 
 // Returns true if it's the given plugin's turn to acquire the prep lock
@@ -241,7 +243,7 @@ func (g *Globals) NextPluginForPrepLock() {
 	fmt.Println("NextPluginForPrepLock after", g.CurrentPluginIndex, g.PluginOrder)
 }
 
-func GetGlobalsFromContext(ctx context.Context) (*Globals, error) {
+func GetWorkerGlobalsFromContext(ctx context.Context) (*Globals, error) {
 	globals, ok := ctx.Value(ContextKey("globals")).(*Globals)
 	if !ok {
 		return nil, fmt.Errorf("GetGlobalsFromContext failed")
@@ -297,4 +299,14 @@ func GetConfigFileNameFromContext(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("GetConfigFileNameFromContext failed")
 	}
 	return configFileName, nil
+}
+
+// GetPluginRunCount returns the current value of the shared plugin run counter
+func (g *Globals) GetPluginRunCount() uint64 {
+	return g.PluginRunCount.Load()
+}
+
+// IncrementPluginRunCount increments the shared plugin run counter and returns the new value
+func (g *Globals) IncrementPluginRunCount() uint64 {
+	return g.PluginRunCount.Add(1)
 }
