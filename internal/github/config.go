@@ -1,25 +1,21 @@
 package github
 
 import (
-	"context"
-	"fmt"
-
 	"github.com/google/go-github/v66/github"
 	"github.com/veertuinc/anklet/internal/anka"
-	"github.com/veertuinc/anklet/internal/config"
 )
 
 type PluginGlobals struct {
 	AlreadyNextedPrepLock *bool
 }
 
-func GetPluginGlobalsFromContext(ctx context.Context) (*PluginGlobals, error) {
-	pluginGlobals, ok := ctx.Value(config.ContextKey("pluginglobals")).(*PluginGlobals)
-	if !ok {
-		return nil, fmt.Errorf("GetPluginGlobalFromContext failed")
-	}
-	return pluginGlobals, nil
-}
+// func GetPluginGlobalsFromContext(ctx context.Context) (*PluginGlobals, error) {
+// 	pluginGlobals, ok := ctx.Value(config.ContextKey("pluginglobals")).(*PluginGlobals)
+// 	if !ok {
+// 		return nil, fmt.Errorf("GetPluginGlobalFromContext failed")
+// 	}
+// 	return pluginGlobals, nil
+// }
 
 type QueueJob struct {
 	Type        string                `json:"type"`

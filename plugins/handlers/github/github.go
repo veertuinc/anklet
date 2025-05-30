@@ -343,20 +343,20 @@ func cleanup(
 	pausedCancellation chan bool,
 ) {
 	cleanupMu.Lock()
-	workerGlobals, err := config.GetWorkerGlobalsFromContext(pluginCtx)
-	if err != nil {
-		logger.ErrorContext(pluginCtx, "error getting globals from context", "err", err)
-		return
-	}
+	// workerGlobals, err := config.GetWorkerGlobalsFromContext(pluginCtx)
+	// if err != nil {
+	// 	logger.ErrorContext(pluginCtx, "error getting globals from context", "err", err)
+	// 	return
+	// }
 	defer func() {
-		pluginGlobals, err := internalGithub.GetPluginGlobalsFromContext(pluginCtx)
-		if err != nil {
-			logger.ErrorContext(pluginCtx, "error getting plugin global from context", "err", err)
-			return
-		}
-		if pluginGlobals.AlreadyNextedPrepLock != nil && !*pluginGlobals.AlreadyNextedPrepLock {
-			workerGlobals.NextPluginForPrepLock()
-		}
+		// pluginGlobals, err := internalGithub.GetPluginGlobalsFromContext(pluginCtx)
+		// if err != nil {
+		// 	logger.ErrorContext(pluginCtx, "error getting plugin global from context", "err", err)
+		// 	return
+		// }
+		// if pluginGlobals.AlreadyNextedPrepLock != nil && !*pluginGlobals.AlreadyNextedPrepLock {
+		// 	workerGlobals.NextPluginForPrepLock()
+		// }
 		if cleanupMu != nil {
 			cleanupMu.Unlock()
 		}
@@ -428,12 +428,12 @@ func cleanup(
 				return
 			}
 			if strings.ToUpper(os.Getenv("LOG_LEVEL")) == "DEBUG" || strings.ToUpper(os.Getenv("LOG_LEVEL")) == "DEV" {
-				err = ankaCLI.AnkaCopyOutOfVM(pluginCtx, "/Users/anka/actions-runner/_diag", "/tmp/"+queuedJob.AnkaVM.Name)
+				err = ankaCLI.AnkaCopyOutOfVM(pluginCtx, queuedJob.AnkaVM.Name, "/Users/anka/actions-runner/_diag", "/tmp/"+queuedJob.AnkaVM.Name)
 				if err != nil {
 					logger.ErrorContext(pluginCtx, "error copying actions runner out of vm", "err", err)
 				}
 			}
-			ankaCLI.AnkaDelete(workerCtx, pluginCtx, &queuedJob.AnkaVM)
+			ankaCLI.AnkaDelete(workerCtx, pluginCtx, queuedJob.AnkaVM.Name)
 			databaseContainer.Client.Del(cleanupContext, pluginQueueName+"/cleaning")
 			continue // required to keep processing tasks in the db list
 		case "WorkflowJobPayload": // MUST COME LAST
@@ -527,10 +527,10 @@ func Run(
 	}
 
 	// must come after first cleanup
-	pluginGlobals := internalGithub.PluginGlobals{
-		AlreadyNextedPrepLock: nil,
-	}
-	pluginCtx = context.WithValue(pluginCtx, config.ContextKey("pluginglobals"), &pluginGlobals)
+	// pluginGlobals := internalGithub.PluginGlobals{
+	// 	AlreadyNextedPrepLock: nil,
+	// }
+	// pluginCtx = context.WithValue(pluginCtx, config.ContextKey("pluginglobals"), &pluginGlobals)
 
 	configFileName, err := config.GetConfigFileNameFromContext(pluginCtx)
 	if err != nil {
@@ -678,21 +678,19 @@ func Run(
 	default:
 	}
 
-	fmt.Println("before " + pluginConfig.Name + " IsMyTurnForPrepLock")
-	// check if another plugin is already running preparation phase
-	for !workerGlobals.IsMyTurnForPrepLock(pluginConfig.Name) {
-		logger.WarnContext(pluginCtx, "not this plugin's turn for prep, waiting...", "plugin", pluginConfig.Name, "workerGlobals", workerGlobals)
-		time.Sleep(2 * time.Second)
-		if pluginCtx.Err() != nil {
-			return pluginCtx, fmt.Errorf("context canceled while waiting for prep lock")
-		}
-	}
-	logger.WarnContext(pluginCtx, "after "+pluginConfig.Name+" IsMyTurnForPrepLock")
+	// // check if another plugin is already running preparation phase
+	// for !workerGlobals.IsMyTurnForPrepLock(pluginConfig.Name) {
+	// 	logger.DebugContext(pluginCtx, "not this plugin's turn for prep, waiting...")
+	// 	time.Sleep(2 * time.Second)
+	// 	if pluginCtx.Err() != nil {
+	// 		return pluginCtx, fmt.Errorf("context canceled while waiting for prep lock")
+	// 	}
+	// }
 
 	logger.InfoContext(pluginCtx, "checking for jobs....")
 
-	alreadyNexted := false
-	pluginGlobals.AlreadyNextedPrepLock = &alreadyNexted // important so the next cleanup doesn't advance the prep lock/index
+	// alreadyNexted := false
+	// pluginGlobals.AlreadyNextedPrepLock = &alreadyNexted // important so the next cleanup doesn't advance the prep lock/index
 
 	var existingQueuedJobString string
 	// allow picking up where we left off
@@ -909,8 +907,6 @@ func Run(
 		internalGithub.UpdateJobInDB(pluginCtx, pluginQueueName, &queuedJob)
 	}
 	logger.DebugContext(pluginCtx, "vmInfo", "queuedJob.AnkaVM", queuedJob.AnkaVM)
-	pluginCtx = logging.AppendCtx(pluginCtx, slog.Int("vmCPUCount", queuedJob.AnkaVM.CPUCount))
-	pluginCtx = logging.AppendCtx(pluginCtx, slog.Uint64("vmMEMBytes", queuedJob.AnkaVM.MEMBytes))
 
 	if queuedJob.Action != "paused" { // no need to do this, we already did it when we got the paused job
 		// check if the host has enough resources to run this VM
@@ -996,10 +992,9 @@ func Run(
 		}
 
 		// Obtain Anka VM (and name)
-		pluginCtx, vm, err := ankaCLI.ObtainAnkaVM(workerCtx, pluginCtx, ankaTemplate)
+		vm, err := ankaCLI.ObtainAnkaVM(workerCtx, pluginCtx, ankaTemplate)
 		if vm != nil {
 			queuedJob.AnkaVM.Name = vm.Name
-			pluginCtx = logging.AppendCtx(pluginCtx, slog.String("vmName", vm.Name))
 		}
 		var wrappedVmJSON []byte
 		var wrappedVmErr error
@@ -1011,20 +1006,20 @@ func Run(
 			wrappedVmJSON, wrappedVmErr = json.Marshal(wrappedVM)
 			if wrappedVmErr != nil {
 				// logger.ErrorContext(pluginCtx, "error marshalling vm to json", "err", wrappedVmErr)
-				ankaCLI.AnkaDelete(workerCtx, pluginCtx, vm)
+				ankaCLI.AnkaDelete(workerCtx, pluginCtx, vm.Name)
 				retryChannel <- true
 				return pluginCtx, fmt.Errorf("error marshalling vm to json: %s", wrappedVmErr.Error())
 			}
 		}
 		if pluginCtx.Err() != nil {
-			ankaCLI.AnkaDelete(workerCtx, pluginCtx, vm)
+			ankaCLI.AnkaDelete(workerCtx, pluginCtx, vm.Name)
 			return pluginCtx, fmt.Errorf("context canceled after ObtainAnkaVM")
 		}
 
-		pluginCtx = logging.AppendCtx(pluginCtx, slog.String("AnkaVM", fmt.Sprintf("%+v", queuedJob.AnkaVM)))
+		pluginCtx = logging.AppendCtx(pluginCtx, slog.Any("vm", queuedJob.AnkaVM))
 
-		workerGlobals.NextPluginForPrepLock()
-		*pluginGlobals.AlreadyNextedPrepLock = true
+		// workerGlobals.NextPluginForPrepLock()
+		// *pluginGlobals.AlreadyNextedPrepLock = true
 
 		dbErr := databaseContainer.Client.RPush(pluginCtx, "anklet/jobs/github/queued/"+pluginConfig.Owner+"/"+pluginConfig.Name, wrappedVmJSON).Err()
 		if dbErr != nil {
@@ -1065,6 +1060,7 @@ func Run(
 		// Copy runner scripts to VM
 		logger.DebugContext(pluginCtx, "copying install-runner.bash, register-runner.bash, and start-runner.bash to vm")
 		err = ankaCLI.AnkaCopyIntoVM(pluginCtx,
+			queuedJob.AnkaVM.Name,
 			installRunnerPath,
 			registerRunnerPath,
 			startRunnerPath,
@@ -1088,7 +1084,7 @@ func Run(
 
 		// Install runner
 		logger.DebugContext(pluginCtx, "installing github runner inside of vm")
-		installRunnerErr = ankaCLI.AnkaRun(pluginCtx, "./install-runner.bash")
+		installRunnerErr = ankaCLI.AnkaRun(pluginCtx, queuedJob.AnkaVM.Name, "./install-runner.bash")
 		if installRunnerErr != nil {
 			logger.ErrorContext(pluginCtx, "error executing install-runner.bash", "err", installRunnerErr)
 			retryChannel <- true
@@ -1105,10 +1101,11 @@ func Run(
 			return pluginCtx, nil
 		default:
 		}
-		logger.DebugContext(pluginCtx, "registering github runner inside of vm")
+		logger.DebugContext(pluginCtx, "registering github runner inside of vm", "queuedJob", queuedJob)
 		registerRunnerErr = ankaCLI.AnkaRun(pluginCtx,
+			queuedJob.AnkaVM.Name,
 			"./register-runner.bash",
-			vm.Name,
+			queuedJob.AnkaVM.Name,
 			*runnerRegistration.Token,
 			repositoryURL,
 			strings.Join(queuedJob.WorkflowJob.Labels, ","),
@@ -1132,7 +1129,7 @@ func Run(
 		default:
 		}
 		logger.DebugContext(pluginCtx, "starting github runner inside of vm")
-		startRunnerErr = ankaCLI.AnkaRun(pluginCtx, "./start-runner.bash")
+		startRunnerErr = ankaCLI.AnkaRun(pluginCtx, queuedJob.AnkaVM.Name, "./start-runner.bash")
 		if startRunnerErr != nil {
 			// logger.ErrorContext(pluginCtx, "error executing start-runner.bash", "err", startRunnerErr)
 			retryChannel <- true
@@ -1374,7 +1371,5 @@ func removeSelfHostedRunner(
 			// 	logger.InfoContext(pluginCtx, "no matching runner found")
 			// }
 		}
-	} else {
-		logger.WarnContext(pluginCtx, "job is not in failure state, skipping runner removal")
 	}
 }

@@ -163,12 +163,8 @@ func (cli *Cli) ExecuteAndParseJsonOnError(pluginCtx context.Context, args ...st
 	return out, nil
 }
 
-func (cli *Cli) AnkaRun(pluginCtx context.Context, args ...string) error {
-	vm, err := GetAnkaVmFromContext(pluginCtx)
-	if err != nil {
-		return err
-	}
-	runOutput, exitCode, err := cli.Execute(pluginCtx, "anka", "-j", "run", vm.Name, "bash", "-c", strings.Join(args, " "))
+func (cli *Cli) AnkaRun(pluginCtx context.Context, vmName string, args ...string) error {
+	runOutput, exitCode, err := cli.Execute(pluginCtx, "anka", "-j", "run", vmName, "bash", "-c", strings.Join(args, " "))
 	if exitCode != 0 || err != nil {
 		return fmt.Errorf("command execution failed with code %d: %s %s", exitCode, string(runOutput), err)
 	}
@@ -242,15 +238,15 @@ func (cli *Cli) AnkaRegistryPull(workerCtx context.Context, pluginCtx context.Co
 	return pullJson, nil
 }
 
-func (cli *Cli) AnkaDelete(workerCtx context.Context, pluginCtx context.Context, vm *VM) error {
+func (cli *Cli) AnkaDelete(workerCtx context.Context, pluginCtx context.Context, vmName string) error {
 	logger, err := logging.GetLoggerFromContext(pluginCtx)
 	if err != nil {
 		return err
 	}
-	deleteOutput, err := cli.ExecuteParseJson(pluginCtx, "anka", "-j", "delete", "--yes", vm.Name)
+	deleteOutput, err := cli.ExecuteParseJson(pluginCtx, "anka", "-j", "delete", "--yes", vmName)
 	if err != nil {
 		logger.ErrorContext(pluginCtx, "error executing anka delete", "err", err)
-		cli.Execute(pluginCtx, "anka", "delete", "--yes", vm.Name)
+		cli.Execute(pluginCtx, "anka", "delete", "--yes", vmName)
 		return err
 	}
 	logger.DebugContext(pluginCtx, "successfully deleted vm", "std", deleteOutput.Message)
@@ -263,44 +259,47 @@ func (cli *Cli) AnkaDelete(workerCtx context.Context, pluginCtx context.Context,
 	return nil
 }
 
-func (cli *Cli) ObtainAnkaVM(workerCtx context.Context, pluginCtx context.Context, ankaTemplate string) (context.Context, *VM, error) {
+func (cli *Cli) ObtainAnkaVM(
+	workerCtx context.Context,
+	pluginCtx context.Context,
+	ankaTemplate string,
+) (*VM, error) {
 	if pluginCtx.Err() != nil {
-		return pluginCtx, nil, fmt.Errorf("context canceled before ObtainAnkaVMAndName")
+		return nil, fmt.Errorf("context canceled before ObtainAnkaVMAndName")
 	}
 	logger, err := logging.GetLoggerFromContext(pluginCtx)
 	if err != nil {
-		return pluginCtx, nil, err
+		return nil, err
 	}
 	vmID, err := uuid.NewRandom()
 	if err != nil {
 		logger.ErrorContext(pluginCtx, "error creating uuid for vm name", "err", err)
-		return pluginCtx, nil, err
+		return nil, err
 	}
 	vmName := fmt.Sprintf("anklet-vm-%s", vmID.String())
 	vm := &VM{Name: vmName}
-	pluginCtx = context.WithValue(pluginCtx, config.ContextKey("ankavm"), vm)
-	err = cli.AnkaClone(pluginCtx, ankaTemplate)
+	err = cli.AnkaClone(pluginCtx, vmName, ankaTemplate)
 	if err != nil {
 		logger.ErrorContext(pluginCtx, "error executing anka clone", "err", err)
-		return pluginCtx, vm, err
+		return vm, err
 	}
 	// Start
-	err = cli.AnkaStart(pluginCtx)
+	err = cli.AnkaStart(pluginCtx, vmName)
 	if err != nil {
 		logger.DebugContext(pluginCtx, "vm", "vm", vm)
 		logger.ErrorContext(pluginCtx, "error executing anka start", "err", err)
-		return pluginCtx, vm, err
+		return vm, err
 	}
 	// increment total running VMs
 	metricsData, err := metrics.GetMetricsDataFromContext(workerCtx)
 	if err != nil {
-		return pluginCtx, vm, err
+		return vm, err
 	}
 	metricsData.IncrementTotalRunningVMs(workerCtx, pluginCtx, logger)
-	return pluginCtx, vm, nil
+	return vm, nil
 }
 
-func (cli *Cli) AnkaClone(pluginCtx context.Context, template string) error {
+func (cli *Cli) AnkaClone(pluginCtx context.Context, vmName string, template string) error {
 	if pluginCtx.Err() != nil {
 		return fmt.Errorf("context canceled before AnkaClone")
 	}
@@ -308,11 +307,7 @@ func (cli *Cli) AnkaClone(pluginCtx context.Context, template string) error {
 	if err != nil {
 		return err
 	}
-	vm, err := GetAnkaVmFromContext(pluginCtx)
-	if err != nil {
-		return err
-	}
-	cloneOutput, err := cli.ExecuteParseJson(pluginCtx, "anka", "-j", "clone", template, vm.Name)
+	cloneOutput, err := cli.ExecuteParseJson(pluginCtx, "anka", "-j", "clone", template, vmName)
 	if err != nil {
 		return err
 	}
@@ -323,7 +318,7 @@ func (cli *Cli) AnkaClone(pluginCtx context.Context, template string) error {
 	return nil
 }
 
-func (cli *Cli) AnkaStart(pluginCtx context.Context) error {
+func (cli *Cli) AnkaStart(pluginCtx context.Context, vmName string) error {
 	if pluginCtx.Err() != nil {
 		return fmt.Errorf("context canceled before AnkaStart")
 	}
@@ -331,11 +326,7 @@ func (cli *Cli) AnkaStart(pluginCtx context.Context) error {
 	if err != nil {
 		return err
 	}
-	vm, err := GetAnkaVmFromContext(pluginCtx)
-	if err != nil {
-		return err
-	}
-	startOutput, err := cli.ExecuteParseJson(pluginCtx, "anka", "-j", "start", vm.Name)
+	startOutput, err := cli.ExecuteParseJson(pluginCtx, "anka", "-j", "start", vmName)
 	if err != nil {
 		return err
 	}
@@ -355,40 +346,32 @@ func (cli *Cli) AnkaList(pluginCtx context.Context, args ...string) (*AnkaJson, 
 	return output, nil
 }
 
-func (cli *Cli) AnkaCopyOutOfVM(ctx context.Context, objectToCopyOut string, hostLevelDestination string) error {
-	// if ctx.Err() != nil {
+func (cli *Cli) AnkaCopyOutOfVM(pluginCtx context.Context, vmName string, objectToCopyOut string, hostLevelDestination string) error {
+	// if pluginCtx.Err() != nil {
 	// 	return fmt.Errorf("context canceled before AnkaCopyOutOfVM")
 	// }
-	logger, err := logging.GetLoggerFromContext(ctx)
+	logger, err := logging.GetLoggerFromContext(pluginCtx)
 	if err != nil {
 		return err
 	}
-	vm, err := GetAnkaVmFromContext(ctx)
-	if err != nil {
-		return err
-	}
-	copyOutput, err := cli.ExecuteParseJson(ctx, "anka", "-j", "cp", "-a", fmt.Sprintf("%s:%s", vm.Name, objectToCopyOut), hostLevelDestination)
+	copyOutput, err := cli.ExecuteParseJson(pluginCtx, "anka", "-j", "cp", "-a", fmt.Sprintf("%s:%s", vmName, objectToCopyOut), hostLevelDestination)
 	if err != nil {
 		return err
 	}
 	if copyOutput.Status != "OK" {
 		return fmt.Errorf("error copying out of vm: %s", copyOutput.Message)
 	}
-	logger.DebugContext(ctx, "copy output", "std", copyOutput)
-	logger.InfoContext(ctx, fmt.Sprintf("successfully copied %s out of vm to %s", objectToCopyOut, hostLevelDestination), "stdout", copyOutput.Message)
+	logger.DebugContext(pluginCtx, "copy output", "std", copyOutput)
+	logger.InfoContext(pluginCtx, fmt.Sprintf("successfully copied %s out of vm to %s", objectToCopyOut, hostLevelDestination), "stdout", copyOutput.Message)
 
 	return nil
 }
 
-func (cli *Cli) AnkaCopyIntoVM(ctx context.Context, filesToCopyIn ...string) error {
-	if ctx.Err() != nil {
+func (cli *Cli) AnkaCopyIntoVM(pluginCtx context.Context, vmName string, filesToCopyIn ...string) error {
+	if pluginCtx.Err() != nil {
 		return fmt.Errorf("context canceled before AnkaCopyIntoVM")
 	}
-	logger, err := logging.GetLoggerFromContext(ctx)
-	if err != nil {
-		return err
-	}
-	vm, err := GetAnkaVmFromContext(ctx)
+	logger, err := logging.GetLoggerFromContext(pluginCtx)
 	if err != nil {
 		return err
 	}
@@ -399,18 +382,18 @@ func (cli *Cli) AnkaCopyIntoVM(ctx context.Context, filesToCopyIn ...string) err
 			return fmt.Errorf("error evaluating symlink for %s: %w", hostLevelFile, err)
 		}
 		hostLevelFile = realPath
-		if ctx.Err() != nil {
+		if pluginCtx.Err() != nil {
 			return fmt.Errorf("context canceled before AnkaCopyIntoVM executing anka cp")
 		}
-		copyOutput, err := cli.ExecuteParseJson(ctx, "anka", "-j", "cp", "-a", hostLevelFile, fmt.Sprintf("%s:", vm.Name))
+		copyOutput, err := cli.ExecuteParseJson(pluginCtx, "anka", "-j", "cp", "-a", hostLevelFile, fmt.Sprintf("%s:", vmName))
 		if err != nil {
 			return err
 		}
 		if copyOutput.Status != "OK" {
 			return fmt.Errorf("error copying into vm: %s", copyOutput.Message)
 		}
-		logger.DebugContext(ctx, "copy output", "std", copyOutput)
-		logger.InfoContext(ctx, "successfully copied file into vm", "file", hostLevelFile, "stdout", copyOutput.Message)
+		logger.DebugContext(pluginCtx, "copy output", "std", copyOutput)
+		logger.InfoContext(pluginCtx, "successfully copied file into vm", "file", hostLevelFile, "stdout", copyOutput.Message)
 	}
 
 	return nil
