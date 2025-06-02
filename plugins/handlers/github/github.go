@@ -534,7 +534,6 @@ func cleanup(
 			return
 		}
 		if cleaningJobJSON == "" {
-			logger.DebugContext(pluginCtx, "no cleaning in progress; popping job from the list and moving to cleaning queue")
 			// pop the job from the list and push it to the cleaning list
 			cleaningJobJSON, err = databaseContainer.Client.RPopLPush(
 				cleanupContext,
@@ -542,7 +541,7 @@ func cleanup(
 				pluginQueueName+"/cleaning",
 			).Result()
 			if err == redis.Nil {
-				logger.DebugContext(pluginCtx, "no job to clean up from "+pluginQueueName)
+				// logger.DebugContext(pluginCtx, "no job to clean up from "+pluginQueueName)
 				return // nothing to clean up
 			} else if err != nil {
 				logger.ErrorContext(pluginCtx, "error popping job from the list", "err", err)
@@ -566,19 +565,30 @@ func cleanup(
 		switch queuedJob.Type {
 		case "anka.VM":
 			logger.DebugContext(pluginCtx, "cleaning anka.VM", "queuedJob", queuedJob)
-			ankaCLI, err := anka.GetAnkaCLIFromContext(pluginCtx)
+			// check if the job is in_progress, and if it is, leave the VM alone.
+			inProgressQueue, err := internalGithub.InQueue(pluginCtx, logger, *queuedJob.WorkflowJob.ID, mainInProgressQueueName)
 			if err != nil {
-				logger.ErrorContext(pluginCtx, "error getting ankaCLI from context", "err", err)
+				logger.ErrorContext(pluginCtx, "error searching in queue", "error", err)
 				return
 			}
-			if strings.ToUpper(os.Getenv("LOG_LEVEL")) == "DEBUG" || strings.ToUpper(os.Getenv("LOG_LEVEL")) == "DEV" {
-				err = ankaCLI.AnkaCopyOutOfVM(pluginCtx, queuedJob.AnkaVM.Name, "/Users/anka/actions-runner/_diag", "/tmp/"+queuedJob.AnkaVM.Name)
+			if inProgressQueue {
+				logger.DebugContext(pluginCtx, "job is in_progress; skipping cleanup")
+				break
+			} else {
+				ankaCLI, err := anka.GetAnkaCLIFromContext(pluginCtx)
 				if err != nil {
-					logger.ErrorContext(pluginCtx, "error copying actions runner out of vm", "err", err)
+					logger.ErrorContext(pluginCtx, "error getting ankaCLI from context", "err", err)
+					return
 				}
+				if strings.ToUpper(os.Getenv("LOG_LEVEL")) == "DEBUG" || strings.ToUpper(os.Getenv("LOG_LEVEL")) == "DEV" {
+					err = ankaCLI.AnkaCopyOutOfVM(pluginCtx, queuedJob.AnkaVM.Name, "/Users/anka/actions-runner/_diag", "/tmp/"+queuedJob.AnkaVM.Name)
+					if err != nil {
+						logger.ErrorContext(pluginCtx, "error copying actions runner out of vm", "err", err)
+					}
+				}
+				ankaCLI.AnkaDelete(workerCtx, pluginCtx, queuedJob.AnkaVM.Name)
+				databaseContainer.Client.Del(cleanupContext, pluginQueueName+"/cleaning")
 			}
-			ankaCLI.AnkaDelete(workerCtx, pluginCtx, queuedJob.AnkaVM.Name)
-			databaseContainer.Client.Del(cleanupContext, pluginQueueName+"/cleaning")
 			continue // required to keep processing tasks in the db list
 		case "WorkflowJobPayload": // MUST COME LAST
 			if workflowJobStatus == "queued" { // don't clean up the workflow job, just the VM
@@ -860,13 +870,11 @@ func Run(
 	var queuedJob internalGithub.QueueJob
 
 	// allow picking up where we left off
-	fmt.Println("pluginQueueName", pluginQueueName)
 	queuedJobString, err = databaseContainer.Client.LIndex(pluginCtx, pluginQueueName, -1).Result()
 	if err != nil && err != redis.Nil {
 		// logger.ErrorContext(pluginCtx, "error getting last object from anklet/jobs/github/queued/"+pluginConfig.Owner+"/"+pluginConfig.Name, "err", err)
 		return pluginCtx, fmt.Errorf("error getting last object from " + pluginQueueName)
 	}
-	fmt.Println("queuedJobString", queuedJobString)
 	if queuedJobString != "" {
 		var typeErr error
 		queuedJob, err, typeErr = database.Unwrap[internalGithub.QueueJob](queuedJobString)
@@ -1171,8 +1179,9 @@ func Run(
 		var wrappedVmErr error
 		if vm != nil {
 			wrappedVM := internalGithub.QueueJob{
-				Type:   "anka.VM",
-				AnkaVM: queuedJob.AnkaVM,
+				Type:        "anka.VM",
+				AnkaVM:      queuedJob.AnkaVM,
+				WorkflowJob: queuedJob.WorkflowJob,
 			}
 			wrappedVmJSON, wrappedVmErr = json.Marshal(wrappedVM)
 			if wrappedVmErr != nil {
@@ -1379,6 +1388,7 @@ func Run(
 			inProgressQueue, err := internalGithub.InQueue(pluginCtx, logger, *queuedJob.WorkflowJob.ID, mainInProgressQueueName)
 			if err != nil {
 				logger.ErrorContext(pluginCtx, "error searching in queue", "error", err)
+				return pluginCtx, err
 			}
 			if inProgressQueue {
 				if logCounter%2 == 0 {

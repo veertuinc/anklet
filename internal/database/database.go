@@ -141,12 +141,12 @@ func Unwrap[T any](payload string) (T, error, error) {
 	if err := json.Unmarshal(payloadBytes, &t); err != nil {
 		return t, err, nil
 	}
-	jobType, ok := wrappedPayload["type"].(string)
-	if !ok {
-		return t, nil, errors.New("job type not found or not a string")
-	}
-	if jobType == "anka.VM" {
-		return t, nil, errors.New("job type " + jobType + " is not what we expect")
-	}
+	// jobType, ok := wrappedPayload["type"].(string)
+	// if !ok {
+	// 	return t, nil, errors.New("job type not found or not a string")
+	// }
+	// if jobType == "anka.VM" {
+	// 	return t, nil, errors.New("job type " + jobType + " is not what we expect")
+	// }
 	return t, nil, nil
 }
