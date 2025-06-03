@@ -15,7 +15,8 @@ func InQueue(pluginCtx context.Context, logger *slog.Logger, jobID int64, queue 
 	if err != nil {
 		logging.Panic(pluginCtx, pluginCtx, "error getting database client from context: "+err.Error())
 	}
-	queued, err := databaseContainer.Client.LRange(pluginCtx, queue, 0, -1).Result()
+	localCtx := context.Background() // avoids context cancellation preventing this from running
+	queued, err := databaseContainer.Client.LRange(localCtx, queue, 0, -1).Result()
 	if err != nil {
 		logger.ErrorContext(pluginCtx, "error getting list of queued jobs", "err", err)
 		return false, err
