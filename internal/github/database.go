@@ -10,7 +10,15 @@ import (
 	"github.com/veertuinc/anklet/internal/logging"
 )
 
-func InQueue(pluginCtx context.Context, logger *slog.Logger, jobID int64, queue string) (bool, error) {
+func InQueue(
+	pluginCtx context.Context,
+	jobID int64,
+	queue string,
+) (*QueueJob, error) {
+	logger, err := logging.GetLoggerFromContext(pluginCtx)
+	if err != nil {
+		return nil, err
+	}
 	databaseContainer, err := database.GetDatabaseFromContext(pluginCtx)
 	if err != nil {
 		logging.Panic(pluginCtx, pluginCtx, "error getting database client from context: "+err.Error())
@@ -19,27 +27,27 @@ func InQueue(pluginCtx context.Context, logger *slog.Logger, jobID int64, queue 
 	queued, err := databaseContainer.Client.LRange(localCtx, queue, 0, -1).Result()
 	if err != nil {
 		logger.ErrorContext(pluginCtx, "error getting list of queued jobs", "err", err)
-		return false, err
+		return nil, err
 	}
 	for _, queueItem := range queued {
 		queueJob, err, typeErr := database.Unwrap[QueueJob](queueItem)
 		if err != nil {
 			logger.ErrorContext(pluginCtx, "error unmarshalling job", "err", err)
-			return false, err
+			return nil, err
 		}
 		if typeErr != nil { // not the type we want
 			continue
 		}
 		if queueJob.WorkflowJob.ID == nil {
 			logger.ErrorContext(pluginCtx, "WorkflowJob.ID is nil", "WorkflowJob", queueJob.WorkflowJob)
-			return false, fmt.Errorf("WorkflowJob.ID is nil")
+			return nil, fmt.Errorf("WorkflowJob.ID is nil")
 		}
 		if *queueJob.WorkflowJob.ID == jobID {
 			// logger.WarnContext(pluginCtx, "WorkflowJob.ID already in queue", "WorkflowJob.ID", jobID)
-			return true, nil
+			return &queueJob, nil
 		}
 	}
-	return false, nil
+	return nil, nil
 }
 
 func DeleteFromQueue(pluginCtx context.Context, logger *slog.Logger, jobID int64, queue string) error {

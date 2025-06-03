@@ -3,6 +3,7 @@ package github
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"github.com/google/go-github/v66/github"
 	"github.com/veertuinc/anklet/internal/anka"
@@ -10,7 +11,12 @@ import (
 )
 
 type PluginGlobals struct {
-	FirstCleanupComplete bool
+	FirstCheckForCompletedJobsRan bool
+	CheckForCompletedJobsMutex    *sync.Mutex
+	RetryChannel                  chan bool
+	CleanupMutex                  *sync.Mutex
+	JobChannel                    chan QueueJob
+	PausedCancellationJobChannel  chan QueueJob
 }
 
 func GetPluginGlobalsFromContext(ctx context.Context) (*PluginGlobals, error) {

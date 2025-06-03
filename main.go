@@ -197,7 +197,7 @@ func main() {
 	parentCtx = logging.AppendCtx(parentCtx, slog.Uint64("hostMemoryBytes", hostMemoryBytes))
 
 	parentCtx = context.WithValue(parentCtx, config.ContextKey("globals"), &config.Globals{
-		RunOnce:         runOnce,
+		RunOnce:         runOnce == "true",
 		PullLock:        &sync.Mutex{},
 		PluginsPath:     pluginsPath,
 		DebugEnabled:    logging.IsDebugEnabled(),
@@ -283,7 +283,7 @@ func worker(
 			switch sig {
 			case syscall.SIGQUIT: // doesn't work for receivers since they don't loop
 				parentLogger.WarnContext(workerCtx, "graceful shutdown, waiting for jobs to finish...")
-				toRunOnce = "true"
+				toRunOnce = true
 			default:
 				sigCount++
 				if sigCount >= 2 {
@@ -367,7 +367,7 @@ func worker(
 				parentLogger.WarnContext(pluginCtx, shutDownMessage)
 				return
 			default:
-				if workerCtx.Err() != nil || toRunOnce == "true" {
+				if workerCtx.Err() != nil || toRunOnce {
 					pluginCancel()
 					break
 				}
@@ -557,7 +557,7 @@ func worker(
 							}
 							return
 						}
-						if workerCtx.Err() != nil || toRunOnce == "true" {
+						if workerCtx.Err() != nil || toRunOnce {
 							pluginLogger.WarnContext(updatedPluginCtx, shutDownMessage)
 							pluginCancel()
 							return
