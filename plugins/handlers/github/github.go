@@ -755,7 +755,8 @@ func cleanup(
 					}
 					databaseContainer.Client.Del(cleanupContext, pluginQueueName+"/cleaning")
 				default:
-					if workflowJobStatus == "completed" { // don't send it back to the queue if the job is completed
+					if queuedJob.WorkflowJob.Status != nil &&
+						(*queuedJob.WorkflowJob.Status == "completed" || *queuedJob.WorkflowJob.Status == "failed") { // don't send it back to the queue if the job is completed
 						databaseContainer.Client.Del(cleanupContext, pluginQueueName+"/cleaning")
 						return
 					}
@@ -1238,7 +1239,7 @@ func Run(
 				fmt.Printf("pausedQueueJob: %+v\n", pausedQueueJob)
 				if pausedQueueJob.Action != "paused" {
 					logger.WarnContext(pluginCtx, "job was picked up by another host")
-					pluginGlobals.PausedCancellationJobChannel <- true
+					pluginGlobals.PausedCancellationJobChannel <- queuedJob
 					return pluginCtx, nil
 				}
 				time.Sleep(5 * time.Second)
