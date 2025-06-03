@@ -187,12 +187,12 @@ func Run(
 			if *workflowJob.Action == "queued" {
 				if exists_in_array_partial(simplifiedWorkflowJobEvent.WorkflowJob.Labels, []string{"anka-template"}) {
 					// make sure it doesn't already exist
-					inQueue, err := internalGithub.InQueue(pluginCtx, logger, *simplifiedWorkflowJobEvent.WorkflowJob.ID, "anklet/jobs/github/queued/"+pluginConfig.Owner)
+					inQueueJob, err := internalGithub.InQueue(pluginCtx, *simplifiedWorkflowJobEvent.WorkflowJob.ID, "anklet/jobs/github/queued/"+pluginConfig.Owner)
 					if err != nil {
 						logger.ErrorContext(pluginCtx, "error searching in queue", "error", err)
 						return
 					}
-					if !inQueue { // if it doesn't exist already
+					if inQueueJob == nil { // if it doesn't exist already
 						// push it to the queue
 						wrappedPayloadJSON, err := json.Marshal(simplifiedWorkflowJobEvent)
 						if err != nil {
@@ -226,12 +226,12 @@ func Run(
 				// store in_progress so we can know if the registration failed
 				if exists_in_array_partial(simplifiedWorkflowJobEvent.WorkflowJob.Labels, []string{"anka-template"}) {
 					// make sure it doesn't already exist
-					inQueue, err := internalGithub.InQueue(pluginCtx, logger, *simplifiedWorkflowJobEvent.WorkflowJob.ID, "anklet/jobs/github/in_progress/"+pluginConfig.Owner)
+					inQueueJob, err := internalGithub.InQueue(pluginCtx, *simplifiedWorkflowJobEvent.WorkflowJob.ID, "anklet/jobs/github/in_progress/"+pluginConfig.Owner)
 					if err != nil {
 						logger.ErrorContext(pluginCtx, "error searching in queue", "error", err)
 						return
 					}
-					if !inQueue { // if it doesn't exist already
+					if inQueueJob == nil { // if it doesn't exist already
 						// push it to the queue
 						wrappedPayloadJSON, err := json.Marshal(simplifiedWorkflowJobEvent)
 						if err != nil {
@@ -271,11 +271,11 @@ func Run(
 						wg.Add(1)
 						go func(queue string) {
 							defer wg.Done()
-							inQueue, err := internalGithub.InQueue(pluginCtx, logger, *simplifiedWorkflowJobEvent.WorkflowJob.ID, queue)
+							inQueueJob, err := internalGithub.InQueue(pluginCtx, *simplifiedWorkflowJobEvent.WorkflowJob.ID, queue)
 							if err != nil {
 								logger.WarnContext(pluginCtx, err.Error(), "queue", queue)
 							}
-							results <- inQueue
+							results <- inQueueJob != nil
 						}(queue)
 					}
 					go func() {
@@ -290,12 +290,12 @@ func Run(
 						}
 					}
 					if inAQueue { // only add completed if it's in a queue
-						inCompletedQueue, err := internalGithub.InQueue(pluginCtx, logger, *simplifiedWorkflowJobEvent.WorkflowJob.ID, "anklet/jobs/github/completed/"+pluginConfig.Owner)
+						inCompletedQueueJob, err := internalGithub.InQueue(pluginCtx, *simplifiedWorkflowJobEvent.WorkflowJob.ID, "anklet/jobs/github/completed/"+pluginConfig.Owner)
 						if err != nil {
 							logger.ErrorContext(pluginCtx, "error searching in queue", "error", err)
 							return
 						}
-						if !inCompletedQueue {
+						if inCompletedQueueJob == nil {
 							// push it to the queue
 							wrappedPayloadJSON, err := json.Marshal(simplifiedWorkflowJobEvent)
 							if err != nil {
