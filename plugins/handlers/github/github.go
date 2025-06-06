@@ -14,7 +14,6 @@ import (
 
 	"github.com/google/go-github/v66/github"
 	"github.com/redis/go-redis/v9"
-	"github.com/veertuinc/anklet/internal/anka"
 	internalAnka "github.com/veertuinc/anklet/internal/anka"
 	"github.com/veertuinc/anklet/internal/config"
 	"github.com/veertuinc/anklet/internal/database"
@@ -417,10 +416,17 @@ func CheckForCompletedJobs(
 				logger.ErrorContext(pluginCtx, "error searching in queue", "error", err)
 				return
 			}
-			if mainInProgressQueueJobJSON != "" {
+			mainInProgressQueueJob, err, typeErr := database.Unwrap[internalGithub.QueueJob](mainInProgressQueueJobJSON)
+			if err != nil || typeErr != nil {
+				logger.ErrorContext(pluginCtx, "error unmarshalling job", "err", err, "typeErr", typeErr, "mainInProgressQueueJobJSON", mainInProgressQueueJobJSON)
+				return
+			}
+			if mainInProgressQueueJob.WorkflowJob.Status != nil && *mainInProgressQueueJob.WorkflowJob.Status == "running" {
 				fmt.Println("CheckForCompletedJobs -> job is in mainInProgressQueue", randomInt)
+				if queuedJob.WorkflowJob.Status != mainInProgressQueueJob.WorkflowJob.Status { // prevent running the dbUpdate more than once if not needed
+					updateDB = true
+				}
 				queuedJob.WorkflowJob.Status = github.String("running")
-				updateDB = true
 			}
 
 			var mainCompletedQueueJobJSON string
@@ -758,7 +764,7 @@ func cleanup(
 		switch queuedJob.Type {
 		case "anka.VM":
 			logger.DebugContext(pluginCtx, "cleanup | anka.VM | queuedJob", "queuedJob", queuedJob)
-			ankaCLI, err := anka.GetAnkaCLIFromContext(pluginCtx)
+			ankaCLI, err := internalAnka.GetAnkaCLIFromContext(pluginCtx)
 			if err != nil {
 				logger.ErrorContext(pluginCtx, "error getting ankaCLI from context", "err", err)
 				return
@@ -1037,7 +1043,7 @@ func Run(
 	default:
 	}
 
-	hostHasVmCapacity := anka.HostHasVmCapacity(pluginCtx)
+	hostHasVmCapacity := internalAnka.HostHasVmCapacity(pluginCtx)
 	if !hostHasVmCapacity {
 		logger.WarnContext(pluginCtx, "host does not have vm capacity")
 		return pluginCtx, nil
@@ -1100,7 +1106,7 @@ func Run(
 			if err != nil || typeErr != nil {
 				return pluginCtx, fmt.Errorf("error unmarshalling job: %s", err.Error())
 			}
-			err = anka.VmHasEnoughHostResources(pluginCtx, pausedQueuedJob.AnkaVM)
+			err = internalAnka.VmHasEnoughHostResources(pluginCtx, pausedQueuedJob.AnkaVM)
 			if err != nil {
 				workerGlobals.IncrementQueueTargetIndex()
 				if pausedQueueLength == 1 { // don't go into a forever loop
@@ -1108,7 +1114,7 @@ func Run(
 				}
 				continue
 			}
-			err = anka.VmHasEnoughResources(pluginCtx, pausedQueuedJob.AnkaVM)
+			err = internalAnka.VmHasEnoughResources(pluginCtx, pausedQueuedJob.AnkaVM)
 			if err != nil {
 				workerGlobals.IncrementQueueTargetIndex()
 				if pausedQueueLength == 1 { // don't go into a forever loop
@@ -1225,7 +1231,7 @@ func Run(
 	pluginCtx = logging.AppendCtx(pluginCtx, slog.String("ankaTemplateTag", ankaTemplateTag))
 
 	// get anka CLI
-	ankaCLI, err := anka.GetAnkaCLIFromContext(pluginCtx)
+	ankaCLI, err := internalAnka.GetAnkaCLIFromContext(pluginCtx)
 	if err != nil {
 		return pluginCtx, err
 	}
@@ -1536,7 +1542,7 @@ func Run(
 func removeSelfHostedRunner(
 	workerCtx context.Context,
 	pluginCtx context.Context,
-	vm anka.VM,
+	vm internalAnka.VM,
 	queuedJob *internalGithub.QueueJob,
 	metricsData *metrics.MetricsDataLock,
 ) {
