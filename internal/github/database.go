@@ -14,10 +14,10 @@ func InQueue(
 	pluginCtx context.Context,
 	jobID int64,
 	queue string,
-) (*QueueJob, error) {
+) (string, error) {
 	logger, err := logging.GetLoggerFromContext(pluginCtx)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 	databaseContainer, err := database.GetDatabaseFromContext(pluginCtx)
 	if err != nil {
@@ -27,27 +27,27 @@ func InQueue(
 	queued, err := databaseContainer.Client.LRange(localCtx, queue, 0, -1).Result()
 	if err != nil {
 		logger.ErrorContext(pluginCtx, "error getting list of queued jobs", "err", err)
-		return nil, err
+		return "", err
 	}
 	for _, queueItem := range queued {
 		queueJob, err, typeErr := database.Unwrap[QueueJob](queueItem)
 		if err != nil {
 			logger.ErrorContext(pluginCtx, "error unmarshalling job", "err", err)
-			return nil, err
+			return "", err
 		}
 		if typeErr != nil { // not the type we want
 			continue
 		}
 		if queueJob.WorkflowJob.ID == nil {
 			logger.ErrorContext(pluginCtx, "WorkflowJob.ID is nil", "WorkflowJob", queueJob.WorkflowJob)
-			return nil, fmt.Errorf("WorkflowJob.ID is nil")
+			return "", fmt.Errorf("WorkflowJob.ID is nil")
 		}
 		if *queueJob.WorkflowJob.ID == jobID {
 			// logger.WarnContext(pluginCtx, "WorkflowJob.ID already in queue", "WorkflowJob.ID", jobID)
-			return &queueJob, nil
+			return queueItem, nil
 		}
 	}
-	return nil, nil
+	return "", nil
 }
 
 func DeleteFromQueue(pluginCtx context.Context, logger *slog.Logger, jobID int64, queue string) error {

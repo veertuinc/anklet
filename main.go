@@ -197,13 +197,15 @@ func main() {
 	parentCtx = logging.AppendCtx(parentCtx, slog.Uint64("hostMemoryBytes", hostMemoryBytes))
 
 	parentCtx = context.WithValue(parentCtx, config.ContextKey("globals"), &config.Globals{
-		RunOnce:         runOnce == "true",
-		PullLock:        &sync.Mutex{},
-		PluginsPath:     pluginsPath,
-		DebugEnabled:    logging.IsDebugEnabled(),
-		IsBlocked:       atomic.Bool{},
-		HostCPUCount:    hostCPUCount,
-		HostMemoryBytes: hostMemoryBytes,
+		RunPluginsOnce:     runOnce == "true",
+		FirstPluginStarted: make(chan bool, 1),
+		ReturnToMainQueue:  make(chan bool, 1),
+		PullLock:           &sync.Mutex{},
+		PluginsPath:        pluginsPath,
+		DebugEnabled:       logging.IsDebugEnabled(),
+		IsBlocked:          atomic.Bool{},
+		HostCPUCount:       hostCPUCount,
+		HostMemoryBytes:    hostMemoryBytes,
 		// PluginOrder: func() []string {
 		// 	order := make([]string, 0, len(loadedConfig.Plugins))
 		// 	for _, p := range loadedConfig.Plugins {
@@ -267,13 +269,10 @@ func worker(
 		parentLogger.ErrorContext(parentCtx, "unable to get globals from context", "error", err)
 		os.Exit(1)
 	}
-	toRunOnce := workerGlobals.RunOnce
+	toRunOnce := workerGlobals.RunPluginsOnce
 	workerCtx, workerCancel := context.WithCancel(parentCtx)
 	suffix := parentCtx.Value(config.ContextKey("suffix")).(string)
 	parentLogger.InfoContext(workerCtx, "starting anklet"+suffix)
-	// returnToMainQueue needs to be worker level so a user graceful shutdown can return jobs to the queue
-	returnToMainQueue := make(chan bool, 1)
-	workerCtx = context.WithValue(workerCtx, config.ContextKey("returnToMainQueue"), returnToMainQueue)
 	var wg sync.WaitGroup
 	go func() {
 		defer signal.Stop(sigChan)
@@ -292,7 +291,7 @@ func worker(
 				}
 				parentLogger.WarnContext(workerCtx, "best effort graceful shutdown, interrupting the job as soon as possible...")
 				workerCancel()
-				returnToMainQueue <- true
+				workerGlobals.ReturnToMainQueue <- true
 			}
 		}
 	}()
@@ -379,10 +378,9 @@ func worker(
 			}
 		}
 	} else {
-		// firstPluginStarted: always make sure the first plugin in the config starts first before any others.
+		// workerGlobals.FirstPluginStarted: always make sure the first plugin in the config starts first before any others.
 		// this allows users to mix a receiver with multiple other plugins,
 		// and let the receiver do its thing to prepare the db first.
-		firstPluginStarted := make(chan bool, 1)
 		metricsData := &metrics.MetricsDataLock{}
 		workerCtx = context.WithValue(workerCtx, config.ContextKey("metrics"), metricsData)
 		parentLogger.InfoContext(workerCtx, "metrics server started on port "+metricsPort)
@@ -396,7 +394,7 @@ func worker(
 			waitLoop:
 				for {
 					select {
-					case <-firstPluginStarted:
+					case <-workerGlobals.FirstPluginStarted:
 						break waitLoop
 					case <-workerCtx.Done():
 						return
@@ -538,7 +536,6 @@ func worker(
 							pluginCtx,
 							pluginCancel,
 							pluginLogger,
-							firstPluginStarted,
 							metricsData,
 						)
 						if err != nil {

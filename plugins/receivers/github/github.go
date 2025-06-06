@@ -56,10 +56,13 @@ func Run(
 	pluginCtx context.Context,
 	pluginCancel context.CancelFunc,
 	logger *slog.Logger,
-	firstPluginStarted chan bool,
 	metricsData *metrics.MetricsDataLock,
 ) (context.Context, error) {
 	pluginConfig, err := config.GetPluginFromContext(pluginCtx)
+	if err != nil {
+		return pluginCtx, err
+	}
+	workerGlobals, err := config.GetWorkerGlobalsFromContext(workerCtx)
 	if err != nil {
 		return pluginCtx, err
 	}
@@ -187,12 +190,12 @@ func Run(
 			if *workflowJob.Action == "queued" {
 				if exists_in_array_partial(simplifiedWorkflowJobEvent.WorkflowJob.Labels, []string{"anka-template"}) {
 					// make sure it doesn't already exist
-					inQueueJob, err := internalGithub.InQueue(pluginCtx, *simplifiedWorkflowJobEvent.WorkflowJob.ID, "anklet/jobs/github/queued/"+pluginConfig.Owner)
+					inQueueJobJSON, err := internalGithub.InQueue(pluginCtx, *simplifiedWorkflowJobEvent.WorkflowJob.ID, "anklet/jobs/github/queued/"+pluginConfig.Owner)
 					if err != nil {
 						logger.ErrorContext(pluginCtx, "error searching in queue", "error", err)
 						return
 					}
-					if inQueueJob == nil { // if it doesn't exist already
+					if inQueueJobJSON == "" { // if it doesn't exist already
 						// push it to the queue
 						wrappedPayloadJSON, err := json.Marshal(simplifiedWorkflowJobEvent)
 						if err != nil {
@@ -226,12 +229,12 @@ func Run(
 				// store in_progress so we can know if the registration failed
 				if exists_in_array_partial(simplifiedWorkflowJobEvent.WorkflowJob.Labels, []string{"anka-template"}) {
 					// make sure it doesn't already exist
-					inQueueJob, err := internalGithub.InQueue(pluginCtx, *simplifiedWorkflowJobEvent.WorkflowJob.ID, "anklet/jobs/github/in_progress/"+pluginConfig.Owner)
+					inQueueJobJSON, err := internalGithub.InQueue(pluginCtx, *simplifiedWorkflowJobEvent.WorkflowJob.ID, "anklet/jobs/github/in_progress/"+pluginConfig.Owner)
 					if err != nil {
 						logger.ErrorContext(pluginCtx, "error searching in queue", "error", err)
 						return
 					}
-					if inQueueJob == nil { // if it doesn't exist already
+					if inQueueJobJSON == "" { // if it doesn't exist already
 						// push it to the queue
 						wrappedPayloadJSON, err := json.Marshal(simplifiedWorkflowJobEvent)
 						if err != nil {
@@ -271,11 +274,11 @@ func Run(
 						wg.Add(1)
 						go func(queue string) {
 							defer wg.Done()
-							inQueueJob, err := internalGithub.InQueue(pluginCtx, *simplifiedWorkflowJobEvent.WorkflowJob.ID, queue)
+							inQueueJobJSON, err := internalGithub.InQueue(pluginCtx, *simplifiedWorkflowJobEvent.WorkflowJob.ID, queue)
 							if err != nil {
 								logger.WarnContext(pluginCtx, err.Error(), "queue", queue)
 							}
-							results <- inQueueJob != nil
+							results <- inQueueJobJSON != ""
 						}(queue)
 					}
 					go func() {
@@ -290,12 +293,12 @@ func Run(
 						}
 					}
 					if inAQueue { // only add completed if it's in a queue
-						inCompletedQueueJob, err := internalGithub.InQueue(pluginCtx, *simplifiedWorkflowJobEvent.WorkflowJob.ID, "anklet/jobs/github/completed/"+pluginConfig.Owner)
+						inCompletedQueueJobJSON, err := internalGithub.InQueue(pluginCtx, *simplifiedWorkflowJobEvent.WorkflowJob.ID, "anklet/jobs/github/completed/"+pluginConfig.Owner)
 						if err != nil {
 							logger.ErrorContext(pluginCtx, "error searching in queue", "error", err)
 							return
 						}
-						if inCompletedQueueJob == nil {
+						if inCompletedQueueJobJSON == "" {
 							// push it to the queue
 							wrappedPayloadJSON, err := json.Marshal(simplifiedWorkflowJobEvent)
 							if err != nil {
@@ -783,9 +786,9 @@ MainLoop:
 
 	// notify the main thread that the service has started
 	select {
-	case <-firstPluginStarted:
+	case <-workerGlobals.FirstPluginStarted:
 	default:
-		close(firstPluginStarted)
+		close(workerGlobals.FirstPluginStarted)
 	}
 	logger.InfoContext(pluginCtx, "started plugin")
 	metrics.UpdatePlugin(workerCtx, pluginCtx, logger, metrics.PluginBase{

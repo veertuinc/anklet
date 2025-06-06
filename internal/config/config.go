@@ -204,14 +204,16 @@ func GetPluginFromContext(ctx context.Context) (Plugin, error) {
 }
 
 type Globals struct {
-	RunOnce          bool
-	PullLock         *sync.Mutex
-	PluginsPath      string
-	DebugEnabled     bool
-	IsBlocked        atomic.Bool
-	HostCPUCount     int
-	HostMemoryBytes  uint64
-	QueueTargetIndex int64
+	RunPluginsOnce     bool
+	FirstPluginStarted chan bool
+	ReturnToMainQueue  chan bool
+	PullLock           *sync.Mutex
+	PluginsPath        string
+	DebugEnabled       bool
+	IsBlocked          atomic.Bool
+	HostCPUCount       int
+	HostMemoryBytes    uint64
+	QueueTargetIndex   int64
 
 	// PluginOrder        []string   // The order in which plugins should acquire the prep lock
 	// CurrentPluginIndex int        // The index of the plugin whose turn it is
