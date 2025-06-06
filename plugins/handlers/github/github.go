@@ -685,33 +685,34 @@ func cleanup(
 		logger.ErrorContext(pluginCtx, "error getting database from context", "err", err)
 		return
 	}
+
+	// get the original job with the latest status and check if it's running
+	originalJobJSON, err := databaseContainer.Client.LIndex(cleanupContext, pluginQueueName, 0).Result()
+	if err != nil && err != redis.Nil {
+		logger.ErrorContext(pluginCtx, "error getting job from the list", "err", err)
+		return
+	}
+	if err == redis.Nil {
+		return // nothing to clean up
+	}
+	originalQueuedJob, err, typeErr := database.Unwrap[internalGithub.QueueJob](originalJobJSON)
+	if err != nil || typeErr != nil {
+		logger.ErrorContext(pluginCtx, "error unmarshalling job", "err", err, "typeErr", typeErr, "originalJobJSON", originalJobJSON)
+		return
+	}
+
+	// if the job is running, we don't need to clean it up yet
+	if originalQueuedJob.WorkflowJob.Status != nil && *originalQueuedJob.WorkflowJob.Status == "running" {
+		logger.DebugContext(pluginCtx, "job is still running; skipping cleanup")
+		return
+	}
+
 	logger.DebugContext(pluginCtx, "starting cleanup loop")
 	for {
 
 		var queuedJob internalGithub.QueueJob
 		var typeErr error
 		var cleaningJobJSON string
-
-		// get the original job with the latest status and check if it's running
-		originalJobJSON, err := databaseContainer.Client.LIndex(cleanupContext, pluginQueueName, 0).Result()
-		if err != nil && err != redis.Nil {
-			logger.ErrorContext(pluginCtx, "error getting job from the list", "err", err)
-			return
-		}
-		if err == redis.Nil {
-			return // nothing to clean up
-		}
-		queuedJob, err, typeErr = database.Unwrap[internalGithub.QueueJob](originalJobJSON)
-		if err != nil || typeErr != nil {
-			logger.ErrorContext(pluginCtx, "error unmarshalling job", "err", err, "typeErr", typeErr, "originalJobJSON", originalJobJSON)
-			return
-		}
-
-		// if the job is running, we don't need to clean it up yet
-		if queuedJob.WorkflowJob.Status != nil && *queuedJob.WorkflowJob.Status == "running" {
-			logger.DebugContext(pluginCtx, "job is still running; skipping cleanup")
-			return
-		}
 
 		// get the cleaning job from the cleaning list
 		cleaningJobJSON, err = databaseContainer.Client.LIndex(cleanupContext, pluginQueueName+"/cleaning", 0).Result()
@@ -990,7 +991,7 @@ func Run(
 	case jobFromJobChannel := <-pluginGlobals.JobChannel:
 		// return if completed so the cleanup doesn't run twice
 		if *jobFromJobChannel.WorkflowJob.Status == "completed" || *jobFromJobChannel.WorkflowJob.Status == "failed" {
-			logger.InfoContext(pluginCtx, "completed or failed job found at start")
+			logger.InfoContext(pluginCtx, "completed job found at start")
 			return pluginCtx, nil
 		}
 		if *jobFromJobChannel.WorkflowJob.Status == "running" { // TODO: make this the same as the loop later on
