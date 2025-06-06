@@ -97,33 +97,33 @@ func UpdateJobInDB(pluginCtx context.Context, queue string, upToDateJob *QueueJo
 	if err != nil {
 		return fmt.Errorf("error getting job list: %w", err)
 	}
-	logger.DebugContext(pluginCtx, "jobList", "jobList", jobList)
+	// logger.DebugContext(pluginCtx, "jobList", "jobList", jobList)
 	// Find the matching job
 	for i, jobStr := range jobList {
 		existingJob, err, typeErr := database.Unwrap[QueueJob](jobStr)
 		if err != nil || typeErr != nil {
 			continue
 		}
-		logger.DebugContext(pluginCtx, "existingJob", "existingJob", existingJob)
-		logger.DebugContext(pluginCtx, "upToDateJob", "upToDateJob", upToDateJob)
+		// logger.DebugContext(pluginCtx, "existingJob", "existingJob", existingJob)
+		// logger.DebugContext(pluginCtx, "upToDateJob", "upToDateJob", upToDateJob)
 		if *existingJob.WorkflowJob.ID == *upToDateJob.WorkflowJob.ID &&
 			*existingJob.WorkflowJob.RunID == *upToDateJob.WorkflowJob.RunID {
 			// Update the job at this index
-			updatedJob, err := json.Marshal(upToDateJob)
+			updatedJobJSON, err := json.Marshal(upToDateJob)
 			if err != nil {
 				return fmt.Errorf("error marshaling updated job: %w", err)
 			}
-			err = databaseContainer.Client.LSet(pluginCtx, queue, int64(i), updatedJob).Err()
+			err = databaseContainer.Client.LSet(pluginCtx, queue, int64(i), updatedJobJSON).Err()
 			if err != nil {
 				return fmt.Errorf("error updating job in database: %w", err)
 			}
 			logger.InfoContext(pluginCtx, "job updated in database", "job", upToDateJob)
 			// Find the job in the database by ID and run_id within the plugin queue
-			jobList, err := databaseContainer.Client.LRange(pluginCtx, queue, 0, -1).Result()
-			if err != nil {
-				return fmt.Errorf("error getting job list: %w", err)
-			}
-			logger.DebugContext(pluginCtx, "jobList", "jobList", jobList)
+			// jobList, err := databaseContainer.Client.LRange(pluginCtx, queue, 0, -1).Result()
+			// if err != nil {
+			// 	return fmt.Errorf("error getting job list: %w", err)
+			// }
+			// logger.DebugContext(pluginCtx, "jobList", "jobList", jobList)
 			return nil
 		}
 	}

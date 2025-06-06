@@ -104,7 +104,7 @@ var once sync.Once
 func watchForJobCompletion(
 	workerCtx context.Context,
 	pluginCtx context.Context,
-	queuedJob internalGithub.QueueJob,
+	pluginQueueName string,
 	mainInProgressQueueName string,
 ) (context.Context, error) {
 	logger, err := logging.GetLoggerFromContext(pluginCtx)
@@ -119,60 +119,65 @@ func watchForJobCompletion(
 	if err != nil {
 		return pluginCtx, err
 	}
+	databaseContainer, err := database.GetDatabaseFromContext(pluginCtx)
+	if err != nil {
+		return pluginCtx, err
+	}
+
 	logCounter := 0
 	alreadyLogged := false
 	jobStatusCheckIntervalSeconds := 10
 	firstLog := true
 	for {
 		select {
-		case completedJobEvent := <-pluginGlobals.JobChannel:
-			if completedJobEvent.Action == "completed" {
-				pluginCtx = logging.AppendCtx(pluginCtx, slog.String("conclusion", *completedJobEvent.WorkflowJob.Conclusion))
+		case <-pluginCtx.Done():
+			logger.WarnContext(pluginCtx, "context canceled while watching for job completion")
+			return pluginCtx, nil
+		default:
+			time.Sleep(time.Duration(jobStatusCheckIntervalSeconds) * time.Second)
+			queuedJobJSON, err := databaseContainer.Client.LIndex(pluginCtx, pluginQueueName, 0).Result()
+			if err != nil {
+				logger.ErrorContext(pluginCtx, "error searching in queue", "error", err)
+				return pluginCtx, err
+			}
+			queuedJob, err, typeErr := database.Unwrap[internalGithub.QueueJob](queuedJobJSON)
+			if err != nil || typeErr != nil {
+				logger.ErrorContext(pluginCtx, "error unmarshalling job", "err", err, "typeErr", typeErr, "queuedJobJSON", queuedJobJSON)
+				return pluginCtx, err
+			}
+			logger.InfoContext(pluginCtx, "watchForJobCompletion -> queuedJob", "queuedJob", queuedJob)
+
+			if queuedJob.WorkflowJob.Status != nil && *queuedJob.WorkflowJob.Status == "completed" {
 				logger.InfoContext(pluginCtx, "job completed",
-					"job_id", completedJobEvent.WorkflowJob.ID,
-					"conclusion", *completedJobEvent.WorkflowJob.Conclusion,
+					"job_id", queuedJob.WorkflowJob.ID,
+					"conclusion", *queuedJob.WorkflowJob.Conclusion,
 				)
-				if *completedJobEvent.WorkflowJob.Conclusion == "success" {
-					metricsData, err := metrics.GetMetricsDataFromContext(workerCtx)
-					if err != nil {
-						return pluginCtx, err
-					}
+				metricsData, err := metrics.GetMetricsDataFromContext(workerCtx)
+				if err != nil {
+					return pluginCtx, err
+				}
+				if *queuedJob.WorkflowJob.Conclusion == "success" || *queuedJob.WorkflowJob.Conclusion == "" {
 					metricsData.IncrementTotalSuccessfulRunsSinceStart(workerCtx, pluginCtx, logger)
 					metricsData.UpdatePlugin(workerCtx, pluginCtx, logger, metrics.Plugin{
 						PluginBase: &metrics.PluginBase{
 							Name: pluginConfig.Name,
 						},
 						LastSuccessfulRun:       time.Now(),
-						LastSuccessfulRunJobUrl: *completedJobEvent.WorkflowJob.HTMLURL,
+						LastSuccessfulRunJobUrl: *queuedJob.WorkflowJob.HTMLURL,
 					})
-				} else if *completedJobEvent.WorkflowJob.Conclusion == "failure" {
-					metricsData, err := metrics.GetMetricsDataFromContext(workerCtx)
-					if err != nil {
-						return pluginCtx, err
-					}
+				} else if *queuedJob.WorkflowJob.Conclusion == "failure" {
 					metricsData.IncrementTotalFailedRunsSinceStart(workerCtx, pluginCtx, logger)
 					metricsData.UpdatePlugin(workerCtx, pluginCtx, logger, metrics.Plugin{
 						PluginBase: &metrics.PluginBase{
 							Name: pluginConfig.Name,
 						},
 						LastFailedRun:       time.Now(),
-						LastFailedRunJobUrl: *completedJobEvent.WorkflowJob.HTMLURL,
+						LastFailedRunJobUrl: *queuedJob.WorkflowJob.HTMLURL,
 					})
-					queuedJob.WorkflowJob.Conclusion = github.String("failure") // support removeSelfHostedRunner
 				}
-			} else if logCounter%2 == 0 {
-				if pluginCtx.Err() != nil {
-					logger.WarnContext(pluginCtx, "context canceled during job status check")
-					return pluginCtx, nil
-				}
+				return pluginCtx, nil
 			}
-			pluginGlobals.JobChannel <- internalGithub.QueueJob{} // so cleanup can also see it as completed
-			return pluginCtx, nil
-		case <-pluginCtx.Done():
-			logger.WarnContext(pluginCtx, "context canceled while watching for job completion")
-			return pluginCtx, nil
-		default:
-			time.Sleep(time.Duration(jobStatusCheckIntervalSeconds) * time.Second)
+
 			mainInProgressQueueJobJSON, err := internalGithub.InQueue(pluginCtx, *queuedJob.WorkflowJob.ID, mainInProgressQueueName)
 			if err != nil {
 				logger.ErrorContext(pluginCtx, "error searching in queue", "error", err)
@@ -205,6 +210,8 @@ func watchForJobCompletion(
 				if mainInProgressQueueJobJSON == "" {
 					logger.ErrorContext(pluginCtx, "waiting for runner registration timed out, will retry")
 					queuedJob.WorkflowJob.Conclusion = github.String("failure") // support removeSelfHostedRunner
+					queuedJob.WorkflowJob.Status = github.String("completed")
+					internalGithub.UpdateJobInDB(pluginCtx, pluginQueueName, &queuedJob)
 					pluginGlobals.RetryChannel <- true
 					return pluginCtx, nil
 				}
@@ -455,7 +462,6 @@ func CheckForCompletedJobs(
 
 			if mainCompletedQueueJobJSON != "" {
 				fmt.Println("CheckForCompletedJobs -> job is in mainCompletedQueue, handling", randomInt)
-				queuedJob.WorkflowJob.Status = github.String("completed")
 				// remove the completed job we found
 				success, err := databaseContainer.Client.LRem(pluginCtx, mainCompletedQueueName, 1, mainCompletedQueueJobJSON).Result()
 				if err != nil {
@@ -477,6 +483,19 @@ func CheckForCompletedJobs(
 					)
 					return
 				}
+
+				completedQueuedJob, err, typeErr := database.Unwrap[internalGithub.QueueJob](mainCompletedQueueJobJSON)
+				if err != nil || typeErr != nil {
+					logger.ErrorContext(pluginCtx,
+						"error unmarshalling job",
+						"err", err,
+						"typeErr", typeErr,
+						"queuedJob", queuedJob,
+					)
+					return
+				}
+				queuedJob.WorkflowJob.Status = completedQueuedJob.WorkflowJob.Status
+				queuedJob.WorkflowJob.Conclusion = completedQueuedJob.WorkflowJob.Conclusion
 				// delete the existing service task
 				// _, err = databaseContainer.Client.Del(pluginCtx, serviceQueueDatabaseKeyName).Result()
 				// if err != nil {
@@ -527,13 +546,15 @@ func CheckForCompletedJobs(
 						queuedJob.WorkflowJob.Status = github.String("completed")
 					case "action_required":
 						logger.InfoContext(pluginCtx, "workflow job requires action")
-						queuedJob.WorkflowJob.Status = github.String("failed")
+						queuedJob.WorkflowJob.Conclusion = github.String("failure")
+						queuedJob.WorkflowJob.Status = github.String("completed")
 					case "cancelled":
 						logger.InfoContext(pluginCtx, "workflow job was cancelled")
 						queuedJob.WorkflowJob.Status = github.String("completed")
 					case "failure":
 						logger.InfoContext(pluginCtx, "workflow job failed")
-						queuedJob.WorkflowJob.Status = github.String("failed")
+						queuedJob.WorkflowJob.Conclusion = github.String("failure")
+						queuedJob.WorkflowJob.Status = github.String("completed")
 					case "neutral":
 						logger.InfoContext(pluginCtx, "workflow job ended with neutral status")
 						queuedJob.WorkflowJob.Status = github.String("completed")
@@ -548,7 +569,8 @@ func CheckForCompletedJobs(
 						queuedJob.WorkflowJob.Status = github.String("completed")
 					case "timed_out":
 						logger.InfoContext(pluginCtx, "workflow job timed out")
-						queuedJob.WorkflowJob.Status = github.String("failed")
+						queuedJob.WorkflowJob.Conclusion = github.String("failure")
+						queuedJob.WorkflowJob.Status = github.String("completed")
 					case "in_progress":
 						logger.InfoContext(pluginCtx, "workflow job is in progress")
 						queuedJob.WorkflowJob.Status = github.String("running")
@@ -581,6 +603,9 @@ func CheckForCompletedJobs(
 				}
 				pluginGlobals.JobChannel <- queuedJob
 			}
+
+			// update the job in the database so we can get the new status for subsequent steps
+			internalGithub.UpdateJobInDB(pluginCtx, pluginQueueName, &queuedJob)
 		}
 
 		pluginGlobals.FirstCheckForCompletedJobsRan = true
@@ -654,6 +679,19 @@ func cleanup(
 	}
 	logger.DebugContext(pluginCtx, "starting cleanup loop")
 	for {
+
+		var jobFromJobChannel internalGithub.QueueJob
+		select { // handle when the CheckForCompletedJobs goroutine sends a job to the JobChannel
+		case jobFromJobChannel = <-pluginGlobals.JobChannel:
+		default:
+		}
+
+		// if the job is running, we don't need to clean it up yet
+		if jobFromJobChannel.WorkflowJob.Status != nil && *jobFromJobChannel.WorkflowJob.Status == "running" {
+			logger.DebugContext(pluginCtx, "job is running; skipping cleanup")
+			return
+		}
+
 		var queuedJob internalGithub.QueueJob
 		var typeErr error
 		var cleaningJobJSON string
@@ -681,16 +719,6 @@ func cleanup(
 			}
 		}
 
-		select { // handle when the CheckForCompletedJobs goroutine sends a job to the JobChannel
-		case job := <-pluginGlobals.JobChannel:
-			// if the job is running, we don't need to clean it up yet
-			if job.WorkflowJob.Status != nil && *job.WorkflowJob.Status == "running" {
-				logger.DebugContext(pluginCtx, "job is running; skipping cleanup")
-				return
-			}
-		default:
-		}
-
 		queuedJob, err, typeErr = database.Unwrap[internalGithub.QueueJob](cleaningJobJSON)
 		if err != nil || typeErr != nil {
 			if err == redis.Nil {
@@ -709,7 +737,7 @@ func cleanup(
 		logger.DebugContext(pluginCtx, "cleaning queuedJob", "queuedJob", queuedJob)
 		switch queuedJob.Type {
 		case "anka.VM":
-			logger.DebugContext(pluginCtx, "cleaning anka.VM", "queuedJob", queuedJob)
+			logger.DebugContext(pluginCtx, "cleanup | anka.VM | queuedJob", "queuedJob", queuedJob)
 			ankaCLI, err := anka.GetAnkaCLIFromContext(pluginCtx)
 			if err != nil {
 				logger.ErrorContext(pluginCtx, "error getting ankaCLI from context", "err", err)
@@ -725,56 +753,57 @@ func cleanup(
 			databaseContainer.Client.Del(cleanupContext, pluginQueueName+"/cleaning")
 			continue // required to keep processing tasks in the db list
 		case "WorkflowJobPayload": // MUST COME LAST
+			logger.DebugContext(pluginCtx, "cleanup | WorkflowJobPayload | queuedJob", "queuedJob", queuedJob)
 			// delete the in_progress queue's index that matches the wrkflowJobID
 			err = internalGithub.DeleteFromQueue(pluginCtx, logger, *queuedJob.WorkflowJob.ID, mainInProgressQueueName)
 			if err != nil {
 				logger.ErrorContext(pluginCtx, "error deleting from in_progress queue", "err", err)
 			}
+
+			if queuedJob.WorkflowJob.Status != nil && *queuedJob.WorkflowJob.Status == "completed" {
+				fmt.Println("cleanup | WorkflowJobPayload | status is completed, so clean everything up", "job.WorkflowJob.Status", *queuedJob.WorkflowJob.Status)
+				databaseContainer.Client.Del(cleanupContext, pluginCompletedQueueName)
+				databaseContainer.Client.Del(cleanupContext, pluginQueueName+"/cleaning")
+				break
+			}
 			// return it to the queue if the job isn't completed yet
 			// if we don't, we could suffer from a situation where a completed job comes in and is orphaned
 			select {
-			case job := <-pluginGlobals.JobChannel:
-				fmt.Println("cleanup -> WorkflowJobPayload -> jobChannel", "job.WorkflowJob.Status", *job.WorkflowJob.Status)
-				databaseContainer.Client.Del(cleanupContext, pluginCompletedQueueName)
+			case <-pluginGlobals.PausedCancellationJobChannel:
+				// if the job was paused, we need to remove it
 				databaseContainer.Client.Del(cleanupContext, pluginQueueName+"/cleaning")
-				break // break loop and delete /queued/servicename
+				return
+			case <-workerGlobals.ReturnToMainQueue:
+				fmt.Println("cleanup | WorkflowJobPayload | workerGlobals.ReturnToMainQueue")
+
+				var targetQueueName string
+				if *queuedJobFromPausedQueue {
+					targetQueueName = pausedQueueName
+				} else {
+					targetQueueName = mainQueueName
+				}
+
+				logger.WarnContext(pluginCtx, "pushing job from "+pluginQueueName+"/cleaning back to "+targetQueueName)
+				_, err := databaseContainer.Client.RPopLPush(cleanupContext, pluginQueueName+"/cleaning", targetQueueName).Result()
+				if err != nil {
+					logger.ErrorContext(pluginCtx, "error pushing job back to queued", "err", err)
+					return
+				}
+				databaseContainer.Client.Del(cleanupContext, pluginQueueName+"/cleaning")
 			default:
-				select {
-				case <-pluginGlobals.PausedCancellationJobChannel:
-					// if the job was paused, we need to remove it
+				if queuedJob.WorkflowJob.Status != nil &&
+					(*queuedJob.WorkflowJob.Status == "completed" || *queuedJob.WorkflowJob.Status == "failed") { // don't send it back to the queue if the job is completed
 					databaseContainer.Client.Del(cleanupContext, pluginQueueName+"/cleaning")
 					return
-				case <-workerGlobals.ReturnToMainQueue:
-
-					var targetQueueName string
-					if *queuedJobFromPausedQueue {
-						targetQueueName = pausedQueueName
-					} else {
-						targetQueueName = mainQueueName
-					}
-
-					logger.WarnContext(pluginCtx, "pushing job from "+pluginQueueName+"/cleaning back to "+targetQueueName)
-					_, err := databaseContainer.Client.RPopLPush(cleanupContext, pluginQueueName+"/cleaning", targetQueueName).Result()
-					if err != nil {
-						logger.ErrorContext(pluginCtx, "error pushing job back to queued", "err", err)
-						return
-					}
-					databaseContainer.Client.Del(cleanupContext, pluginQueueName+"/cleaning")
-				default:
-					if queuedJob.WorkflowJob.Status != nil &&
-						(*queuedJob.WorkflowJob.Status == "completed" || *queuedJob.WorkflowJob.Status == "failed") { // don't send it back to the queue if the job is completed
-						databaseContainer.Client.Del(cleanupContext, pluginQueueName+"/cleaning")
-						return
-					}
-
-					logger.WarnContext(pluginCtx, "pushing job back to "+pluginQueueName)
-					_, err := databaseContainer.Client.RPopLPush(cleanupContext, pluginQueueName+"/cleaning", pluginQueueName).Result()
-					if err != nil {
-						logger.ErrorContext(pluginCtx, "error pushing job back to queued", "err", err)
-						return
-					}
-					databaseContainer.Client.Del(cleanupContext, pluginQueueName+"/cleaning")
 				}
+
+				logger.WarnContext(pluginCtx, "pushing job back to "+pluginQueueName)
+				_, err := databaseContainer.Client.RPopLPush(cleanupContext, pluginQueueName+"/cleaning", pluginQueueName).Result()
+				if err != nil {
+					logger.ErrorContext(pluginCtx, "error pushing job back to queued", "err", err)
+					return
+				}
+				databaseContainer.Client.Del(cleanupContext, pluginQueueName+"/cleaning")
 			}
 		default:
 			logger.ErrorContext(pluginCtx, "unknown job type", "job", queuedJob)
@@ -939,12 +968,17 @@ func Run(
 		time.Sleep(1 * time.Second)
 	}
 	select {
-	case runningJob := <-pluginGlobals.JobChannel:
-		if *runningJob.WorkflowJob.Status == "running" { // TODO: make this the same as the loop later on
+	case jobFromJobChannel := <-pluginGlobals.JobChannel:
+		// return if completed so the cleanup doesn't run twice
+		if *jobFromJobChannel.WorkflowJob.Status == "completed" || *jobFromJobChannel.WorkflowJob.Status == "failed" {
+			logger.InfoContext(pluginCtx, "completed or failed job found at start")
+			return pluginCtx, nil
+		}
+		if *jobFromJobChannel.WorkflowJob.Status == "running" { // TODO: make this the same as the loop later on
 			pluginCtx, err = watchForJobCompletion(
 				workerCtx,
 				pluginCtx,
-				runningJob,
+				pluginQueueName,
 				mainInProgressQueueName,
 			)
 			if err != nil {
@@ -956,6 +990,7 @@ func Run(
 	default:
 		logger.InfoContext(pluginCtx, "no existing jobs found on startup")
 	}
+
 	// finalize cleanup if the service crashed mid-cleanup
 	cleanup(
 		workerCtx,
@@ -1006,6 +1041,7 @@ func Run(
 	var queuedJob internalGithub.QueueJob
 
 	// allow picking up where we left off
+	// always get -1 so we get the eldest job in the queue
 	queuedJobString, err = databaseContainer.Client.LIndex(pluginCtx, pluginQueueName, -1).Result()
 	if err != nil && err != redis.Nil {
 		// logger.ErrorContext(pluginCtx, "error getting last object from anklet/jobs/github/queued/"+pluginConfig.Owner+"/"+pluginConfig.Name, "err", err)
@@ -1154,8 +1190,6 @@ func Run(
 		return pluginCtx, nil
 	default:
 	}
-
-	os.Exit(1)
 
 	// get anka template
 	ankaTemplate := extractLabelValue(queuedJob.WorkflowJob.Labels, "anka-template:")
@@ -1333,7 +1367,7 @@ func Run(
 		// workerGlobals.NextPluginForPrepLock()
 		// *pluginGlobals.AlreadyNextedPrepLock = true
 
-		dbErr := databaseContainer.Client.RPush(pluginCtx, "anklet/jobs/github/queued/"+pluginConfig.Owner+"/"+pluginConfig.Name, wrappedVmJSON).Err()
+		dbErr := databaseContainer.Client.RPush(pluginCtx, pluginQueueName, wrappedVmJSON).Err()
 		if dbErr != nil {
 			// logger.ErrorContext(pluginCtx, "error pushing vm data to database", "err", dbErr)
 			pluginGlobals.RetryChannel <- true
@@ -1466,7 +1500,7 @@ func Run(
 	pluginCtx, err = watchForJobCompletion(
 		workerCtx,
 		pluginCtx,
-		queuedJob,
+		pluginQueueName,
 		mainInProgressQueueName,
 	)
 	if err != nil {
