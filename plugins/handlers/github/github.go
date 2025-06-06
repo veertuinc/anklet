@@ -144,8 +144,6 @@ func watchForJobCompletion(
 				logger.ErrorContext(pluginCtx, "error unmarshalling job", "err", err, "typeErr", typeErr, "queuedJobJSON", queuedJobJSON)
 				return pluginCtx, err
 			}
-			logger.InfoContext(pluginCtx, "watchForJobCompletion -> queuedJob", "queuedJob", queuedJob)
-
 			if queuedJob.WorkflowJob.Status != nil && *queuedJob.WorkflowJob.Status == "completed" {
 				logger.InfoContext(pluginCtx, "job completed",
 					"job_id", queuedJob.WorkflowJob.ID,
@@ -423,8 +421,6 @@ func CheckForCompletedJobs(
 					logger.ErrorContext(pluginCtx, "error unmarshalling job", "err", err, "typeErr", typeErr, "mainInProgressQueueJobJSON", mainInProgressQueueJobJSON)
 					return
 				}
-				fmt.Println("CheckForCompletedJobs -> mainInProgressQueueJob", *mainInProgressQueueJob.WorkflowJob.Status)
-				fmt.Println("CheckForCompletedJobs -> queuedJob", *queuedJob.WorkflowJob.Status)
 				if *queuedJob.WorkflowJob.Status != *mainInProgressQueueJob.WorkflowJob.Status { // prevent running the dbUpdate more than once if not needed
 					updateDB = true
 				}
