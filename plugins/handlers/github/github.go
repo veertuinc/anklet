@@ -369,6 +369,7 @@ func CheckForCompletedJobs(
 		pluginGlobals.FirstCheckForCompletedJobsRan = true
 		fmt.Println("CheckForCompletedJobs defer end")
 	}()
+	var updateDB bool = false
 	for {
 		// BE VERY CAREFUL when you use return here. You could orphan the job if you're not careful.
 		pluginGlobals.CheckForCompletedJobsMutex.Lock()
@@ -419,6 +420,7 @@ func CheckForCompletedJobs(
 			if mainInProgressQueueJobJSON != "" {
 				fmt.Println("CheckForCompletedJobs -> job is in mainInProgressQueue", randomInt)
 				queuedJob.WorkflowJob.Status = github.String("running")
+				updateDB = true
 			}
 
 			var mainCompletedQueueJobJSON string
@@ -458,6 +460,7 @@ func CheckForCompletedJobs(
 					// }
 					// fmt.Println("CheckForCompletedJobs -> deleted existing job from "+pluginCompletedQueueName, "queuedJob", queuedJob)
 				}
+				updateDB = true
 			}
 
 			if mainCompletedQueueJobJSON != "" {
@@ -509,12 +512,14 @@ func CheckForCompletedJobs(
 					return
 				}
 				pluginGlobals.JobChannel <- queuedJob
+				updateDB = true
 			}
 
 			// if in progress, but no completed job found, we need to check the status of the job in github's API
 			if !pluginGlobals.FirstCheckForCompletedJobsRan &&
 				mainCompletedQueueJobJSON == "" && pluginCompletedQueueJobJSON == "" &&
 				mainInProgressQueueJobJSON != "" {
+				fmt.Println("CheckForCompletedJobs -> job is in mainInProgressQueue, checking status from API", randomInt)
 				githubClient, err := internalGithub.GetGitHubClientFromContext(pluginCtx)
 				if err != nil {
 					logger.ErrorContext(pluginCtx, "error getting github client from context", "err", err)
@@ -602,10 +607,13 @@ func CheckForCompletedJobs(
 					}
 				}
 				pluginGlobals.JobChannel <- queuedJob
+				updateDB = true
 			}
 
 			// update the job in the database so we can get the new status for subsequent steps
-			internalGithub.UpdateJobInDB(pluginCtx, pluginQueueName, &queuedJob)
+			if updateDB {
+				internalGithub.UpdateJobInDB(pluginCtx, pluginQueueName, &queuedJob)
+			}
 		}
 
 		pluginGlobals.FirstCheckForCompletedJobsRan = true
@@ -680,21 +688,32 @@ func cleanup(
 	logger.DebugContext(pluginCtx, "starting cleanup loop")
 	for {
 
-		var jobFromJobChannel internalGithub.QueueJob
-		select { // handle when the CheckForCompletedJobs goroutine sends a job to the JobChannel
-		case jobFromJobChannel = <-pluginGlobals.JobChannel:
-		default:
-		}
-
-		// if the job is running, we don't need to clean it up yet
-		if jobFromJobChannel.WorkflowJob.Status != nil && *jobFromJobChannel.WorkflowJob.Status == "running" {
-			logger.DebugContext(pluginCtx, "job is running; skipping cleanup")
-			return
-		}
-
 		var queuedJob internalGithub.QueueJob
 		var typeErr error
 		var cleaningJobJSON string
+
+		// get the original job with the latest status and check if it's running
+		originalJobJSON, err := databaseContainer.Client.LIndex(cleanupContext, pluginQueueName, 0).Result()
+		if err != nil && err != redis.Nil {
+			logger.ErrorContext(pluginCtx, "error getting job from the list", "err", err)
+			return
+		}
+		if err == redis.Nil {
+			return // nothing to clean up
+		}
+		queuedJob, err, typeErr = database.Unwrap[internalGithub.QueueJob](originalJobJSON)
+		if err != nil || typeErr != nil {
+			logger.ErrorContext(pluginCtx, "error unmarshalling job", "err", err, "typeErr", typeErr, "originalJobJSON", originalJobJSON)
+			return
+		}
+
+		// if the job is running, we don't need to clean it up yet
+		if queuedJob.WorkflowJob.Status != nil && *queuedJob.WorkflowJob.Status == "running" {
+			logger.DebugContext(pluginCtx, "job is still running; skipping cleanup")
+			return
+		}
+
+		// get the cleaning job from the cleaning list
 		cleaningJobJSON, err = databaseContainer.Client.LIndex(cleanupContext, pluginQueueName+"/cleaning", 0).Result()
 		if err != nil && err != redis.Nil {
 			logger.ErrorContext(pluginCtx, "error getting job from the list", "err", err)
@@ -704,7 +723,7 @@ func cleanup(
 			if onStartRun {
 				return
 			}
-			// pop the job from the list and push it to the cleaning list
+			// if nothing in cleaning already, pop the job from the list and push it to the cleaning list
 			cleaningJobJSON, err = databaseContainer.Client.RPopLPush(
 				cleanupContext,
 				pluginQueueName,
