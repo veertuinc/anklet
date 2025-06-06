@@ -416,13 +416,13 @@ func CheckForCompletedJobs(
 				logger.ErrorContext(pluginCtx, "error searching in queue", "error", err)
 				return
 			}
-			mainInProgressQueueJob, err, typeErr := database.Unwrap[internalGithub.QueueJob](mainInProgressQueueJobJSON)
-			if err != nil || typeErr != nil {
-				logger.ErrorContext(pluginCtx, "error unmarshalling job", "err", err, "typeErr", typeErr, "mainInProgressQueueJobJSON", mainInProgressQueueJobJSON)
-				return
-			}
-			if mainInProgressQueueJob.WorkflowJob.Status != nil && *mainInProgressQueueJob.WorkflowJob.Status == "running" {
+			if mainInProgressQueueJobJSON != "" {
 				fmt.Println("CheckForCompletedJobs -> job is in mainInProgressQueue", randomInt)
+				mainInProgressQueueJob, err, typeErr := database.Unwrap[internalGithub.QueueJob](mainInProgressQueueJobJSON)
+				if err != nil || typeErr != nil {
+					logger.ErrorContext(pluginCtx, "error unmarshalling job", "err", err, "typeErr", typeErr, "mainInProgressQueueJobJSON", mainInProgressQueueJobJSON)
+					return
+				}
 				if queuedJob.WorkflowJob.Status != mainInProgressQueueJob.WorkflowJob.Status { // prevent running the dbUpdate more than once if not needed
 					updateDB = true
 				}
