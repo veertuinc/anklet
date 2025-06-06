@@ -368,8 +368,8 @@ func CheckForCompletedJobs(
 		pluginGlobals.FirstCheckForCompletedJobsRan = true
 		fmt.Println("CheckForCompletedJobs defer end")
 	}()
-	var updateDB bool = false
 	for {
+		var updateDB bool = false
 		// BE VERY CAREFUL when you use return here. You could orphan the job if you're not careful.
 		pluginGlobals.CheckForCompletedJobsMutex.Lock()
 		fmt.Println("CheckForCompletedJobs start loop", randomInt)
@@ -423,10 +423,12 @@ func CheckForCompletedJobs(
 					logger.ErrorContext(pluginCtx, "error unmarshalling job", "err", err, "typeErr", typeErr, "mainInProgressQueueJobJSON", mainInProgressQueueJobJSON)
 					return
 				}
-				if queuedJob.WorkflowJob.Status != mainInProgressQueueJob.WorkflowJob.Status { // prevent running the dbUpdate more than once if not needed
+				fmt.Println("CheckForCompletedJobs -> mainInProgressQueueJob", *mainInProgressQueueJob.WorkflowJob.Status)
+				fmt.Println("CheckForCompletedJobs -> queuedJob", *queuedJob.WorkflowJob.Status)
+				if *queuedJob.WorkflowJob.Status != *mainInProgressQueueJob.WorkflowJob.Status { // prevent running the dbUpdate more than once if not needed
 					updateDB = true
 				}
-				queuedJob.WorkflowJob.Status = github.String("running")
+				queuedJob.WorkflowJob.Status = github.String("in_progress")
 			}
 
 			var mainCompletedQueueJobJSON string
@@ -584,7 +586,7 @@ func CheckForCompletedJobs(
 						queuedJob.WorkflowJob.Status = github.String("completed")
 					case "in_progress":
 						logger.InfoContext(pluginCtx, "workflow job is in progress")
-						queuedJob.WorkflowJob.Status = github.String("running")
+						queuedJob.WorkflowJob.Status = github.String("in_progress")
 					case "queued":
 						logger.InfoContext(pluginCtx, "workflow job is queued")
 						queuedJob.WorkflowJob.Status = github.String("queued")
@@ -593,10 +595,10 @@ func CheckForCompletedJobs(
 						queuedJob.WorkflowJob.Status = github.String("queued")
 					case "waiting":
 						logger.InfoContext(pluginCtx, "workflow job is waiting")
-						queuedJob.WorkflowJob.Status = github.String("running")
+						queuedJob.WorkflowJob.Status = github.String("in_progress")
 					case "pending":
 						logger.InfoContext(pluginCtx, "workflow job is pending")
-						queuedJob.WorkflowJob.Status = github.String("running")
+						queuedJob.WorkflowJob.Status = github.String("in_progress")
 					default:
 						logger.InfoContext(pluginCtx, "workflow job has unknown status", "status", status)
 					}
@@ -618,6 +620,7 @@ func CheckForCompletedJobs(
 
 			// update the job in the database so we can get the new status for subsequent steps
 			if updateDB {
+				fmt.Println("CheckForCompletedJobs -> updating job in database", *queuedJob.WorkflowJob.Status)
 				internalGithub.UpdateJobInDB(pluginCtx, pluginQueueName, &queuedJob)
 			}
 		}
@@ -708,7 +711,7 @@ func cleanup(
 	}
 
 	// if the job is running, we don't need to clean it up yet
-	if originalQueuedJob.WorkflowJob.Status != nil && *originalQueuedJob.WorkflowJob.Status == "running" {
+	if originalQueuedJob.WorkflowJob.Status != nil && *originalQueuedJob.WorkflowJob.Status == "in_progress" {
 		logger.DebugContext(pluginCtx, "job is still running; skipping cleanup")
 		return
 	}
@@ -1000,7 +1003,7 @@ func Run(
 			logger.InfoContext(pluginCtx, "completed job found at start")
 			return pluginCtx, nil
 		}
-		if *jobFromJobChannel.WorkflowJob.Status == "running" { // TODO: make this the same as the loop later on
+		if *jobFromJobChannel.WorkflowJob.Status == "in_progress" { // TODO: make this the same as the loop later on
 			pluginCtx, err = watchForJobCompletion(
 				workerCtx,
 				pluginCtx,
@@ -1237,7 +1240,7 @@ func Run(
 	}
 
 	logger.InfoContext(pluginCtx, "handling anka workflow run job")
-	metricsData.SetStatus(pluginCtx, logger, "running")
+	metricsData.SetStatus(pluginCtx, logger, "in_progress")
 
 	skipPrep := false // allows us to wait for the cancellation we sent to be received so we can clean up properly
 
