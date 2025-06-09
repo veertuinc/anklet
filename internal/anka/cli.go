@@ -37,6 +37,7 @@ type Cli struct {
 type AnkaShowOutput struct {
 	CPU      int    `json:"cpu_cores"`
 	MEMBytes uint64 `json:"ram_size"`
+	Tag      string `json:"tag"`
 }
 
 func GetAnkaCLIFromContext(pluginCtx context.Context) (*Cli, error) {
@@ -176,20 +177,26 @@ func (cli *Cli) AnkaRun(pluginCtx context.Context, vmName string, args ...string
 	return nil
 }
 
-func (cli *Cli) AnkaShow(pluginCtx context.Context, template string) (*AnkaShowOutput, error) {
-	ankaJson, err := cli.ExecuteParseJson(pluginCtx, "anka", "-j", "show", template)
+func (cli *Cli) AnkaShow(pluginCtx context.Context, vmName string) (*AnkaShowOutput, error) {
+	ankaJson, err := cli.ExecuteParseJson(pluginCtx, "anka", "-j", "show", vmName)
 	if err != nil {
 		return nil, err
 	}
-	logger, err := logging.GetLoggerFromContext(pluginCtx)
+	ankaTagJson, err := cli.ExecuteParseJson(pluginCtx, "anka", "-j", "show", vmName, "tag")
 	if err != nil {
 		return nil, err
 	}
-	logger.DebugContext(pluginCtx, "command executed successfully", "stdout", ankaJson.Body)
-	return &AnkaShowOutput{
+	output := &AnkaShowOutput{
 		CPU:      int(ankaJson.Body.(map[string]any)["cpu_cores"].(float64)),
 		MEMBytes: uint64(ankaJson.Body.(map[string]any)["ram_size"].(float64)),
-	}, nil
+	}
+	ankaTag := ankaTagJson.Body.(map[string]any)["tag"].(string)
+	if ankaTag == "" {
+		output.Tag = "(using latest)"
+	} else {
+		output.Tag = ankaTag
+	}
+	return output, nil
 }
 
 func (cli *Cli) AnkaExecuteRegistryCommand(pluginCtx context.Context, args ...string) (*AnkaJson, error) {
@@ -201,9 +208,9 @@ func (cli *Cli) AnkaExecuteRegistryCommand(pluginCtx context.Context, args ...st
 	if ctxPlugin.RegistryURL != "" {
 		registryExtra = []string{"--remote", ctxPlugin.RegistryURL}
 	}
-	args = append([]string{"anka", "-j", "registry"}, registryExtra...)
-	args = append(args, args...)
-	return cli.ExecuteParseJson(pluginCtx, args...)
+	cmdArgs := append([]string{"anka", "-j", "registry"}, registryExtra...)
+	cmdArgs = append(cmdArgs, args...)
+	return cli.ExecuteParseJson(pluginCtx, cmdArgs...)
 }
 
 func (cli *Cli) AnkaRegistryShowTemplate(
@@ -468,10 +475,10 @@ func HostHasVmCapacity(pluginCtx context.Context) bool {
 		return false
 	}
 	runningVMsCount := 0
-	if bodySlice, ok := runningVMsList.Body.([]interface{}); ok {
+	if bodySlice, ok := runningVMsList.Body.([]any); ok {
 		runningVMsCount = len(bodySlice)
 	} else {
-		logger.ErrorContext(pluginCtx, "unable to parse running VMs list body to []interface{}")
+		logger.ErrorContext(pluginCtx, "unable to parse running VMs list body to []any")
 		return false
 	}
 	if runningVMsCount >= 2 {

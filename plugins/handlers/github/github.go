@@ -1240,37 +1240,46 @@ func Run(
 	metricsData.SetStatus(pluginCtx, logger, "in_progress")
 
 	// Check if host has enough resources for the template
-	// isRegistryRunning, err := ankaCLI.AnkaRegistryRunning(pluginCtx)
-	// if err != nil {
-	// 	logger.ErrorContext(pluginCtx, "error checking if registry is running", "err", err)
-	// 	pluginGlobals.RetryChannel <- true
-	// 	return pluginCtx, nil
-	// }
-	// if isRegistryRunning {
-	if queuedJob.AnkaVM.CPUCount == 0 || queuedJob.AnkaVM.MEMBytes == 0 {
-		ankaRegistryVMInfo, err := internalAnka.GetAnkaRegistryVmInfo(pluginCtx, ankaTemplate, ankaTemplateTag)
-		if err != nil {
-			logger.ErrorContext(pluginCtx, "error getting anka registry vm info", "err", err)
+	isRegistryRunning, err := ankaCLI.AnkaRegistryRunning(pluginCtx)
+	if err != nil {
+		logger.ErrorContext(pluginCtx, "error checking if registry is running", "err", err)
+		pluginGlobals.RetryChannel <- true
+		return pluginCtx, nil
+	}
+	if isRegistryRunning {
+		if queuedJob.AnkaVM.CPUCount == 0 || queuedJob.AnkaVM.MEMBytes == 0 {
+			ankaRegistryVMInfo, err := internalAnka.GetAnkaRegistryVmInfo(pluginCtx, ankaTemplate, ankaTemplateTag)
+			if err != nil {
+				logger.ErrorContext(pluginCtx, "error getting anka registry vm info", "err", err)
+				pluginGlobals.RetryChannel <- true
+				return pluginCtx, nil
+			}
+			queuedJob.AnkaVM = *ankaRegistryVMInfo
+		}
+	} else {
+		logger.WarnContext(pluginCtx, "anka registry is not running, checking if template is already pulled")
+		ankaShowOutput, err := ankaCLI.AnkaShow(pluginCtx, ankaTemplate)
+		if err != nil { // doesn't exist locally
+			logger.ErrorContext(pluginCtx, "error getting anka show output", "err", err)
 			pluginGlobals.RetryChannel <- true
 			return pluginCtx, nil
 		}
-		queuedJob.AnkaVM = *ankaRegistryVMInfo
-		internalGithub.UpdateJobInDB(pluginCtx, pluginQueueName, &queuedJob)
+		if ankaShowOutput.Tag != ankaTemplateTag { // exists locally but doesn't match the tag specified in the labels
+			logger.WarnContext(pluginCtx, "current anka template tag on the host doesn't match the tag specified in the labels", "ankaShowOutput.Tag", ankaShowOutput.Tag)
+			pluginGlobals.RetryChannel <- true
+			return pluginCtx, nil
+		}
+		// Determine CPU and MEM from the template and tag
+		templateInfo, err := internalAnka.GetAnkaVmInfo(pluginCtx, ankaTemplate)
+		if err != nil {
+			logger.ErrorContext(pluginCtx, "error getting vm info", "err", err)
+			pluginGlobals.RetryChannel <- true
+			return pluginCtx, fmt.Errorf("error getting vm info: %s", err.Error())
+		}
+		queuedJob.AnkaVM = *templateInfo
 	}
-	// }
-	// TODO: Support if the registry is down, use the template info if it's already pulled
-	// else {
-	// 	// Determine CPU and MEM from the template and tag
-	// 	templateInfo, err := internalAnka.GetAnkaVmInfo(pluginCtx, ankaTemplate)
-	// 	if err != nil {
-	// 		logger.ErrorContext(pluginCtx, "error getting vm info", "err", err)
-	// 		pluginGlobals.RetryChannel <- true
-	// 		return pluginCtx, fmt.Errorf("error getting vm info: %s", err.Error())
-	// 	}
-	// 	queuedJob.AnkaVM = *templateInfo
-	// 	internalGithub.UpdateJobInDB(pluginCtx, pluginQueueName, &queuedJob)
-	// }
 
+	internalGithub.UpdateJobInDB(pluginCtx, pluginQueueName, &queuedJob)
 	logger.DebugContext(pluginCtx, "vmInfo", "queuedJob.AnkaVM", queuedJob.AnkaVM)
 
 	if queuedJob.Action != "paused" { // no need to do this, we already did it when we got the paused job
