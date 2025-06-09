@@ -386,7 +386,8 @@ func CheckForCompletedJobs(
 			workerGlobals.ResetQueueTargetIndex()
 			return
 		case <-pluginCtx.Done():
-			logging.DevContext(pluginCtx, "CheckForCompletedJobs"+pluginConfig.Name+" pluginCtx.Done()")
+			logging.DevContext(pluginCtx, "CheckForCompletedJobs "+pluginConfig.Name+" pluginCtx.Done()")
+			fmt.Println(pluginConfig.Name, "DONE")
 			return
 		default:
 		}
@@ -643,6 +644,7 @@ func cleanup(
 	queuedJobFromPausedQueue *bool,
 	onStartRun bool,
 ) {
+	fmt.Println(pluginQueueName, "cleanup | plugin cleanup started")
 	logger, err := logging.GetLoggerFromContext(pluginCtx)
 	if err != nil {
 		logger.ErrorContext(pluginCtx, "error getting logger from context", "err", err)
@@ -653,17 +655,30 @@ func cleanup(
 		logger.ErrorContext(pluginCtx, "error getting plugin global from context", "err", err)
 		return
 	}
+	pluginConfig, err := config.GetPluginFromContext(pluginCtx)
+	if err != nil {
+		logger.ErrorContext(pluginCtx, "error getting plugin from context", "err", err)
+		return
+	}
 	workerGlobals, err := config.GetWorkerGlobalsFromContext(workerCtx)
 	if err != nil {
 		logger.ErrorContext(pluginCtx, "error getting worker global from context", "err", err)
 		return
 	}
 
+	fmt.Println(pluginConfig.Name, "cleanup | locking plugin cleanup mutex")
 	pluginGlobals.CleanupMutex.Lock()
+	fmt.Println(pluginConfig.Name, "cleanup | plugin cleanup mutex locked")
 
 	defer func() {
 		if pluginGlobals.CleanupMutex != nil {
 			pluginGlobals.CleanupMutex.Unlock()
+		}
+		if !onStartRun {
+			fmt.Println(pluginConfig.Name, "cleanup | unlocking plugin preparing state")
+			if workerGlobals.IsAPluginPreparingState() == pluginConfig.Name {
+				workerGlobals.UnsetAPluginIsPreparing()
+			}
 		}
 	}()
 	// create an idependent copy of the pluginCtx so we can do cleanup even if pluginCtx got "context canceled"
@@ -714,7 +729,6 @@ func cleanup(
 
 	logger.DebugContext(pluginCtx, "starting cleanup loop")
 	for {
-
 		var queuedJob internalGithub.QueueJob
 		var typeErr error
 		var cleaningJobJSON string
@@ -780,7 +794,7 @@ func cleanup(
 		case "WorkflowJobPayload": // MUST COME LAST
 			logger.DebugContext(pluginCtx, "cleanup | WorkflowJobPayload | queuedJob", "queuedJob", queuedJob)
 			// delete the in_progress queue's index that matches the wrkflowJobID
-			err = internalGithub.DeleteFromQueue(pluginCtx, logger, *queuedJob.WorkflowJob.ID, mainInProgressQueueName)
+			err = internalGithub.DeleteFromQueue(cleanupContext, logger, *queuedJob.WorkflowJob.ID, mainInProgressQueueName)
 			if err != nil {
 				logger.ErrorContext(pluginCtx, "error deleting from in_progress queue", "err", err)
 			}
@@ -795,6 +809,7 @@ func cleanup(
 			// if we don't, we could suffer from a situation where a completed job comes in and is orphaned
 			select {
 			case <-pluginGlobals.PausedCancellationJobChannel:
+				fmt.Println(pluginConfig.Name, "cleanup | WorkflowJobPayload | PausedCancellationJobChannel")
 				// if the job was paused, we need to remove it
 				databaseContainer.Client.Del(cleanupContext, pluginQueueName+"/cleaning")
 				return
@@ -846,12 +861,12 @@ func Run(
 	metricsData *metrics.MetricsDataLock,
 ) (context.Context, error) {
 
-	fmt.Println("Run")
-
 	pluginConfig, err := config.GetPluginFromContext(pluginCtx)
 	if err != nil {
 		return pluginCtx, err
 	}
+	fmt.Println(pluginConfig.Name, "Run | setting plugin preparing state")
+
 	isRepoSet, err := config.GetIsRepoSetFromContext(pluginCtx)
 	if err != nil {
 		return pluginCtx, err
@@ -876,6 +891,9 @@ func Run(
 	if err != nil {
 		return pluginCtx, err
 	}
+	// Block other plugins from running until we're done preparing the VM so that
+	// VmHasEnoughResources has a running VM to compare resources against
+	workerGlobals.SetAPluginIsPreparing(pluginConfig.Name)
 
 	// must come after first cleanup
 	pluginGlobals := internalGithub.PluginGlobals{
@@ -968,9 +986,9 @@ func Run(
 			&queuedJobFromPausedQueue,
 			false,
 		)
-		fmt.Println("cleanup done")
+		fmt.Println(pluginConfig.Name, "cleanup done")
 		close(pluginGlobals.JobChannel)
-		fmt.Println("pluginGlobals.JobChannel closed")
+		fmt.Println(pluginConfig.Name, "pluginGlobals.JobChannel closed")
 	}()
 
 	// check constantly for a cancelled/completed webhook to be received for our job
@@ -1284,6 +1302,7 @@ func Run(
 		internalGithub.UpdateJobInDB(pluginCtx, pluginQueueName, &queuedJob)
 	}
 	logger.DebugContext(pluginCtx, "vmInfo", "queuedJob.AnkaVM", queuedJob.AnkaVM)
+	pluginCtx = logging.AppendCtx(pluginCtx, slog.Any("vm", queuedJob.AnkaVM))
 
 	if queuedJob.Action != "paused" { // no need to do this, we already did it when we got the paused job
 		// check if the host has enough resources to run this VM
@@ -1294,39 +1313,47 @@ func Run(
 			pluginGlobals.RetryChannel <- true
 			return pluginCtx, nil
 		}
+
 		// check if, compared to other VMs potentially running, we have enough resources to run this VM
 		err = internalAnka.VmHasEnoughResources(pluginCtx, queuedJob.AnkaVM)
 		if err != nil {
 			// push to proper queue so other hosts with the same specs can pick it up if available
 			queuedJob.PausedOn = pluginConfig.Name
-			databaseContainer.Client.RPush(pluginCtx, pausedQueueName, queuedJob)
+			queuedJob.Action = "paused"
+			queuedJobJSON, err := json.Marshal(queuedJob)
+			if err != nil {
+				logger.ErrorContext(pluginCtx, "error marshalling queued job", "err", err)
+				pluginGlobals.RetryChannel <- true
+				return pluginCtx, nil
+			}
+			databaseContainer.Client.RPush(pluginCtx, pausedQueueName, queuedJobJSON)
 			logger.WarnContext(pluginCtx, "cannot run vm yet, waiting for enough resources to be available...")
 			for {
+				if pluginCtx.Err() != nil {
+					pluginGlobals.RetryChannel <- true
+					return pluginCtx, fmt.Errorf("context canceled while waiting for resources")
+				}
 				logger.WarnContext(pluginCtx, "waiting for enough resources to be available...")
+				time.Sleep(5 * time.Second)
 				// check if the job was picked up by another host
-				pausedQueueJob, err := internalGithub.GetJobFromQueueByKeyAndValue(pluginCtx, pluginQueueName, "PausedOn", pluginConfig.Name)
+				pausedQueueJob, err := internalGithub.GetJobFromQueueByKeyAndValue(pluginCtx, pausedQueueName, "PausedOn", pluginConfig.Name)
 				if err != nil {
 					logger.ErrorContext(pluginCtx, "error getting paused job", "err", err)
 					pluginGlobals.RetryChannel <- true
 					return pluginCtx, nil
 				}
-				fmt.Printf("pausedQueueJob: %+v\n", pausedQueueJob)
+				logger.DebugContext(pluginCtx, "pausedQueueJob", "pausedQueueJob", pausedQueueJob)
 				if pausedQueueJob.Action != "paused" {
 					logger.WarnContext(pluginCtx, "job was picked up by another host")
 					pluginGlobals.PausedCancellationJobChannel <- queuedJob
 					return pluginCtx, nil
 				}
-				time.Sleep(5 * time.Second)
 				err = internalAnka.VmHasEnoughResources(pluginCtx, queuedJob.AnkaVM)
 				if err != nil {
-					logger.ErrorContext(pluginCtx, "error checking if vm can run", "err", err)
-					pluginGlobals.RetryChannel <- true
-					return pluginCtx, nil
+					logger.WarnContext(pluginCtx, err.Error())
+					continue
 				}
-				if pluginCtx.Err() != nil {
-					pluginGlobals.RetryChannel <- true
-					return pluginCtx, fmt.Errorf("context canceled while waiting for resources")
-				}
+				break
 			}
 		}
 	}
@@ -1421,10 +1448,12 @@ func Run(
 			return pluginCtx, fmt.Errorf("context canceled after ObtainAnkaVM")
 		}
 
-		pluginCtx = logging.AppendCtx(pluginCtx, slog.Any("vm", queuedJob.AnkaVM))
+		// free up other plugins to run
+		if workerGlobals.IsAPluginPreparingState() == pluginConfig.Name {
+			workerGlobals.UnsetAPluginIsPreparing()
+		}
 
-		// workerGlobals.NextPluginForPrepLock()
-		// *pluginGlobals.AlreadyNextedPrepLock = true
+		pluginCtx = logging.AppendCtx(pluginCtx, slog.Any("vm", queuedJob.AnkaVM))
 
 		dbErr := databaseContainer.Client.RPush(pluginCtx, pluginQueueName, wrappedVmJSON).Err()
 		if dbErr != nil {

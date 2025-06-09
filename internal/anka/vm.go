@@ -107,7 +107,7 @@ func VmHasEnoughResources(pluginCtx context.Context, vm VM) error {
 	if err != nil {
 		return fmt.Errorf("error getting anka list output: %s", err.Error())
 	}
-	logger.DebugContext(pluginCtx, "ankaListOutput", "ankaListOutput", ankaListOutput)
+	// logger.DebugContext(pluginCtx, "ankaListOutput", "ankaListOutput", ankaListOutput)
 	totalVMCPUUsed := 0
 	totalVMMEMBytesUsed := uint64(0)
 	for _, vmFromList := range ankaListOutput.Body.([]any) {
@@ -121,8 +121,8 @@ func VmHasEnoughResources(pluginCtx context.Context, vm VM) error {
 		totalVMMEMBytesUsed += ankaShowOutput.MEMBytes
 	}
 	// See if host has enough resources to run VM
-	logger.DebugContext(pluginCtx, "totalVMCPUUsed", "totalVMCPUUsed", totalVMCPUUsed)
-	logger.DebugContext(pluginCtx, "totalVMMEMBytesUsed", "totalVMMEMBytesUsed", totalVMMEMBytesUsed)
+	// logger.DebugContext(pluginCtx, "totalVMCPUUsed", "totalVMCPUUsed", totalVMCPUUsed)
+	// logger.DebugContext(pluginCtx, "totalVMMEMBytesUsed", "totalVMMEMBytesUsed", totalVMMEMBytesUsed)
 	// check if the host has enough resources to run the VM given other VMs already running
 	if (vm.CPUCount + totalVMCPUUsed) > workerGlobals.HostCPUCount {
 		logger.WarnContext(pluginCtx, "host does not have enough CPU cores to run VM", "vm.CPUCount", vm.CPUCount, "totalVMCPUUsed", totalVMCPUUsed, "hostCPUCount", workerGlobals.HostCPUCount)

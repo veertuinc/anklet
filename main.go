@@ -203,7 +203,8 @@ func main() {
 		PullLock:           &sync.Mutex{},
 		PluginsPath:        pluginsPath,
 		DebugEnabled:       logging.IsDebugEnabled(),
-		IsBlocked:          atomic.Bool{},
+		PluginsPaused:      atomic.Bool{},
+		APluginIsPreparing: atomic.Value{},
 		HostCPUCount:       hostCPUCount,
 		HostMemoryBytes:    hostMemoryBytes,
 		// PluginOrder: func() []string {
@@ -519,11 +520,19 @@ func worker(
 						return
 					default:
 
-						if workerGlobals.IsBlockedState() {
-							logging.DevContext(pluginCtx, "pausing due to global block state")
+						if workerGlobals.IsAPluginPreparingState() != "" {
+							logging.DevContext(pluginCtx, "pausing due to global plugin preparing state")
 							// When paused, sleep briefly and continue checking
 							metricsData.SetStatus(pluginCtx, pluginLogger, "paused")
-							time.Sleep(time.Second + 5)
+							time.Sleep(time.Second + 1)
+							continue
+						}
+
+						if workerGlobals.ArePluginsPaused() {
+							logging.DevContext(pluginCtx, "pausing due to global pause state")
+							// When paused, sleep briefly and continue checking
+							metricsData.SetStatus(pluginCtx, pluginLogger, "paused")
+							time.Sleep(time.Second + 1)
 							continue
 						}
 

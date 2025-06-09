@@ -210,14 +210,15 @@ type Globals struct {
 	PullLock           *sync.Mutex
 	PluginsPath        string
 	DebugEnabled       bool
-	IsBlocked          atomic.Bool
+	PluginsPaused      atomic.Bool
+	APluginIsPreparing atomic.Value
 	HostCPUCount       int
 	HostMemoryBytes    uint64
 	QueueTargetIndex   int64
 
 	// PluginOrder        []string   // The order in which plugins should acquire the prep lock
 	// CurrentPluginIndex int        // The index of the plugin whose turn it is
-	PrepLockMu sync.Mutex // Mutex to protect PluginOrder/CurrentPluginIndex
+	// PrepLockMu sync.Mutex // Mutex to protect PluginOrder/CurrentPluginIndex
 
 	PluginRunCount atomic.Uint64 // Shared run count across all plugins
 }
@@ -253,16 +254,34 @@ func GetWorkerGlobalsFromContext(ctx context.Context) (*Globals, error) {
 	return globals, nil
 }
 
-func (g *Globals) Block() {
-	g.IsBlocked.Store(true)
+func (g *Globals) PausePlugins() {
+	g.PluginsPaused.Store(true)
 }
 
-func (g *Globals) Unblock() {
-	g.IsBlocked.Store(false)
+func (g *Globals) UnPausePlugins() {
+	g.PluginsPaused.Store(false)
 }
 
-func (g *Globals) IsBlockedState() bool {
-	return g.IsBlocked.Load()
+func (g *Globals) ArePluginsPaused() bool {
+	return g.PluginsPaused.Load()
+}
+
+func (g *Globals) SetAPluginIsPreparing(pluginName string) {
+	fmt.Println("SetAPluginIsPreparing", pluginName)
+	g.APluginIsPreparing.Store(pluginName)
+}
+
+func (g *Globals) UnsetAPluginIsPreparing() {
+	fmt.Println("UnsetAPluginIsPreparing")
+	g.APluginIsPreparing.Store("")
+}
+
+func (g *Globals) IsAPluginPreparingState() string {
+	pluginName := g.APluginIsPreparing.Load()
+	if pluginName == nil {
+		return ""
+	}
+	return pluginName.(string)
 }
 
 func (g *Globals) IncrementQueueTargetIndex() {

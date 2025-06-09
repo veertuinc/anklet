@@ -190,11 +190,21 @@ func (cli *Cli) AnkaShow(pluginCtx context.Context, vmName string) (*AnkaShowOut
 		CPU:      int(ankaJson.Body.(map[string]any)["cpu_cores"].(float64)),
 		MEMBytes: uint64(ankaJson.Body.(map[string]any)["ram_size"].(float64)),
 	}
-	ankaTag := ankaTagJson.Body.(map[string]any)["tag"].(string)
-	if ankaTag == "" {
-		output.Tag = "(using latest)"
+	tagBody := ankaTagJson.Body
+	if tagArr, isArray := tagBody.([]any); isArray {
+		// Handle case where body is an array
+		if len(tagArr) > 0 {
+			if tagMap, ok := tagArr[0].(map[string]any); ok && tagMap["tag"] != nil {
+				output.Tag = fmt.Sprintf("%v", tagMap["tag"])
+			} else {
+				output.Tag = "(using latest)"
+			}
+		} else {
+			output.Tag = "(using latest)"
+		}
 	} else {
-		output.Tag = ankaTag
+		// Default fallback
+		output.Tag = "(using latest)"
 	}
 	return output, nil
 }
