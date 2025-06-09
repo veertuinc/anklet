@@ -359,18 +359,18 @@ func CheckForCompletedJobs(
 		os.Exit(1)
 	}
 	defer func() {
-		fmt.Println("CheckForCompletedJobs defer start")
+		fmt.Println(pluginConfig.Name, " CheckForCompletedJobs defer start")
 		if pluginGlobals.CheckForCompletedJobsMutex != nil {
 			pluginGlobals.CheckForCompletedJobsMutex.Unlock()
 		}
 		pluginGlobals.FirstCheckForCompletedJobsRan = true
-		fmt.Println("CheckForCompletedJobs defer end")
+		fmt.Println(pluginConfig.Name, " CheckForCompletedJobs defer end")
 	}()
 	for {
 		var updateDB bool = false
 		// BE VERY CAREFUL when you use return here. You could orphan the job if you're not careful.
 		pluginGlobals.CheckForCompletedJobsMutex.Lock()
-		fmt.Println("CheckForCompletedJobs start loop", randomInt)
+		fmt.Println(pluginConfig.Name, " CheckForCompletedJobs start loop", randomInt)
 		// logger.DebugContext(pluginCtx, "checkForCompletedJobsMu locked")
 		// do not use 'continue' in the loop or else the ranOnce won't happen
 		// logging.DevContext(pluginCtx, "CheckForCompletedJobs "+pluginConfig.Name+" | runOnce "+fmt.Sprint(runOnce))
@@ -382,7 +382,7 @@ func CheckForCompletedJobs(
 			workerGlobals.ReturnToMainQueue <- true
 			return
 		case <-pluginGlobals.JobChannel:
-			// logger.DebugContext(pluginCtx, "completedJobChannel")
+			fmt.Println(pluginConfig.Name, " CheckForCompletedJobs -> job found in JobChannel (resetting queue target index)", randomInt)
 			workerGlobals.ResetQueueTargetIndex()
 			return
 		case <-pluginCtx.Done():
@@ -394,9 +394,9 @@ func CheckForCompletedJobs(
 		// get the job ID
 		existingJobString, err := databaseContainer.Client.LIndex(pluginCtx, pluginQueueName, 0).Result()
 		if err == redis.Nil || existingJobString == "" {
-			fmt.Println("CheckForCompletedJobs -> no job found in pluginQueue", randomInt)
+			fmt.Println(pluginConfig.Name, " CheckForCompletedJobs -> no job found in pluginQueue", randomInt)
 		} else {
-			fmt.Println("CheckForCompletedJobs -> job found in pluginQueue", randomInt)
+			fmt.Println(pluginConfig.Name, " CheckForCompletedJobs -> job found in pluginQueue", randomInt)
 			queuedJob, err, typeErr := database.Unwrap[internalGithub.QueueJob](existingJobString)
 			if err != nil || typeErr != nil {
 				logger.ErrorContext(pluginCtx,
@@ -415,7 +415,7 @@ func CheckForCompletedJobs(
 				return
 			}
 			if mainInProgressQueueJobJSON != "" {
-				fmt.Println("CheckForCompletedJobs -> job is in mainInProgressQueue", randomInt)
+				fmt.Println(pluginConfig.Name, " CheckForCompletedJobs -> job is in mainInProgressQueue", randomInt)
 				mainInProgressQueueJob, err, typeErr := database.Unwrap[internalGithub.QueueJob](mainInProgressQueueJobJSON)
 				if err != nil || typeErr != nil {
 					logger.ErrorContext(pluginCtx, "error unmarshalling job", "err", err, "typeErr", typeErr, "mainInProgressQueueJobJSON", mainInProgressQueueJobJSON)
@@ -436,9 +436,9 @@ func CheckForCompletedJobs(
 				return
 			}
 			if pluginCompletedQueueJobJSON != "" {
-				fmt.Println("CheckForCompletedJobs -> job is in pluginCompletedQueue", randomInt)
+				fmt.Println(pluginConfig.Name, " CheckForCompletedJobs -> job is in pluginCompletedQueue", randomInt)
 			} else {
-				fmt.Println("CheckForCompletedJobs -> job is not in pluginCompletedQueue", randomInt)
+				fmt.Println(pluginConfig.Name, " CheckForCompletedJobs -> job is not in pluginCompletedQueue", randomInt)
 				// check if there is already a completed job queued in the mainCompletedQueue
 				mainCompletedQueueJobJSON, err = internalGithub.InQueue(pluginCtx, *queuedJob.WorkflowJob.ID, mainCompletedQueueName)
 				if err != nil {
@@ -446,12 +446,12 @@ func CheckForCompletedJobs(
 					return
 				}
 				if mainCompletedQueueJobJSON != "" {
-					fmt.Println("CheckForCompletedJobs -> job is in mainCompletedQueue", randomInt)
+					fmt.Println(pluginConfig.Name, " CheckForCompletedJobs -> job is in mainCompletedQueue", randomInt)
 				}
 			}
 
 			if pluginCompletedQueueJobJSON != "" {
-				fmt.Println("CheckForCompletedJobs -> job is in pluginCompletedQueue, handling", randomInt)
+				fmt.Println(pluginConfig.Name, " CheckForCompletedJobs -> job is in pluginCompletedQueue, handling", randomInt)
 				queuedJob.WorkflowJob.Status = github.String("completed")
 				select {
 				case pluginGlobals.JobChannel <- queuedJob:
@@ -468,7 +468,7 @@ func CheckForCompletedJobs(
 			}
 
 			if mainCompletedQueueJobJSON != "" {
-				fmt.Println("CheckForCompletedJobs -> job is in mainCompletedQueue, handling", randomInt)
+				fmt.Println(pluginConfig.Name, " CheckForCompletedJobs -> job is in mainCompletedQueue, handling", randomInt)
 				// remove the completed job we found
 				success, err := databaseContainer.Client.LRem(pluginCtx, mainCompletedQueueName, 1, mainCompletedQueueJobJSON).Result()
 				if err != nil {
@@ -480,7 +480,7 @@ func CheckForCompletedJobs(
 					return
 				}
 				if success == 1 {
-					fmt.Println("CheckForCompletedJobs -> removed job from mainCompletedQueue", randomInt)
+					fmt.Println(pluginConfig.Name, " CheckForCompletedJobs -> removed job from mainCompletedQueue", randomInt)
 				} else { // handle if another host removed the job
 					logger.ErrorContext(
 						pluginCtx,
@@ -523,7 +523,7 @@ func CheckForCompletedJobs(
 			if !pluginGlobals.FirstCheckForCompletedJobsRan &&
 				mainCompletedQueueJobJSON == "" && pluginCompletedQueueJobJSON == "" &&
 				mainInProgressQueueJobJSON != "" {
-				fmt.Println("CheckForCompletedJobs -> job is in mainInProgressQueue, checking status from API", randomInt)
+				fmt.Println(pluginConfig.Name, " CheckForCompletedJobs -> job is in mainInProgressQueue, checking status from API", randomInt)
 				githubClient, err := internalGithub.GetGitHubClientFromContext(pluginCtx)
 				if err != nil {
 					logger.ErrorContext(pluginCtx, "error getting github client from context", "err", err)
@@ -616,7 +616,7 @@ func CheckForCompletedJobs(
 
 			// update the job in the database so we can get the new status for subsequent steps
 			if updateDB {
-				fmt.Println("CheckForCompletedJobs -> updating job in database", *queuedJob.WorkflowJob.Status)
+				fmt.Println(pluginConfig.Name, " CheckForCompletedJobs -> updating job in database", *queuedJob.WorkflowJob.Status)
 				internalGithub.UpdateJobInDB(pluginCtx, pluginQueueName, &queuedJob)
 			}
 		}
@@ -625,7 +625,7 @@ func CheckForCompletedJobs(
 		if pluginGlobals.CheckForCompletedJobsMutex != nil {
 			pluginGlobals.CheckForCompletedJobsMutex.Unlock()
 		}
-		fmt.Println("CheckForCompletedJobs end loop", randomInt)
+		fmt.Println(pluginConfig.Name, " CheckForCompletedJobs end loop", randomInt)
 		time.Sleep(3 * time.Second)
 	}
 }
@@ -1137,6 +1137,7 @@ func Run(
 			queuedJobString, err = internalGithub.GetQueuedJob(pluginCtx, mainQueueName, workerGlobals.QueueTargetIndex)
 			if err != nil {
 				metricsData.IncrementTotalFailedRunsSinceStart(workerCtx, pluginCtx, logger)
+				fmt.Printf("resetting queue target index 1\n")
 				workerGlobals.ResetQueueTargetIndex()
 				return pluginCtx, fmt.Errorf("error getting queued jobs: %s", err.Error())
 			}
@@ -1238,44 +1239,38 @@ func Run(
 	logger.InfoContext(pluginCtx, "handling anka workflow run job")
 	metricsData.SetStatus(pluginCtx, logger, "in_progress")
 
-	skipPrep := false // allows us to wait for the cancellation we sent to be received so we can clean up properly
-
-	// See if VM Template existing already
-	if !pluginConfig.SkipPull {
-		noTemplateTagExistsError, templateExistsError := ankaCLI.EnsureVMTemplateExists(workerCtx, pluginCtx, ankaTemplate, ankaTemplateTag)
-		if templateExistsError != nil {
-			// DO NOT RETURN AN ERROR TO MAIN. It will cause the other job on this node to be cancelled.
-			logger.WarnContext(pluginCtx, "problem ensuring vm template exists on host", "err", templateExistsError)
-			pluginGlobals.RetryChannel <- true // return to queue so another node can pick it up
+	// Check if host has enough resources for the template
+	// isRegistryRunning, err := ankaCLI.AnkaRegistryRunning(pluginCtx)
+	// if err != nil {
+	// 	logger.ErrorContext(pluginCtx, "error checking if registry is running", "err", err)
+	// 	pluginGlobals.RetryChannel <- true
+	// 	return pluginCtx, nil
+	// }
+	// if isRegistryRunning {
+	if queuedJob.AnkaVM.CPUCount == 0 || queuedJob.AnkaVM.MEMBytes == 0 {
+		ankaRegistryVMInfo, err := internalAnka.GetAnkaRegistryVmInfo(pluginCtx, ankaTemplate, ankaTemplateTag)
+		if err != nil {
+			logger.ErrorContext(pluginCtx, "error getting anka registry vm info", "err", err)
+			pluginGlobals.RetryChannel <- true
 			return pluginCtx, nil
 		}
-		if noTemplateTagExistsError != nil {
-			logger.ErrorContext(pluginCtx, "error ensuring vm template exists on host", "err", noTemplateTagExistsError)
-			err := sendCancelWorkflowRun(workerCtx, pluginCtx, logger, queuedJob, metricsData)
-			if err != nil {
-				logger.ErrorContext(pluginCtx, "error sending cancel workflow run", "err", err)
-			}
-			skipPrep = true
-		}
-	}
-
-	if pluginCtx.Err() != nil {
-		// logger.WarnContext(pluginCtx, "context canceled during vm template check")
-		pluginGlobals.RetryChannel <- true
-		return pluginCtx, fmt.Errorf("context canceled during vm template check")
-	}
-
-	if queuedJob.AnkaVM.CPUCount == 0 || queuedJob.AnkaVM.MEMBytes == 0 {
-		// Determine CPU and MEM from the template and tag
-		templateInfo, err := internalAnka.GetAnkaVmInfo(pluginCtx, ankaTemplate)
-		if err != nil {
-			logger.ErrorContext(pluginCtx, "error getting vm info", "err", err)
-			pluginGlobals.RetryChannel <- true
-			return pluginCtx, fmt.Errorf("error getting vm info: %s", err.Error())
-		}
-		queuedJob.AnkaVM = *templateInfo
+		queuedJob.AnkaVM = *ankaRegistryVMInfo
 		internalGithub.UpdateJobInDB(pluginCtx, pluginQueueName, &queuedJob)
 	}
+	// }
+	// TODO: Support if the registry is down, use the template info if it's already pulled
+	// else {
+	// 	// Determine CPU and MEM from the template and tag
+	// 	templateInfo, err := internalAnka.GetAnkaVmInfo(pluginCtx, ankaTemplate)
+	// 	if err != nil {
+	// 		logger.ErrorContext(pluginCtx, "error getting vm info", "err", err)
+	// 		pluginGlobals.RetryChannel <- true
+	// 		return pluginCtx, fmt.Errorf("error getting vm info: %s", err.Error())
+	// 	}
+	// 	queuedJob.AnkaVM = *templateInfo
+	// 	internalGithub.UpdateJobInDB(pluginCtx, pluginQueueName, &queuedJob)
+	// }
+
 	logger.DebugContext(pluginCtx, "vmInfo", "queuedJob.AnkaVM", queuedJob.AnkaVM)
 
 	if queuedJob.Action != "paused" { // no need to do this, we already did it when we got the paused job
@@ -1325,6 +1320,33 @@ func Run(
 	}
 
 	logger.InfoContext(pluginCtx, "vm has enough resources to run; starting runner")
+
+	skipPrep := false // allows us to wait for the cancellation we sent to be received so we can clean up properly
+
+	// See if VM Template existing already
+	if !pluginConfig.SkipPull {
+		noTemplateTagExistsError, templateExistsError := ankaCLI.EnsureVMTemplateExists(workerCtx, pluginCtx, ankaTemplate, ankaTemplateTag)
+		if templateExistsError != nil {
+			// DO NOT RETURN AN ERROR TO MAIN. It will cause the other job on this node to be cancelled.
+			logger.WarnContext(pluginCtx, "problem ensuring vm template exists on host", "err", templateExistsError)
+			pluginGlobals.RetryChannel <- true // return to queue so another node can pick it up
+			return pluginCtx, nil
+		}
+		if noTemplateTagExistsError != nil {
+			logger.ErrorContext(pluginCtx, "error ensuring vm template exists on host", "err", noTemplateTagExistsError)
+			err := sendCancelWorkflowRun(workerCtx, pluginCtx, logger, queuedJob, metricsData)
+			if err != nil {
+				logger.ErrorContext(pluginCtx, "error sending cancel workflow run", "err", err)
+			}
+			skipPrep = true
+		}
+	}
+
+	if pluginCtx.Err() != nil {
+		// logger.WarnContext(pluginCtx, "context canceled during vm template check")
+		pluginGlobals.RetryChannel <- true
+		return pluginCtx, fmt.Errorf("context canceled during vm template check")
+	}
 
 	if !skipPrep {
 

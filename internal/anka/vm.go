@@ -22,6 +22,34 @@ type VM struct {
 // 	return ankaVm, nil
 // }
 
+func GetAnkaRegistryVmInfo(
+	pluginCtx context.Context,
+	template string,
+	tag string,
+) (*VM, error) {
+	var vm VM
+	ankaCLI, err := GetAnkaCLIFromContext(pluginCtx)
+	if err != nil {
+		return nil, err
+	}
+	logger, err := logging.GetLoggerFromContext(pluginCtx)
+	if err != nil {
+		return nil, err
+	}
+	ankaShowOutput, err := ankaCLI.AnkaRegistryShowTemplate(pluginCtx, template, tag)
+	if err != nil {
+		logger.ErrorContext(pluginCtx, "error getting anka show output", "err", err)
+		return nil, fmt.Errorf("error getting anka show output: %s", err.Error())
+	}
+
+	logger.DebugContext(pluginCtx, "anka show output", "output", ankaShowOutput)
+
+	//vm.Name = name this would end up the template name, which we don't want
+	vm.CPUCount = ankaShowOutput.CPU
+	vm.MEMBytes = ankaShowOutput.MEMBytes
+	return &vm, nil
+}
+
 func GetAnkaVmInfo(pluginCtx context.Context, name string) (*VM, error) {
 	var vm VM
 	ankaCLI, err := GetAnkaCLIFromContext(pluginCtx)

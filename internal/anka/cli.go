@@ -192,14 +192,7 @@ func (cli *Cli) AnkaShow(pluginCtx context.Context, template string) (*AnkaShowO
 	}, nil
 }
 
-func (cli *Cli) AnkaRegistryPull(workerCtx context.Context, pluginCtx context.Context, template string, tag string) (*AnkaJson, error) {
-	if pluginCtx.Err() != nil {
-		return nil, fmt.Errorf("context canceled before AnkaRegistryPull")
-	}
-	logger, err := logging.GetLoggerFromContext(pluginCtx)
-	if err != nil {
-		return nil, err
-	}
+func (cli *Cli) AnkaExecuteRegistryCommand(pluginCtx context.Context, args ...string) (*AnkaJson, error) {
 	ctxPlugin, err := config.GetPluginFromContext(pluginCtx)
 	if err != nil {
 		return nil, err
@@ -208,14 +201,52 @@ func (cli *Cli) AnkaRegistryPull(workerCtx context.Context, pluginCtx context.Co
 	if ctxPlugin.RegistryURL != "" {
 		registryExtra = []string{"--remote", ctxPlugin.RegistryURL}
 	}
+	args = append([]string{"anka", "-j", "registry"}, registryExtra...)
+	args = append(args, args...)
+	return cli.ExecuteParseJson(pluginCtx, args...)
+}
+
+func (cli *Cli) AnkaRegistryShowTemplate(
+	pluginCtx context.Context,
+	template string,
+	tag string,
+) (*AnkaShowOutput, error) {
+	if pluginCtx.Err() != nil {
+		return nil, fmt.Errorf("context canceled before AnkaRegistryShowTemplate")
+	}
 	var args []string
 	if tag != "(using latest)" {
-		args = append([]string{"anka", "-j", "registry"}, registryExtra...)
-		args = append(args, "pull", "--shrink", template, "--tag", tag)
+		args = append(args, "show", template, "--tag", tag)
 	} else {
-		args = append([]string{"anka", "-j", "registry"}, registryExtra...)
-		args = append(args, "pull", "--shrink", template)
+		args = append(args, "show", template)
 	}
+	showJson, err := cli.AnkaExecuteRegistryCommand(pluginCtx, args...)
+	if err != nil {
+		return nil, err
+	}
+	if showJson.Status != "OK" {
+		return nil, fmt.Errorf("error showing template from registry: %s", showJson.Message)
+	}
+	return &AnkaShowOutput{
+		CPU:      int(showJson.Body.(map[string]any)["cpu_cores"].(float64)),
+		MEMBytes: uint64(showJson.Body.(map[string]any)["ram_size"].(float64)),
+	}, nil
+}
+
+func (cli *Cli) AnkaRegistryPull(
+	workerCtx context.Context,
+	pluginCtx context.Context,
+	template string,
+	tag string,
+) (*AnkaJson, error) {
+	if pluginCtx.Err() != nil {
+		return nil, fmt.Errorf("context canceled before AnkaRegistryPull")
+	}
+	logger, err := logging.GetLoggerFromContext(pluginCtx)
+	if err != nil {
+		return nil, err
+	}
+
 	logger.DebugContext(pluginCtx, "pulling template to host")
 
 	metricsData, err := metrics.GetMetricsDataFromContext(workerCtx)
@@ -227,14 +258,20 @@ func (cli *Cli) AnkaRegistryPull(workerCtx context.Context, pluginCtx context.Co
 
 	metricsData.SetStatus(pluginCtx, logger, "pulling")
 
-	pullJson, err := cli.ExecuteParseJson(pluginCtx, args...)
+	var args []string
+	if tag != "(using latest)" {
+		args = append(args, "pull", "--shrink", template, "--tag", tag)
+	} else {
+		args = append(args, "pull", "--shrink", template)
+	}
+	pullJson, err := cli.AnkaExecuteRegistryCommand(pluginCtx, args...)
 	if err != nil {
-		return pullJson, err
+		return nil, err
 	}
 	if pullJson.Status != "OK" {
-		return pullJson, fmt.Errorf("error pulling template from registry: %s", pullJson.Message)
+		return nil, fmt.Errorf("error pulling template from registry: %s", pullJson.Message)
 	}
-	logger.DebugContext(pluginCtx, "successfully pulled template from registry")
+
 	return pullJson, nil
 }
 
@@ -257,6 +294,18 @@ func (cli *Cli) AnkaDelete(workerCtx context.Context, pluginCtx context.Context,
 	}
 	metricsData.DecrementTotalRunningVMs()
 	return nil
+}
+
+// ping the registry to see if it's up
+func (cli *Cli) AnkaRegistryRunning(pluginCtx context.Context) (bool, error) {
+	listOutput, err := cli.AnkaExecuteRegistryCommand(pluginCtx, "list")
+	if err != nil {
+		return false, err
+	}
+	if listOutput.Status != "OK" {
+		return false, nil
+	}
+	return true, nil
 }
 
 func (cli *Cli) ObtainAnkaVM(
