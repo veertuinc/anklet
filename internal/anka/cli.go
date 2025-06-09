@@ -307,7 +307,7 @@ func (cli *Cli) AnkaDelete(workerCtx context.Context, pluginCtx context.Context,
 func (cli *Cli) AnkaRegistryRunning(pluginCtx context.Context) (bool, error) {
 	listOutput, err := cli.AnkaExecuteRegistryCommand(pluginCtx, "list")
 	if err != nil {
-		return false, err
+		return false, nil
 	}
 	if listOutput.Status != "OK" {
 		return false, nil

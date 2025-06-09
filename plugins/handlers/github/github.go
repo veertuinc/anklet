@@ -1257,15 +1257,15 @@ func Run(
 			queuedJob.AnkaVM = *ankaRegistryVMInfo
 		}
 	} else {
-		logger.WarnContext(pluginCtx, "anka registry is not running, checking if template is already pulled")
+		logger.ErrorContext(pluginCtx, "anka registry is not running, checking if template is already pulled")
 		ankaShowOutput, err := ankaCLI.AnkaShow(pluginCtx, ankaTemplate)
 		if err != nil { // doesn't exist locally
-			logger.ErrorContext(pluginCtx, "error getting anka show output", "err", err)
+			logger.ErrorContext(pluginCtx, "template doesn't exist locally", "err", err)
 			pluginGlobals.RetryChannel <- true
 			return pluginCtx, nil
 		}
 		if ankaShowOutput.Tag != ankaTemplateTag { // exists locally but doesn't match the tag specified in the labels
-			logger.WarnContext(pluginCtx, "current anka template tag on the host doesn't match the tag specified in the labels", "ankaShowOutput.Tag", ankaShowOutput.Tag)
+			logger.ErrorContext(pluginCtx, "current anka template tag on the host doesn't match the tag specified in the labels", "ankaShowOutput.Tag", ankaShowOutput.Tag)
 			pluginGlobals.RetryChannel <- true
 			return pluginCtx, nil
 		}
