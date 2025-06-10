@@ -17,7 +17,22 @@ func GetQueueSize(pluginCtx context.Context, queueName string) (int64, error) {
 	return databaseContainer.Client.LLen(pluginCtx, queueName).Result()
 }
 
-func GetQueuedJob(
+func CheckIfQueueHasJob(
+	pluginCtx context.Context,
+	queueName string,
+) (bool, error) {
+	databaseContainer, err := database.GetDatabaseFromContext(pluginCtx)
+	if err != nil {
+		return false, fmt.Errorf("error getting database client from context: %s", err.Error())
+	}
+	queueSize, err := databaseContainer.Client.LLen(pluginCtx, queueName).Result()
+	if err != nil {
+		return false, fmt.Errorf("error getting queue size: %s", err.Error())
+	}
+	return queueSize > 0, nil
+}
+
+func PopJobOffQueue(
 	pluginCtx context.Context,
 	queueName string,
 	queueTargetIndex int64,
