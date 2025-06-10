@@ -113,3 +113,37 @@ The following logic consumes [API limits](https://docs.github.com/en/rest/using-
   4. If jobs were `in_progress` when anklet was exited, we will make a single API call to see if the job finished successfully or not. If the job is still running, the VM will stay running and the plugin will wait for it to finish. Otherwise, we'll proceed with the cleanup.
 
 This means in the worst case scenario it could make a total of 3 api calls total. Otherwise only one should happen on job success.
+
+
+## Development
+
+### Functions
+
+#### `cleanup`
+
+This function runs at the end of the plugin's run, ensuring that everything is cleaned up.
+
+- It uses its own context to avoid context cancellation preventing it from running.
+- It pops items off the plugin's queue one by one in the newest first order and handles them. For example, a job that runs fully will have index 0,1 with 0 being the newest object inserted in the plugin queue and representing the anka.VM. The function sees this and processes the deletion of the VM, then moves on to the next object until there is nothing left to cleanup.
+
+#### `checkForCompletedJobs`
+
+This runs constantly for the entire life of the plugin. It constantly checks the main completed queue for a job that matches the currently active job ID. If it finds one, it sets the existing job's status, etc.
+
+- You can tell it to start wrapping up the job/run by sending `pluginGlobals.JobChannel <- internalGithub.QueueJob{Action: "finish"}` to the channel.
+
+#### `watchForJobCompletion`
+
+This function loops and waits for the job to be in a completed status in the specific plugin's queue.
+
+#### `sendCancelWorkflowRun`
+
+This function sends a cancel request to the github API, preventing the runner from being orphaned in github.
+
+#### `Run`
+
+The primary function that runs the plugin.
+
+- On start we run a full `checkForCompletedJobs` and `cleanup` in order to continue where we left off if the plugin was stopped mid-run.
+- In versions >= `0.14.0`, we support handling VMs with varying resource requirements. To do this, we need to check the VM Template's needs and what we have currently available. This requires that plugins don't start VMs at the same time or else we won't have usage information to compare to. `workerGlobals.SetAPluginIsPreparing(pluginConfig.Name)` is used to allow us to only allow one plugin at a time to start the VM. It unlocks after preparing the VM so that the other plugin on the host can start preparing its own VM though.
+

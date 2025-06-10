@@ -390,7 +390,6 @@ func checkForCompletedJobs(
 			}
 		case <-pluginCtx.Done():
 			logging.DevContext(pluginCtx, "checkForCompletedJobs "+pluginConfig.Name+" pluginCtx.Done()")
-			fmt.Println(pluginConfig.Name, "DONE")
 			return
 		default:
 		}
