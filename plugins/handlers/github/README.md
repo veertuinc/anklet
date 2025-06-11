@@ -146,4 +146,4 @@ The primary function that runs the plugin.
 
 - On start we run a full `checkForCompletedJobs` and `cleanup` in order to continue where we left off if the plugin was stopped mid-run.
 - In versions >= `0.14.0`, we support handling VMs with varying resource requirements. To do this, we need to check the VM Template's needs and what we have currently available. This requires that plugins don't start VMs at the same time or else we won't have usage information to compare to. `workerGlobals.SetAPluginIsPreparing(pluginConfig.Name)` is used to allow us to only allow one plugin at a time to start the VM. It unlocks after preparing the VM so that the other plugin on the host can start preparing its own VM though.
-
+- Each `return` from this function must include some sort of instruction to interrupt the `checkForCompletedJobs` otherwise it will run indefinitely.

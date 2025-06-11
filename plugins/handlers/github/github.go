@@ -360,6 +360,11 @@ func checkForCompletedJobs(
 		logger.ErrorContext(pluginCtx, "error getting database from context", "err", err)
 		os.Exit(1)
 	}
+	metricsData, err := metrics.GetMetricsDataFromContext(workerCtx)
+	if err != nil {
+		logger.ErrorContext(pluginCtx, "error getting metrics data from context", "err", err)
+		os.Exit(1)
+	}
 	defer func() {
 		fmt.Println(pluginConfig.Name, " checkForCompletedJobs defer start")
 		if pluginGlobals.CheckForCompletedJobsMutex != nil {
@@ -388,6 +393,13 @@ func checkForCompletedJobs(
 			if job.Action == "finish" {
 				fmt.Println(pluginConfig.Name, " checkForCompletedJobs -> finished", randomInt)
 				workerGlobals.ResetQueueTargetIndex()
+				return
+			}
+			if job.Action == "cancel" {
+				err := sendCancelWorkflowRun(workerCtx, pluginCtx, logger, job, metricsData)
+				if err != nil {
+					logger.ErrorContext(pluginCtx, "error sending cancel workflow run", "err", err)
+				}
 				return
 			}
 		case <-pluginCtx.Done():
@@ -1300,6 +1312,17 @@ func Run(
 		if isRegistryRunning {
 			ankaRegistryVMInfo, err := internalAnka.GetAnkaRegistryVmInfo(pluginCtx, ankaTemplate, ankaTemplateTag)
 			if err != nil {
+				if strings.Contains(err.Error(), "tag not found") || strings.Contains(err.Error(), "template not found") {
+					queuedJob.Action = "cancel"
+					queuedJob.WorkflowJob.Conclusion = github.String("failure") // support removeSelfHostedRunner
+					queuedJob.WorkflowJob.Status = github.String("completed")
+					internalGithub.UpdateJobInDB(pluginCtx, pluginQueueName, &queuedJob)
+					pluginGlobals.JobChannel <- queuedJob
+					if workerGlobals.IsAPluginPreparingState() == pluginConfig.Name {
+						workerGlobals.UnsetAPluginIsPreparing()
+					}
+					return pluginCtx, nil
+				}
 				logger.ErrorContext(pluginCtx, "error getting anka registry vm info", "err", err)
 				pluginGlobals.RetryChannel <- true
 				return pluginCtx, nil

@@ -38,7 +38,7 @@ func GetAnkaRegistryVmInfo(
 	}
 	ankaShowOutput, err := ankaCLI.AnkaRegistryShowTemplate(pluginCtx, template, tag)
 	if err != nil {
-		logger.ErrorContext(pluginCtx, "error getting anka show output", "err", err)
+		logger.WarnContext(pluginCtx, "error getting anka show output", "err", err)
 		return nil, fmt.Errorf("error getting anka show output: %s", err.Error())
 	}
 
