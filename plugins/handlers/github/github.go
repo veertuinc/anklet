@@ -256,7 +256,6 @@ func watchForJobCompletion(
 	}
 }
 
-// test
 func extractLabelValue(labels []string, prefix string) string {
 	for _, label := range labels {
 		if strings.HasPrefix(label, prefix) {
