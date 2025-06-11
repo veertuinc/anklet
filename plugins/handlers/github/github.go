@@ -1315,7 +1315,7 @@ func Run(
 				if strings.Contains(err.Error(), "not found") {
 					logger.WarnContext(pluginCtx, err.Error())
 					queuedJob.Action = "cancel"
-					queuedJob.WorkflowJob.Conclusion = github.String("failure") // support removeSelfHostedRunner
+					queuedJob.WorkflowJob.Conclusion = github.String("failure")
 					queuedJob.WorkflowJob.Status = github.String("completed")
 					internalGithub.UpdateJobInDB(pluginCtx, pluginQueueName, &queuedJob)
 					pluginGlobals.JobChannel <- queuedJob
