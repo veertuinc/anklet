@@ -1312,7 +1312,8 @@ func Run(
 		if isRegistryRunning {
 			ankaRegistryVMInfo, err := internalAnka.GetAnkaRegistryVmInfo(pluginCtx, ankaTemplate, ankaTemplateTag)
 			if err != nil {
-				if strings.Contains(err.Error(), "tag not found") || strings.Contains(err.Error(), "template not found") {
+				if strings.Contains(err.Error(), "not found") {
+					logger.WarnContext(pluginCtx, err.Error())
 					queuedJob.Action = "cancel"
 					queuedJob.WorkflowJob.Conclusion = github.String("failure") // support removeSelfHostedRunner
 					queuedJob.WorkflowJob.Status = github.String("completed")
