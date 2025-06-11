@@ -259,7 +259,8 @@ func watchForJobCompletion(
 func extractLabelValue(labels []string, prefix string) string {
 	for _, label := range labels {
 		if strings.HasPrefix(label, prefix) {
-			return strings.TrimPrefix(label, prefix)
+			result := strings.TrimPrefix(label, prefix)
+			return result
 		}
 	}
 	return ""
@@ -377,9 +378,10 @@ func checkForCompletedJobs(
 		// logging.DevContext(pluginCtx, "checkForCompletedJobs "+pluginConfig.Name+" | runOnce "+fmt.Sprint(runOnce))
 		select {
 		case <-pluginGlobals.PausedCancellationJobChannel:
-			logger.DebugContext(pluginCtx, "checkForCompletedJobs pausedCancellationJobChannel")
+			fmt.Println(pluginConfig.Name, " checkForCompletedJobs -> pausedCancellationJobChannel", randomInt)
 			return
 		case <-pluginGlobals.RetryChannel:
+			fmt.Println(pluginConfig.Name, " checkForCompletedJobs -> retryChannel", randomInt)
 			workerGlobals.ReturnToMainQueue <- true
 			return
 		case job := <-pluginGlobals.JobChannel:
@@ -676,10 +678,11 @@ func cleanup(
 
 	fmt.Println(pluginConfig.Name, "cleanup | locking plugin cleanup mutex")
 	pluginGlobals.CleanupMutex.Lock()
-	fmt.Println(pluginConfig.Name, "cleanup | plugin cleanup mutex locked")
+	fmt.Println(pluginConfig.Name, "cleanup | locked plugin cleanup mutex 2")
 
 	defer func() {
 		if pluginGlobals.CleanupMutex != nil {
+			fmt.Println(pluginConfig.Name, "cleanup | unlocking plugin cleanup mutex")
 			pluginGlobals.CleanupMutex.Unlock()
 		}
 		if !onStartRun {
@@ -689,8 +692,11 @@ func cleanup(
 			}
 		}
 	}()
+
 	// create an idependent copy of the pluginCtx so we can do cleanup even if pluginCtx got "context canceled"
 	cleanupContext := context.Background()
+
+	fmt.Println(pluginConfig.Name, "cleanup | HERE 1")
 
 	select {
 	case <-pluginGlobals.PausedCancellationJobChannel: // no cleanup necessary, it was picked up by another host
@@ -698,6 +704,9 @@ func cleanup(
 		return
 	default:
 	}
+
+	fmt.Println(pluginConfig.Name, "cleanup | HERE 2")
+
 	serviceDatabase, err := database.GetDatabaseFromContext(pluginCtx)
 	if err != nil {
 		logger.ErrorContext(pluginCtx, "error getting database from context", "err", err)
@@ -714,6 +723,8 @@ func cleanup(
 		return
 	}
 
+	fmt.Println(pluginConfig.Name, "cleanup | HERE 3")
+
 	// get the original job with the latest status and check if it's running
 	originalJobJSON, err := databaseContainer.Client.LIndex(cleanupContext, pluginQueueName, 0).Result()
 	if err != nil && err != redis.Nil {
@@ -721,6 +732,7 @@ func cleanup(
 		return
 	}
 	if err == redis.Nil {
+		fmt.Println(pluginConfig.Name, "cleanup | HERE 4")
 		return // nothing to clean up
 	}
 	originalQueuedJob, err, typeErr := database.Unwrap[internalGithub.QueueJob](originalJobJSON)
@@ -808,7 +820,7 @@ func cleanup(
 			}
 
 			if queuedJob.WorkflowJob.Status != nil && *queuedJob.WorkflowJob.Status == "completed" {
-				fmt.Println("cleanup | WorkflowJobPayload | status is completed, so clean everything up", "job.WorkflowJob.Status", *queuedJob.WorkflowJob.Status)
+				fmt.Println(pluginConfig.Name, "cleanup | WorkflowJobPayload | status is completed, so clean everything up", "job.WorkflowJob.Status", *queuedJob.WorkflowJob.Status)
 				databaseContainer.Client.Del(cleanupContext, pluginCompletedQueueName)
 				databaseContainer.Client.Del(cleanupContext, pluginQueueName+"/cleaning")
 				break
@@ -822,7 +834,7 @@ func cleanup(
 				databaseContainer.Client.Del(cleanupContext, pluginQueueName+"/cleaning")
 				return
 			case <-workerGlobals.ReturnToMainQueue:
-				fmt.Println("cleanup | WorkflowJobPayload | workerGlobals.ReturnToMainQueue")
+				fmt.Println(pluginConfig.Name, "cleanup | WorkflowJobPayload | workerGlobals.ReturnToMainQueue")
 
 				var targetQueueName string
 				if *queuedJobFromPausedQueue {
@@ -1074,6 +1086,7 @@ func Run(
 	hostHasVmCapacity := internalAnka.HostHasVmCapacity(pluginCtx)
 	if !hostHasVmCapacity {
 		logger.WarnContext(pluginCtx, "host does not have vm capacity")
+		pluginGlobals.JobChannel <- internalGithub.QueueJob{Action: "finish"}
 		return pluginCtx, nil
 	}
 
@@ -1239,6 +1252,7 @@ func Run(
 	}
 	select {
 	case job := <-pluginGlobals.JobChannel:
+		fmt.Println(pluginConfig.Name, " HERE ====================================== 1")
 		if *job.WorkflowJob.Status == "completed" || *job.WorkflowJob.Status == "failed" {
 			logger.InfoContext(pluginCtx, "job found by checkForCompletedJobs (at start of Run)")
 			pluginGlobals.JobChannel <- job // send true to the channel to stop the check for completed jobs goroutine
@@ -1255,6 +1269,7 @@ func Run(
 	ankaTemplate := extractLabelValue(queuedJob.WorkflowJob.Labels, "anka-template:")
 	if ankaTemplate == "" {
 		// logger.WarnContext(pluginCtx, "warning: unable to find Anka Template specified in labels - skipping")
+		pluginGlobals.JobChannel <- internalGithub.QueueJob{Action: "finish"}
 		return pluginCtx, fmt.Errorf("warning: unable to find Anka Template specified in labels - skipping")
 	}
 	pluginCtx = logging.AppendCtx(pluginCtx, slog.String("ankaTemplate", ankaTemplate))
@@ -1267,6 +1282,7 @@ func Run(
 	// get anka CLI
 	ankaCLI, err := internalAnka.GetAnkaCLIFromContext(pluginCtx)
 	if err != nil {
+		pluginGlobals.JobChannel <- internalGithub.QueueJob{Action: "finish"}
 		return pluginCtx, err
 	}
 
