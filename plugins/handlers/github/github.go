@@ -1252,7 +1252,6 @@ func Run(
 	}
 	select {
 	case job := <-pluginGlobals.JobChannel:
-		fmt.Println(pluginConfig.Name, " HERE ====================================== 1")
 		if *job.WorkflowJob.Status == "completed" || *job.WorkflowJob.Status == "failed" {
 			logger.InfoContext(pluginCtx, "job found by checkForCompletedJobs (at start of Run)")
 			pluginGlobals.JobChannel <- job // send true to the channel to stop the check for completed jobs goroutine
