@@ -80,10 +80,10 @@ func VmHasEnoughHostResources(pluginCtx context.Context, vm VM) error {
 		return fmt.Errorf("error getting globals from context: %s", err.Error())
 	}
 	if vm.CPUCount > workerGlobals.HostCPUCount {
-		return fmt.Errorf("host does not have enough CPU cores to run VM")
+		return fmt.Errorf("host does not have enough CPU cores yet to run VM")
 	}
 	if vm.MEMBytes > workerGlobals.HostMemoryBytes {
-		return fmt.Errorf("host does not have enough memory to run VM")
+		return fmt.Errorf("host does not have enough memory yet to run VM")
 	}
 	return nil
 }

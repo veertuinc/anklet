@@ -17,6 +17,7 @@ type PluginGlobals struct {
 	CleanupMutex                  *sync.Mutex
 	JobChannel                    chan QueueJob
 	PausedCancellationJobChannel  chan QueueJob
+	ReturnToMainQueue             chan bool
 }
 
 func GetPluginGlobalsFromContext(ctx context.Context) (*PluginGlobals, error) {

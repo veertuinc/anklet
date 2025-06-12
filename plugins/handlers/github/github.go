@@ -382,12 +382,16 @@ func checkForCompletedJobs(
 		// do not use 'continue' in the loop or else the ranOnce won't happen
 		// logging.DevContext(pluginCtx, "checkForCompletedJobs "+pluginConfig.Name+" | runOnce "+fmt.Sprint(runOnce))
 		select {
+		case <-workerGlobals.ReturnAllToMainQueue:
+			logger.WarnContext(pluginCtx, "main worker is returning all jobs to main queue")
+			pluginGlobals.ReturnToMainQueue <- true
+			return
 		case <-pluginGlobals.PausedCancellationJobChannel:
 			fmt.Println(pluginConfig.Name, " checkForCompletedJobs -> pausedCancellationJobChannel", randomInt)
 			return
 		case <-pluginGlobals.RetryChannel:
 			fmt.Println(pluginConfig.Name, " checkForCompletedJobs -> retryChannel", randomInt)
-			workerGlobals.ReturnToMainQueue <- true
+			pluginGlobals.ReturnToMainQueue <- true
 			return
 		case job := <-pluginGlobals.JobChannel:
 			if job.Action == "finish" {
@@ -708,16 +712,12 @@ func cleanup(
 	// create an idependent copy of the pluginCtx so we can do cleanup even if pluginCtx got "context canceled"
 	cleanupContext := context.Background()
 
-	fmt.Println(pluginConfig.Name, "cleanup | HERE 1")
-
 	select {
 	case <-pluginGlobals.PausedCancellationJobChannel: // no cleanup necessary, it was picked up by another host
 		logger.DebugContext(pluginCtx, "cleanup pausedCancellationJobChannel")
 		return
 	default:
 	}
-
-	fmt.Println(pluginConfig.Name, "cleanup | HERE 2")
 
 	serviceDatabase, err := database.GetDatabaseFromContext(pluginCtx)
 	if err != nil {
@@ -735,8 +735,6 @@ func cleanup(
 		return
 	}
 
-	fmt.Println(pluginConfig.Name, "cleanup | HERE 3")
-
 	// get the original job with the latest status and check if it's running
 	originalJobJSON, err := databaseContainer.Client.LIndex(cleanupContext, pluginQueueName, 0).Result()
 	if err != nil && err != redis.Nil {
@@ -744,7 +742,6 @@ func cleanup(
 		return
 	}
 	if err == redis.Nil {
-		fmt.Println(pluginConfig.Name, "cleanup | HERE 4")
 		return // nothing to clean up
 	}
 	originalQueuedJob, err, typeErr := database.Unwrap[internalGithub.QueueJob](originalJobJSON)
@@ -817,7 +814,7 @@ func cleanup(
 			if strings.ToUpper(os.Getenv("LOG_LEVEL")) == "DEBUG" || strings.ToUpper(os.Getenv("LOG_LEVEL")) == "DEV" {
 				err = ankaCLI.AnkaCopyOutOfVM(pluginCtx, queuedJob.AnkaVM.Name, "/Users/anka/actions-runner/_diag", "/tmp/"+queuedJob.AnkaVM.Name)
 				if err != nil {
-					logger.ErrorContext(pluginCtx, "error copying actions runner out of vm", "err", err)
+					logger.WarnContext(pluginCtx, "error copying actions runner out of vm", "err", err)
 				}
 			}
 			ankaCLI.AnkaDelete(workerCtx, pluginCtx, queuedJob.AnkaVM.Name)
@@ -845,8 +842,8 @@ func cleanup(
 				// if the job was paused, we need to remove it
 				databaseContainer.Client.Del(cleanupContext, pluginQueueName+"/cleaning")
 				return
-			case <-workerGlobals.ReturnToMainQueue:
-				fmt.Println(pluginConfig.Name, "cleanup | WorkflowJobPayload | workerGlobals.ReturnToMainQueue")
+			case <-pluginGlobals.ReturnToMainQueue:
+				fmt.Println(pluginConfig.Name, "cleanup | WorkflowJobPayload | pluginGlobals.ReturnToMainQueue")
 
 				var targetQueueName string
 				if *queuedJobFromPausedQueue {
@@ -862,6 +859,7 @@ func cleanup(
 					return
 				}
 				databaseContainer.Client.Del(cleanupContext, pluginQueueName+"/cleaning")
+
 			default:
 				if queuedJob.WorkflowJob.Status != nil &&
 					(*queuedJob.WorkflowJob.Status == "completed" || *queuedJob.WorkflowJob.Status == "failed") { // don't send it back to the queue if the job is completed
@@ -931,9 +929,10 @@ func Run(
 	pluginGlobals := internalGithub.PluginGlobals{
 		FirstCheckForCompletedJobsRan: false,
 		CheckForCompletedJobsMutex:    &sync.Mutex{},
-		RetryChannel:                  make(chan bool, 1),
+		RetryChannel:                  make(chan bool, 1), // TODO: do we need this if we have ReturnToMainQueue?
 		CleanupMutex:                  &sync.Mutex{},
 		JobChannel:                    make(chan internalGithub.QueueJob, 1),
+		ReturnToMainQueue:             make(chan bool, 1),
 	}
 	pluginCtx = context.WithValue(pluginCtx, config.ContextKey("pluginglobals"), &pluginGlobals)
 
@@ -1406,6 +1405,12 @@ func Run(
 				if err != nil {
 					logger.WarnContext(pluginCtx, err.Error())
 					continue
+				}
+				// remove from paused queue so other hosts won't try to pick it up anymore.
+				_, err = databaseContainer.Client.LRem(pluginCtx, pausedQueueName, 1, queuedJobJSON).Result()
+				if err != nil {
+					logger.ErrorContext(pluginCtx, "error removing job from paused queue", "err", err)
+					return pluginCtx, fmt.Errorf("error removing job from paused queue: %s", err.Error())
 				}
 				break
 			}

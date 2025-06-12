@@ -197,16 +197,16 @@ func main() {
 	parentCtx = logging.AppendCtx(parentCtx, slog.Uint64("hostMemoryBytes", hostMemoryBytes))
 
 	parentCtx = context.WithValue(parentCtx, config.ContextKey("globals"), &config.Globals{
-		RunPluginsOnce:     runOnce == "true",
-		FirstPluginStarted: make(chan bool, 1),
-		ReturnToMainQueue:  make(chan bool, 1),
-		PullLock:           &sync.Mutex{},
-		PluginsPath:        pluginsPath,
-		DebugEnabled:       logging.IsDebugEnabled(),
-		PluginsPaused:      atomic.Bool{},
-		APluginIsPreparing: atomic.Value{},
-		HostCPUCount:       hostCPUCount,
-		HostMemoryBytes:    hostMemoryBytes,
+		RunPluginsOnce:       runOnce == "true",
+		FirstPluginStarted:   make(chan bool, 1),
+		ReturnAllToMainQueue: make(chan bool, 1),
+		PullLock:             &sync.Mutex{},
+		PluginsPath:          pluginsPath,
+		DebugEnabled:         logging.IsDebugEnabled(),
+		PluginsPaused:        atomic.Bool{},
+		APluginIsPreparing:   atomic.Value{},
+		HostCPUCount:         hostCPUCount,
+		HostMemoryBytes:      hostMemoryBytes,
 		// PluginOrder: func() []string {
 		// 	order := make([]string, 0, len(loadedConfig.Plugins))
 		// 	for _, p := range loadedConfig.Plugins {
@@ -292,7 +292,7 @@ func worker(
 				}
 				parentLogger.WarnContext(workerCtx, "best effort graceful shutdown, interrupting the job as soon as possible...")
 				workerCancel()
-				workerGlobals.ReturnToMainQueue <- true
+				workerGlobals.ReturnAllToMainQueue <- true
 			}
 		}
 	}()
