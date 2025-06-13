@@ -3,10 +3,12 @@ package github
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"reflect"
 
 	"github.com/redis/go-redis/v9"
 	"github.com/veertuinc/anklet/internal/database"
+	"github.com/veertuinc/anklet/internal/logging"
 )
 
 func GetQueueSize(pluginCtx context.Context, queueName string) (int64, error) {
@@ -17,7 +19,80 @@ func GetQueueSize(pluginCtx context.Context, queueName string) (int64, error) {
 	return databaseContainer.Client.LLen(pluginCtx, queueName).Result()
 }
 
-func CheckIfQueueHasJob(
+func GetJobFromQueue(
+	pluginCtx context.Context,
+	jobID int64,
+	queue string,
+) (string, error) {
+	logger, err := logging.GetLoggerFromContext(pluginCtx)
+	if err != nil {
+		return "", err
+	}
+	databaseContainer, err := database.GetDatabaseFromContext(pluginCtx)
+	if err != nil {
+		logging.Panic(pluginCtx, pluginCtx, "error getting database client from context: "+err.Error())
+	}
+	localCtx := context.Background() // avoids context cancellation preventing this from running
+	queued, err := databaseContainer.Client.LRange(localCtx, queue, 0, -1).Result()
+	if err != nil {
+		logger.ErrorContext(pluginCtx, "error getting list of queued jobs", "err", err)
+		return "", err
+	}
+	for _, queueItem := range queued {
+		queueJob, err, typeErr := database.Unwrap[QueueJob](queueItem)
+		if err != nil {
+			logger.ErrorContext(pluginCtx, "error unmarshalling job", "err", err)
+			return "", err
+		}
+		if typeErr != nil { // not the type we want
+			continue
+		}
+		if queueJob.WorkflowJob.ID == nil {
+			logger.ErrorContext(pluginCtx, "WorkflowJob.ID is nil", "WorkflowJob", queueJob.WorkflowJob)
+			return "", fmt.Errorf("WorkflowJob.ID is nil")
+		}
+		if *queueJob.WorkflowJob.ID == jobID {
+			// logger.WarnContext(pluginCtx, "WorkflowJob.ID already in queue", "WorkflowJob.ID", jobID)
+			return queueItem, nil
+		}
+	}
+	return "", nil
+}
+
+func DeleteFromQueue(pluginCtx context.Context, logger *slog.Logger, jobID int64, queue string) error {
+	innerContext := context.Background() // avoids context cancellation preventing cleanup
+	databaseContainer, err := database.GetDatabaseFromContext(pluginCtx)
+	if err != nil {
+		logging.Panic(pluginCtx, pluginCtx, "error getting database client from context: "+err.Error())
+	}
+	queued, err := databaseContainer.Client.LRange(innerContext, queue, 0, -1).Result()
+	if err != nil {
+		logger.ErrorContext(pluginCtx, "error getting list of queued jobs", "err", err)
+		return err
+	}
+	for _, queueItem := range queued {
+		queueJob, err, typeErr := database.Unwrap[QueueJob](queueItem)
+		if err != nil {
+			logger.ErrorContext(pluginCtx, "error unmarshalling job", "err", err)
+			return err
+		}
+		if typeErr != nil { // not the type we want
+			continue
+		}
+		if *queueJob.WorkflowJob.ID == jobID {
+			// logger.WarnContext(pluginCtx, "WorkflowJob.ID already in queue", "WorkflowJob.ID", jobID)
+			_, err = databaseContainer.Client.LRem(innerContext, queue, 1, queueItem).Result()
+			if err != nil {
+				logger.ErrorContext(pluginCtx, "error removing job from queue", "err", err)
+				return err
+			}
+			return nil
+		}
+	}
+	return nil
+}
+
+func QueueHasJobs(
 	pluginCtx context.Context,
 	queueName string,
 ) (bool, error) {

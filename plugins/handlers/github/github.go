@@ -176,7 +176,7 @@ func watchForJobCompletion(
 				return pluginCtx, nil
 			}
 
-			mainInProgressQueueJobJSON, err := internalGithub.InQueue(pluginCtx, *queuedJob.WorkflowJob.ID, mainInProgressQueueName)
+			mainInProgressQueueJobJSON, err := internalGithub.GetJobFromQueue(pluginCtx, *queuedJob.WorkflowJob.ID, mainInProgressQueueName)
 			if err != nil {
 				logger.ErrorContext(pluginCtx, "error searching in queue", "error", err)
 				return pluginCtx, err
@@ -430,7 +430,7 @@ func checkForCompletedJobs(
 			}
 
 			// check if in_progress queue, so we can skip cleanup later on
-			mainInProgressQueueJobJSON, err := internalGithub.InQueue(pluginCtx, *queuedJob.WorkflowJob.ID, mainInProgressQueueName)
+			mainInProgressQueueJobJSON, err := internalGithub.GetJobFromQueue(pluginCtx, *queuedJob.WorkflowJob.ID, mainInProgressQueueName)
 			if err != nil {
 				logger.ErrorContext(pluginCtx, "error searching in queue", "error", err)
 				return
@@ -451,7 +451,7 @@ func checkForCompletedJobs(
 			var mainCompletedQueueJobJSON string
 			var pluginCompletedQueueJobJSON string
 			// check if there is already a completed job queued in the pluginCompletedQueue
-			pluginCompletedQueueJobJSON, err = internalGithub.InQueue(pluginCtx, *queuedJob.WorkflowJob.ID, pluginCompletedQueueName)
+			pluginCompletedQueueJobJSON, err = internalGithub.GetJobFromQueue(pluginCtx, *queuedJob.WorkflowJob.ID, pluginCompletedQueueName)
 			if err != nil {
 				logger.ErrorContext(pluginCtx, "error searching in queue", "error", err)
 				return
@@ -461,7 +461,7 @@ func checkForCompletedJobs(
 			} else {
 				fmt.Println(pluginConfig.Name, " checkForCompletedJobs -> job is not in pluginCompletedQueue", randomInt)
 				// check if there is already a completed job queued in the mainCompletedQueue
-				mainCompletedQueueJobJSON, err = internalGithub.InQueue(pluginCtx, *queuedJob.WorkflowJob.ID, mainCompletedQueueName)
+				mainCompletedQueueJobJSON, err = internalGithub.GetJobFromQueue(pluginCtx, *queuedJob.WorkflowJob.ID, mainCompletedQueueName)
 				if err != nil {
 					logger.ErrorContext(pluginCtx, "error searching in queue", "error", err)
 					return
@@ -1150,12 +1150,14 @@ func Run(
 		// Check if there are any paused jobs we can pick up
 		// paused jobs take priority since they were higher in the queue and something picked them up already
 		for {
+			fmt.Println(pluginConfig.Name, "checking for paused jobs")
 			// Check the length of the paused queue
 			pausedQueueLength, err := databaseContainer.Client.LLen(pluginCtx, pausedQueueName).Result()
 			if err != nil {
 				return pluginCtx, fmt.Errorf("error getting paused queue length: %s", err.Error())
 			}
 			if pausedQueueLength == 0 {
+				fmt.Println(pluginConfig.Name, "no paused jobs found (length 0)")
 				break
 			}
 			pausedQueuedJobString, err := internalGithub.PopJobOffQueue(pluginCtx, pausedQueueName, workerGlobals.QueueTargetIndex)
@@ -1163,6 +1165,7 @@ func Run(
 				return pluginCtx, fmt.Errorf("error getting paused jobs: %s", err.Error())
 			}
 			if pausedQueuedJobString == "" {
+				fmt.Println(pluginConfig.Name, "no paused jobs found (empty string)")
 				workerGlobals.ResetQueueTargetIndex()
 				break
 			}
@@ -1393,7 +1396,29 @@ func Run(
 				pluginGlobals.RetryChannel <- true
 				return pluginCtx, nil
 			}
-			databaseContainer.Client.RPush(pluginCtx, pausedQueueName, queuedJobJSON)
+			// check if it's already in the paused queue
+			InQueue, err := internalGithub.GetJobFromQueue(pluginCtx, *queuedJob.WorkflowJob.ID, pausedQueueName)
+			if err != nil {
+				logger.ErrorContext(pluginCtx, "error checking if job is in paused queue", "err", err)
+				pluginGlobals.RetryChannel <- true
+				return pluginCtx, nil
+			}
+			if InQueue != "" {
+				logger.InfoContext(pluginCtx, "job already in paused queue")
+			} else {
+				success, err := databaseContainer.Client.RPush(pluginCtx, pausedQueueName, queuedJobJSON).Result()
+				if err != nil {
+					logger.ErrorContext(pluginCtx, "error pushing job to paused queue", "err", err)
+					pluginGlobals.RetryChannel <- true
+					return pluginCtx, nil
+				}
+				if success == 0 {
+					logger.ErrorContext(pluginCtx, "error pushing job to paused queue", "err", err)
+					pluginGlobals.RetryChannel <- true
+					return pluginCtx, nil
+				}
+				fmt.Println(pluginConfig.Name, "pushed job to paused queue", success)
+			}
 			logger.WarnContext(pluginCtx, "cannot run vm yet, waiting for enough resources to be available...")
 			for {
 				if pluginCtx.Err() != nil {
@@ -1403,12 +1428,12 @@ func Run(
 				time.Sleep(5 * time.Second)
 				logger.WarnContext(pluginCtx, "waiting for enough resources to be available...")
 				// check if the job was picked up by another host
-				hasJob, err := internalGithub.CheckIfQueueHasJob(pluginCtx, pluginQueueName)
+				existingJob, err := internalGithub.GetJobFromQueue(pluginCtx, *queuedJob.WorkflowJob.ID, pausedQueueName)
 				if err != nil {
 					pluginGlobals.RetryChannel <- true
 					return pluginCtx, fmt.Errorf("error checking if queue has job: %s", err.Error())
 				}
-				if !hasJob { // some other host has taken the job from this host
+				if existingJob == "" { // some other host has taken the job from this host
 					logger.WarnContext(pluginCtx, "job was picked up by another host")
 					pluginGlobals.PausedCancellationJobChannel <- queuedJob
 					return pluginCtx, nil
@@ -1425,6 +1450,7 @@ func Run(
 					logger.ErrorContext(pluginCtx, "error removing job from paused queue", "err", err)
 					return pluginCtx, fmt.Errorf("error removing job from paused queue: %s", err.Error())
 				}
+				logger.InfoContext(pluginCtx, "job removed from paused queue")
 				break
 			}
 		}
