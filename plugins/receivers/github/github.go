@@ -121,7 +121,7 @@ func Run(
 	)
 	if err != nil {
 		// logger.ErrorContext(pluginCtx, "error authenticating github client", "err", err)
-		return pluginCtx, fmt.Errorf("error authenticating github client: " + err.Error())
+		return pluginCtx, fmt.Errorf("error authenticating github client: %s", err.Error())
 	}
 
 	// clean up in_progress queue if it exists
