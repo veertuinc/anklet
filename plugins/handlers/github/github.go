@@ -1012,7 +1012,7 @@ func Run(
 	mainQueueName := "anklet/jobs/github/queued/" + pluginConfig.Owner
 	mainCompletedQueueName := "anklet/jobs/github/completed/" + pluginConfig.Owner
 	// hash tag needed for avoiding "CROSSSLOT Keys in request don't hash to the same slot"
-	pluginQueueName := "anklet/jobs/github/queued/" + pluginConfig.Owner + "/" + "{" + pluginConfig.Name + "}"
+	pluginQueueName := "anklet/jobs/github/queued/" + pluginConfig.Owner + "/" + pluginConfig.Name
 	pluginCompletedQueueName := "anklet/jobs/github/completed/" + pluginConfig.Owner + "/" + pluginConfig.Name
 	mainInProgressQueueName := "anklet/jobs/github/in_progress/" + pluginConfig.Owner
 	pausedQueueName := "anklet/jobs/github/paused/" + pluginConfig.Owner
