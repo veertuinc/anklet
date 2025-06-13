@@ -197,24 +197,24 @@ func main() {
 	parentCtx = logging.AppendCtx(parentCtx, slog.Uint64("hostMemoryBytes", hostMemoryBytes))
 
 	parentCtx = context.WithValue(parentCtx, config.ContextKey("globals"), &config.Globals{
-		RunPluginsOnce:       runOnce == "true",
-		FirstPluginStarted:   make(chan bool, 1),
-		ReturnAllToMainQueue: make(chan bool, 1),
-		PullLock:             &sync.Mutex{},
-		PluginsPath:          pluginsPath,
-		DebugEnabled:         logging.IsDebugEnabled(),
-		PluginsPaused:        atomic.Bool{},
-		APluginIsPreparing:   atomic.Value{},
-		HostCPUCount:         hostCPUCount,
-		HostMemoryBytes:      hostMemoryBytes,
-		// PluginOrder: func() []string {
-		// 	order := make([]string, 0, len(loadedConfig.Plugins))
-		// 	for _, p := range loadedConfig.Plugins {
-		// 		order = append(order, p.Name)
-		// 	}
-		// 	return order
-		// }(),
-		// CurrentPluginIndex: 0,
+		RunPluginsOnce:                 runOnce == "true",
+		FirstPluginStarted:             make(chan bool, 1),
+		ReturnAllToMainQueue:           make(chan bool, 1),
+		PullLock:                       &sync.Mutex{},
+		PluginsPath:                    pluginsPath,
+		DebugEnabled:                   logging.IsDebugEnabled(),
+		PluginsPaused:                  atomic.Bool{},
+		APluginIsPreparing:             atomic.Value{},
+		HostCPUCount:                   hostCPUCount,
+		HostMemoryBytes:                hostMemoryBytes,
+		FinishedInitialRunOfEachPlugin: make([]bool, len(loadedConfig.Plugins)),
+		PluginList: func() []string {
+			pluginNames := make([]string, len(loadedConfig.Plugins))
+			for i, p := range loadedConfig.Plugins {
+				pluginNames[i] = p.Name
+			}
+			return pluginNames
+		}(),
 	})
 
 	httpTransport := http.DefaultTransport

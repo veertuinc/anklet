@@ -204,23 +204,20 @@ func GetPluginFromContext(ctx context.Context) (Plugin, error) {
 }
 
 type Globals struct {
-	RunPluginsOnce       bool
-	FirstPluginStarted   chan bool
-	ReturnAllToMainQueue chan bool
-	PullLock             *sync.Mutex
-	PluginsPath          string
-	DebugEnabled         bool
-	PluginsPaused        atomic.Bool
-	APluginIsPreparing   atomic.Value
-	HostCPUCount         int
-	HostMemoryBytes      uint64
-	QueueTargetIndex     int64
-
-	// PluginOrder        []string   // The order in which plugins should acquire the prep lock
-	// CurrentPluginIndex int        // The index of the plugin whose turn it is
-	// PrepLockMu sync.Mutex // Mutex to protect PluginOrder/CurrentPluginIndex
-
-	PluginRunCount atomic.Uint64 // Shared run count across all plugins
+	RunPluginsOnce                 bool
+	FirstPluginStarted             chan bool
+	ReturnAllToMainQueue           chan bool
+	PullLock                       *sync.Mutex
+	PluginsPath                    string
+	DebugEnabled                   bool
+	PluginsPaused                  atomic.Bool
+	APluginIsPreparing             atomic.Value
+	HostCPUCount                   int
+	HostMemoryBytes                uint64
+	QueueTargetIndex               int64
+	FinishedInitialRunOfEachPlugin []bool
+	PluginRunCount                 atomic.Uint64 // Shared run count across all plugins
+	PluginList                     []string
 }
 
 // // Returns true if it's the given plugin's turn to acquire the prep lock
@@ -330,4 +327,13 @@ func (g *Globals) GetPluginRunCount() uint64 {
 // IncrementPluginRunCount increments the shared plugin run counter and returns the new value
 func (g *Globals) IncrementPluginRunCount() uint64 {
 	return g.PluginRunCount.Add(1)
+}
+
+func FindIndex(slice []string, value string) int {
+	for i, v := range slice {
+		if v == value {
+			return i
+		}
+	}
+	return -1
 }

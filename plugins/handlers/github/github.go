@@ -1108,6 +1108,21 @@ func Run(
 	default:
 	}
 
+	// We want each plugin to run at least once so that any VMs/jobs that were orphaned
+	// on this host get a chance to be cleaned or continue where they left off
+	if !workerGlobals.FinishedInitialRunOfEachPlugin[config.FindIndex(workerGlobals.PluginList, pluginConfig.Name)] {
+		workerGlobals.FinishedInitialRunOfEachPlugin[config.FindIndex(workerGlobals.PluginList, pluginConfig.Name)] = true
+		pluginGlobals.JobChannel <- internalGithub.QueueJob{Action: "finish"}
+		return pluginCtx, nil
+	}
+
+	if !(workerGlobals.FinishedInitialRunOfEachPlugin[0] && workerGlobals.FinishedInitialRunOfEachPlugin[1]) {
+		logger.WarnContext(pluginCtx, "not all plugins have completed their initial run")
+		pluginGlobals.JobChannel <- internalGithub.QueueJob{Action: "finish"}
+		return pluginCtx, nil
+	}
+	os.Exit(0)
+
 	hostHasVmCapacity := internalAnka.HostHasVmCapacity(pluginCtx)
 	if !hostHasVmCapacity {
 		logger.WarnContext(pluginCtx, "host does not have vm capacity")
