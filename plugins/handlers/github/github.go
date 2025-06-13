@@ -853,13 +853,25 @@ func cleanup(
 				}
 
 				logger.WarnContext(pluginCtx, "pushing job from "+pluginQueueName+"/cleaning back to "+targetQueueName)
-				_, err := databaseContainer.Client.RPopLPush(cleanupContext, pluginQueueName+"/cleaning", targetQueueName).Result()
+				queuedJobJSON, err := json.Marshal(queuedJob)
+				if err != nil {
+					logger.ErrorContext(pluginCtx, "error marshalling queued job", "err", err)
+					return
+				}
+				// do not use RPopLPush due to hash tag issue
+				// remove from cleaning queue so other hosts won't try to pick it up anymore.
+				err = databaseContainer.Client.LRem(cleanupContext, pluginQueueName+"/cleaning", 1, queuedJobJSON).Err()
+				if err != nil {
+					logger.ErrorContext(pluginCtx, "error removing job from cleaning queue", "err", err)
+					return
+				}
+				// push to the target queue
+				_, err = databaseContainer.Client.LPush(cleanupContext, targetQueueName, queuedJobJSON).Result()
 				if err != nil {
 					logger.ErrorContext(pluginCtx, "error pushing job back to queued", "err", err)
 					return
 				}
-				databaseContainer.Client.Del(cleanupContext, pluginQueueName+"/cleaning")
-
+				// databaseContainer.Client.Del(cleanupContext, pluginQueueName+"/cleaning")
 			default:
 				if queuedJob.WorkflowJob.Status != nil &&
 					(*queuedJob.WorkflowJob.Status == "completed" || *queuedJob.WorkflowJob.Status == "failed") { // don't send it back to the queue if the job is completed
