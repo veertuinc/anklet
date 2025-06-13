@@ -972,7 +972,7 @@ func Run(
 	)
 	if err != nil {
 		// logger.ErrorContext(pluginCtx, "error authenticating github client", "err", err)
-		return pluginCtx, fmt.Errorf("error authenticating github client")
+		return pluginCtx, fmt.Errorf("error authenticating github client: %s", err.Error())
 	}
 	githubWrapperClient := internalGithub.NewGitHubClientWrapper(githubClient)
 	pluginCtx = context.WithValue(pluginCtx, config.ContextKey("githubwrapperclient"), githubWrapperClient)

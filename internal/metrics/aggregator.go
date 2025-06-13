@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -570,6 +571,7 @@ func ExportMetricsToDB(pluginCtx context.Context, logger *slog.Logger) {
 					setting := databaseContainer.Client.Set(pluginCtx, "anklet/metrics/"+ctxPlugin.Owner+"/"+ctxPlugin.Name, metricsDataJson, time.Hour*24*7) // keep metrics for one week max
 					if setting.Err() != nil {
 						logger.ErrorContext(pluginCtx, "error storing metrics data in Redis", "error", setting.Err())
+						os.Exit(1)
 						return
 					}
 					_, err := databaseContainer.Client.Exists(pluginCtx, "anklet/metrics/"+ctxPlugin.Owner+"/"+ctxPlugin.Name).Result()
