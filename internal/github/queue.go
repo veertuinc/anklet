@@ -2,6 +2,7 @@ package github
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"reflect"
@@ -151,26 +152,30 @@ func GetJobFromQueueByKeyAndValue(
 	queueName string,
 	key string,
 	value string,
-) (QueueJob, error) {
+) (string, error) {
 	databaseContainer, err := database.GetDatabaseFromContext(pluginCtx)
 	if err != nil {
-		return QueueJob{}, fmt.Errorf("error getting database client from context: %s", err.Error())
+		return "", fmt.Errorf("error getting database client from context: %s", err.Error())
 	}
 	queuedJobsString, err := databaseContainer.Client.LRange(pluginCtx, queueName, 0, -1).Result()
 	if err != nil {
-		return QueueJob{}, fmt.Errorf("error getting queued jobs: %s", err.Error())
+		return "", fmt.Errorf("error getting queued jobs: %s", err.Error())
 	}
 	for _, job := range queuedJobsString {
 		queuedJob, err, typeErr := database.Unwrap[QueueJob](job)
 		if err != nil || typeErr != nil {
-			return QueueJob{}, fmt.Errorf("error unmarshalling job: %s", err.Error())
+			return "", fmt.Errorf("error unmarshalling job: %s", err.Error())
 		}
 		// Dynamically access the field using reflection
 		val := reflect.ValueOf(queuedJob)
 		field := val.FieldByName(key)
 		if field.IsValid() && field.Kind() == reflect.String && field.String() == value {
-			return queuedJob, nil
+			jsonString, err := json.Marshal(queuedJob)
+			if err != nil {
+				return "", fmt.Errorf("error marshalling job: %s", err.Error())
+			}
+			return string(jsonString), nil
 		}
 	}
-	return QueueJob{}, nil
+	return "", nil
 }

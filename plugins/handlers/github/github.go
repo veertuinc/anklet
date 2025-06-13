@@ -8,6 +8,7 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -1149,7 +1150,18 @@ func Run(
 
 		// Check if there are any paused jobs we can pick up
 		// paused jobs take priority since they were higher in the queue and something picked them up already
+		var pausedQueuedJobString string
 		for {
+			defer func() {
+				fmt.Println(pluginConfig.Name, "end of paused jobs loop iteration")
+				if pausedQueuedJobString != "" {
+					err := databaseContainer.Client.LPush(pluginCtx, pausedQueueName, pausedQueuedJobString).Err()
+					if err != nil {
+						logger.ErrorContext(pluginCtx, "error pushing job to plugin queue", "err", err)
+					}
+					fmt.Println(pluginConfig.Name, "pushed job back to plugin queue")
+				}
+			}()
 			fmt.Println(pluginConfig.Name, "checking for paused jobs")
 			// Check the length of the paused queue
 			pausedQueueLength, err := databaseContainer.Client.LLen(pluginCtx, pausedQueueName).Result()
@@ -1160,7 +1172,7 @@ func Run(
 				fmt.Println(pluginConfig.Name, "no paused jobs found (length 0)")
 				break
 			}
-			pausedQueuedJobString, err := internalGithub.PopJobOffQueue(pluginCtx, pausedQueueName, workerGlobals.QueueTargetIndex)
+			pausedQueuedJobString, err = internalGithub.PopJobOffQueue(pluginCtx, pausedQueueName, workerGlobals.QueueTargetIndex)
 			if err != nil {
 				return pluginCtx, fmt.Errorf("error getting paused jobs: %s", err.Error())
 			}
@@ -1177,6 +1189,7 @@ func Run(
 			}
 			err = internalAnka.VmHasEnoughHostResources(pluginCtx, pausedQueuedJob.AnkaVM)
 			if err != nil {
+				fmt.Println(pluginConfig.Name, "paused job does not have enough host resources to run")
 				workerGlobals.IncrementQueueTargetIndex()
 				if pausedQueueLength == 1 { // don't go into a forever loop
 					break
@@ -1185,6 +1198,7 @@ func Run(
 			}
 			err = internalAnka.VmHasEnoughResources(pluginCtx, pausedQueuedJob.AnkaVM)
 			if err != nil {
+				fmt.Println(pluginConfig.Name, "paused job does not have enough resources yet on the host")
 				workerGlobals.IncrementQueueTargetIndex()
 				if pausedQueueLength == 1 { // don't go into a forever loop
 					break
@@ -1193,11 +1207,12 @@ func Run(
 			}
 
 			// pull the workflow job from the currently paused host's queue and put it in the current queue instead
-			originalHostJob, err := internalGithub.PopJobOffQueue(pluginCtx, "anklet/jobs/github/queued/"+pluginConfig.Owner+"/"+pausedQueuedJob.PausedOn, 0)
+			originalHostJob, err := internalGithub.GetJobFromQueueByKeyAndValue(pluginCtx, "anklet/jobs/github/queued/"+pluginConfig.Owner+"/"+pausedQueuedJob.PausedOn, "workflowJobID", strconv.FormatInt(*pausedQueuedJob.WorkflowJob.ID, 10))
 			if err != nil {
 				return pluginCtx, fmt.Errorf("error getting job from paused host's queue: %s", err.Error())
 			}
 			queuedJobString = originalHostJob
+			pausedQueuedJobString = "" // don't push back to the paused queue
 			break
 		}
 
@@ -1444,6 +1459,7 @@ func Run(
 					logger.WarnContext(pluginCtx, err.Error())
 					continue
 				}
+				fmt.Println(pluginConfig.Name, "removing job from paused queue 1")
 				// remove from paused queue so other hosts won't try to pick it up anymore.
 				_, err = databaseContainer.Client.LRem(pluginCtx, pausedQueueName, 1, queuedJobJSON).Result()
 				if err != nil {
