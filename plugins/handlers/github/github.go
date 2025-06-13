@@ -775,11 +775,11 @@ func cleanup(
 			// if nothing in cleaning already, pop the job from the list and push it to the cleaning list
 			cleaningJobJSON, err = databaseContainer.Client.RPopLPush(
 				cleanupContext,
-				"{"+pluginQueueName+"}",
-				"{"+pluginQueueName+"}/cleaning",
+				pluginQueueName,
+				pluginQueueName+"/cleaning",
 			).Result()
 			if err == redis.Nil {
-				// logger.DebugContext(pluginCtx, "no job to clean up from "+pluginQueueName)
+				fmt.Println(pluginConfig.Name, "cleanup | no job to clean up from "+pluginQueueName)
 				return // nothing to clean up
 			} else if err != nil {
 				logger.ErrorContext(pluginCtx, "error popping job from the list", "err", err)
@@ -999,8 +999,9 @@ func Run(
 
 	mainQueueName := "anklet/jobs/github/queued/" + pluginConfig.Owner
 	mainCompletedQueueName := "anklet/jobs/github/completed/" + pluginConfig.Owner
-	pluginQueueName := "anklet/jobs/github/queued/" + pluginConfig.Owner + "/" + pluginConfig.Name
-	pluginCompletedQueueName := "anklet/jobs/github/completed/" + pluginConfig.Owner + "/" + pluginConfig.Name + "/" + pluginConfig.Name
+	// hash tag needed for avoiding "CROSSSLOT Keys in request don't hash to the same slot"
+	pluginQueueName := "anklet/jobs/github/queued/" + pluginConfig.Owner + "/" + "{" + pluginConfig.Name + "}"
+	pluginCompletedQueueName := "anklet/jobs/github/completed/" + pluginConfig.Owner + "/" + pluginConfig.Name
 	mainInProgressQueueName := "anklet/jobs/github/in_progress/" + pluginConfig.Owner
 	pausedQueueName := "anklet/jobs/github/paused/" + pluginConfig.Owner
 
