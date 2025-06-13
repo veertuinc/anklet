@@ -204,20 +204,26 @@ func GetPluginFromContext(ctx context.Context) (Plugin, error) {
 }
 
 type Globals struct {
-	RunPluginsOnce                 bool
-	FirstPluginStarted             chan bool
-	ReturnAllToMainQueue           chan bool
-	PullLock                       *sync.Mutex
-	PluginsPath                    string
-	DebugEnabled                   bool
-	PluginsPaused                  atomic.Bool
-	APluginIsPreparing             atomic.Value
-	HostCPUCount                   int
-	HostMemoryBytes                uint64
-	QueueTargetIndex               int64
+	RunPluginsOnce bool
+	// block the second plugin until the first plugin is done
+	FirstPluginStarted   chan bool
+	ReturnAllToMainQueue chan bool
+	PullLock             *sync.Mutex
+	PluginsPath          string
+	DebugEnabled         bool
+	PluginsPaused        atomic.Bool
+	// block other plugins from running until the currently running
+	// plugin is at a place that's safe to let other run
+	APluginIsPreparing atomic.Value
+	HostCPUCount       int
+	HostMemoryBytes    uint64
+	QueueTargetIndex   int64
+	// We want each plugin to run at least once so that any VMs/jobs that were orphaned
+	// on this host get a chance to be cleaned or continue where they left off
 	FinishedInitialRunOfEachPlugin []bool
-	PluginRunCount                 atomic.Uint64 // Shared run count across all plugins
 	PluginList                     []string
+	// Shared run count across all plugins
+	PluginRunCount atomic.Uint64
 }
 
 // // Returns true if it's the given plugin's turn to acquire the prep lock
