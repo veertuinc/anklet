@@ -602,7 +602,7 @@ func ExportMetricsToDB(pluginCtx context.Context, logger *slog.Logger) {
 					// 	logging.DevContext(pluginCtx, "successfully stored metrics data in Redis, key: anklet/metrics/"+ctxPlugin.Owner+"/"+ctxPlugin.Name+" exists: false")
 					// }
 					if amountOfErrorsAllowed < 60 {
-						logger.InfoContext(pluginCtx, "errors resolved")
+						logger.InfoContext(pluginCtx, "errors resolved with metrics export")
 						amountOfErrorsAllowed = 60
 					}
 				}
