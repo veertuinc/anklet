@@ -117,6 +117,8 @@ This means in the worst case scenario it could make a total of 3 api calls total
 
 ## Development
 
+This plugin handles running jobs queued in the DB. It also is responsible for finding completed jobs in the DB and cleaning them up.
+
 ### Functions
 
 #### `cleanup`

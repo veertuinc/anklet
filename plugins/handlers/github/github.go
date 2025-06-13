@@ -1116,12 +1116,19 @@ func Run(
 		return pluginCtx, nil
 	}
 
-	if !(workerGlobals.FinishedInitialRunOfEachPlugin[0] && workerGlobals.FinishedInitialRunOfEachPlugin[1]) {
+	// Check if all plugins have completed their initial run
+	allPluginsFinishedInitialRun := true
+	for _, finished := range workerGlobals.FinishedInitialRunOfEachPlugin {
+		if !finished {
+			allPluginsFinishedInitialRun = false
+			break
+		}
+	}
+	if !allPluginsFinishedInitialRun {
 		logger.WarnContext(pluginCtx, "not all plugins have completed their initial run")
 		pluginGlobals.JobChannel <- internalGithub.QueueJob{Action: "finish"}
 		return pluginCtx, nil
 	}
-	os.Exit(0)
 
 	hostHasVmCapacity := internalAnka.HostHasVmCapacity(pluginCtx)
 	if !hostHasVmCapacity {
