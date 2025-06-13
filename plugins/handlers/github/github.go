@@ -775,8 +775,8 @@ func cleanup(
 			// if nothing in cleaning already, pop the job from the list and push it to the cleaning list
 			cleaningJobJSON, err = databaseContainer.Client.RPopLPush(
 				cleanupContext,
-				pluginQueueName,
-				pluginQueueName+"/cleaning",
+				"{"+pluginQueueName+"}",
+				"{"+pluginQueueName+"}/cleaning",
 			).Result()
 			if err == redis.Nil {
 				// logger.DebugContext(pluginCtx, "no job to clean up from "+pluginQueueName)
@@ -1000,7 +1000,7 @@ func Run(
 	mainQueueName := "anklet/jobs/github/queued/" + pluginConfig.Owner
 	mainCompletedQueueName := "anklet/jobs/github/completed/" + pluginConfig.Owner
 	pluginQueueName := "anklet/jobs/github/queued/" + pluginConfig.Owner + "/" + pluginConfig.Name
-	pluginCompletedQueueName := "anklet/jobs/github/completed/" + pluginConfig.Owner + "/" + pluginConfig.Name
+	pluginCompletedQueueName := "anklet/jobs/github/completed/" + pluginConfig.Owner + "/" + pluginConfig.Name + "/" + pluginConfig.Name
 	mainInProgressQueueName := "anklet/jobs/github/in_progress/" + pluginConfig.Owner
 	pausedQueueName := "anklet/jobs/github/paused/" + pluginConfig.Owner
 
