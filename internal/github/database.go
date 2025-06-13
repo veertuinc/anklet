@@ -32,7 +32,8 @@ func UpdateJobInDB(pluginCtx context.Context, queue string, upToDateJob *QueueJo
 		}
 		// logger.DebugContext(pluginCtx, "existingJob", "existingJob", existingJob)
 		// logger.DebugContext(pluginCtx, "upToDateJob", "upToDateJob", upToDateJob)
-		if *existingJob.WorkflowJob.ID == *upToDateJob.WorkflowJob.ID &&
+		if existingJob.Type == upToDateJob.Type &&
+			*existingJob.WorkflowJob.ID == *upToDateJob.WorkflowJob.ID &&
 			*existingJob.WorkflowJob.RunID == *upToDateJob.WorkflowJob.RunID {
 			// Update the job at this index
 			updatedJobJSON, err := json.Marshal(upToDateJob)

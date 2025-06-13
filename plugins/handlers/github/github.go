@@ -1433,6 +1433,7 @@ func Run(
 				pluginGlobals.RetryChannel <- true
 				return pluginCtx, nil
 			}
+			internalGithub.UpdateJobInDB(pluginCtx, pluginQueueName, &queuedJob)
 			// check if it's already in the paused queue
 			InQueue, err := internalGithub.GetJobFromQueue(pluginCtx, *queuedJob.WorkflowJob.ID, pausedQueueName)
 			if err != nil {
