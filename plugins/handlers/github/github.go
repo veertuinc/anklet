@@ -389,6 +389,7 @@ func checkForCompletedJobs(
 			return
 		case <-pluginGlobals.PausedCancellationJobChannel:
 			fmt.Println(pluginConfig.Name, " checkForCompletedJobs -> pausedCancellationJobChannel", randomInt)
+			pluginGlobals.JobChannel <- internalGithub.QueueJob{Action: "finish"}
 			return
 		case <-pluginGlobals.RetryChannel:
 			fmt.Println(pluginConfig.Name, " checkForCompletedJobs -> retryChannel", randomInt)
@@ -1177,6 +1178,7 @@ func Run(
 			defer func() {
 				fmt.Println(pluginConfig.Name, "end of paused jobs loop iteration")
 				if pausedQueuedJobString != "" {
+					logger.InfoContext(pluginCtx, "pushing job back to plugin queue", "pausedQueuedJobString", pausedQueuedJobString)
 					err := databaseContainer.Client.LPush(pluginCtx, pausedQueueName, pausedQueuedJobString).Err()
 					if err != nil {
 						logger.ErrorContext(pluginCtx, "error pushing job to plugin queue", "err", err)
@@ -1228,11 +1230,19 @@ func Run(
 				continue
 			}
 
+			logger.InfoContext(pluginCtx, "paused job found to run and passes checks", "pausedQueuedJob", pausedQueuedJob)
+
 			// pull the workflow job from the currently paused host's queue and put it in the current queue instead
-			originalHostJob, err := internalGithub.GetJobFromQueueByKeyAndValue(pluginCtx, "anklet/jobs/github/queued/"+pluginConfig.Owner+"/"+pausedQueuedJob.PausedOn, "workflowJobID", strconv.FormatInt(*pausedQueuedJob.WorkflowJob.ID, 10))
+			originalHostJob, err := internalGithub.GetJobFromQueueByKeyAndValue(
+				pluginCtx,
+				"anklet/jobs/github/queued/"+pluginConfig.Owner+"/"+pausedQueuedJob.PausedOn,
+				"workflowJobID",
+				strconv.FormatInt(*pausedQueuedJob.WorkflowJob.ID, 10),
+			)
 			if err != nil {
 				return pluginCtx, fmt.Errorf("error getting job from paused host's queue: %s", err.Error())
 			}
+			logger.InfoContext(pluginCtx, "originalHostJob", "originalHostJob", originalHostJob)
 			queuedJobString = originalHostJob
 			pausedQueuedJobString = "" // don't push back to the paused queue
 			break
