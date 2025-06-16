@@ -161,6 +161,7 @@ func GetJobFromQueueByKeyAndValue(
 	if err != nil {
 		return "", fmt.Errorf("error getting database client from context: %s", err.Error())
 	}
+	logger.DebugContext(pluginCtx, "getting queued jobs from queue", "queueName", queueName)
 	queuedJobsString, err := databaseContainer.Client.LRange(pluginCtx, queueName, 0, -1).Result()
 	if err != nil {
 		return "", fmt.Errorf("error getting queued jobs: %s", err.Error())
