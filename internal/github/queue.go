@@ -153,10 +153,6 @@ func GetJobFromQueueByKeyAndValue(
 	key string,
 	value string,
 ) (string, error) {
-	logger, err := logging.GetLoggerFromContext(pluginCtx)
-	if err != nil {
-		return "", fmt.Errorf("error getting logger from context: %s", err.Error())
-	}
 	databaseContainer, err := database.GetDatabaseFromContext(pluginCtx)
 	if err != nil {
 		return "", fmt.Errorf("error getting database client from context: %s", err.Error())
