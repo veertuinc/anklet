@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"reflect"
+	"strings"
 
 	"github.com/redis/go-redis/v9"
 	"github.com/veertuinc/anklet/internal/database"
@@ -171,7 +172,21 @@ func GetJobFromQueueByKeyAndValue(
 		}
 		// Dynamically access the field using reflection
 		val := reflect.ValueOf(queuedJob)
-		field := val.FieldByName(key)
+		// We need to handle nested fields like "WorkflowJob.ID"
+		parts := strings.Split(key, ".")
+		field := val
+		for _, part := range parts {
+			if field.Kind() == reflect.Struct {
+				field = field.FieldByName(part)
+			} else {
+				// If we're not dealing with a struct but need to access a nested field, it's invalid
+				field = reflect.ValueOf(nil)
+				break
+			}
+			if !field.IsValid() {
+				break
+			}
+		}
 		fmt.Println("field", field)
 		fmt.Println("value", value)
 		if field.IsValid() && field.Kind() == reflect.String && field.String() == value {
