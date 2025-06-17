@@ -847,6 +847,7 @@ func cleanup(
 			case <-pluginGlobals.ReturnToMainQueue:
 				fmt.Println(pluginConfig.Name, "cleanup | WorkflowJobPayload | pluginGlobals.ReturnToMainQueue")
 
+				// IS THIS NEEDED?
 				var targetQueueName string
 				if *queuedJobFromPausedQueue {
 					targetQueueName = pausedQueueName
