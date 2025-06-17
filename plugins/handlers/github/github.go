@@ -1198,6 +1198,10 @@ func Run(
 				fmt.Println(pluginConfig.Name, "no paused jobs found (length 0)")
 				break
 			}
+			// handle when there is only one job in the paused queue and our index is 1, avoiding missing the paused job
+			if pausedQueueLength == 1 {
+				workerGlobals.ResetQueueTargetIndex()
+			}
 			pausedQueuedJobString, err = internalGithub.PopJobOffQueue(pluginCtx, pausedQueueName, workerGlobals.QueueTargetIndex)
 			defer func() {
 				fmt.Println(pluginConfig.Name, "end of paused jobs loop iteration")
