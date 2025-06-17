@@ -1236,7 +1236,7 @@ func Run(
 			originalHostJob, err := internalGithub.GetJobFromQueueByKeyAndValue(
 				pluginCtx,
 				"anklet/jobs/github/queued/"+pluginConfig.Owner+"/{"+pausedQueuedJob.PausedOn+"}",
-				"workflowJobID",
+				"workflow_job.id",
 				strconv.FormatInt(*pausedQueuedJob.WorkflowJob.ID, 10),
 			)
 			if err != nil {

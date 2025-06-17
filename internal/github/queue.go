@@ -2,9 +2,9 @@ package github
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
-	"reflect"
 	"strings"
 
 	"github.com/redis/go-redis/v9"
@@ -166,30 +166,57 @@ func GetJobFromQueueByKeyAndValue(
 	}
 	fmt.Println("queuedJobsString", queuedJobsString)
 	for _, job := range queuedJobsString {
-		queuedJob, err, typeErr := database.Unwrap[QueueJob](job)
-		if err != nil || typeErr != nil {
-			return "", fmt.Errorf("error unmarshalling job: %s", err.Error())
+		var jobMap map[string]interface{}
+		err := json.Unmarshal([]byte(job), &jobMap)
+		if err != nil {
+			return "", fmt.Errorf("error unmarshalling job to map: %s", err.Error())
 		}
-		// Dynamically access the field using reflection
-		val := reflect.ValueOf(queuedJob)
-		// We need to handle nested fields like "WorkflowJob.ID"
-		parts := strings.Split(key, ".")
-		field := val
-		for _, part := range parts {
-			if field.Kind() == reflect.Struct {
-				field = field.FieldByName(part)
+
+		// Split the key by dots to navigate through nested fields
+		keyParts := strings.Split(key, ".")
+
+		// Start with the root of the JSON
+		var current any = jobMap
+
+		// Navigate through each part of the key
+		for _, part := range keyParts {
+			// Check if current is a map
+			if currentMap, ok := current.(map[string]any); ok {
+				current = currentMap[part]
+				if current == nil {
+					break
+				}
 			} else {
-				// If we're not dealing with a struct but need to access a nested field, it's invalid
-				field = reflect.ValueOf(nil)
-				break
-			}
-			if !field.IsValid() {
+				// If not a map, we can't go deeper
+				current = nil
 				break
 			}
 		}
-		fmt.Println("field", field)
-		fmt.Println("value", value)
-		if field.IsValid() && field.Kind() == reflect.String && field.String() == value {
+
+		// Convert the found value to string for comparison
+		var currentStr string
+		if current != nil {
+			switch v := current.(type) {
+			case string:
+				currentStr = v
+			case float64:
+				// JSON numbers are parsed as float64
+				currentStr = fmt.Sprintf("%d", int64(v))
+			case bool:
+				currentStr = fmt.Sprintf("%t", v)
+			default:
+				// For other types, try JSON marshaling
+				bytes, err := json.Marshal(v)
+				if err == nil {
+					currentStr = string(bytes)
+				}
+			}
+		}
+
+		fmt.Println("found value:", current)
+		fmt.Println("comparing:", currentStr, "with", value)
+
+		if currentStr == value {
 			return job, nil
 		}
 	}
