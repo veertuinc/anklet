@@ -867,6 +867,18 @@ func cleanup(
 					logger.ErrorContext(pluginCtx, "error removing job from cleaning queue", "err", err)
 					return
 				}
+				// set proper status back to queued
+				cleaningQueuedJob, err, typeErr := database.Unwrap[internalGithub.QueueJob](cleaningJobJSON)
+				if err != nil || typeErr != nil {
+					logger.ErrorContext(pluginCtx, "error unmarshalling job", "err", err, "typeErr", typeErr, "cleaningJobJSON", cleaningJobJSON)
+					return
+				}
+				cleaningQueuedJob.Action = "queued"
+				cleaningJobJSON, err := json.Marshal(cleaningQueuedJob)
+				if err != nil {
+					logger.ErrorContext(pluginCtx, "error marshalling job", "err", err)
+					return
+				}
 				// push to the target queue
 				_, err = databaseContainer.Client.LPush(cleanupContext, targetQueueName, cleaningJobJSON).Result()
 				if err != nil {
