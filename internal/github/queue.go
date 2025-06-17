@@ -153,20 +153,16 @@ func GetJobFromQueueByKeyAndValue(
 	key string,
 	value string,
 ) (string, error) {
-	fmt.Println("key", key)
-	fmt.Println("value", value)
 	databaseContainer, err := database.GetDatabaseFromContext(pluginCtx)
 	if err != nil {
 		return "", fmt.Errorf("error getting database client from context: %s", err.Error())
 	}
-	fmt.Println("queueName", queueName)
 	queuedJobsString, err := databaseContainer.Client.LRange(pluginCtx, queueName, 0, -1).Result()
 	if err != nil {
 		return "", fmt.Errorf("error getting queued jobs: %s", err.Error())
 	}
-	fmt.Println("queuedJobsString", queuedJobsString)
 	for _, job := range queuedJobsString {
-		var jobMap map[string]interface{}
+		var jobMap map[string]any
 		err := json.Unmarshal([]byte(job), &jobMap)
 		if err != nil {
 			return "", fmt.Errorf("error unmarshalling job to map: %s", err.Error())
@@ -212,11 +208,8 @@ func GetJobFromQueueByKeyAndValue(
 				}
 			}
 		}
-
-		fmt.Println("found value:", current)
-		fmt.Println("comparing:", currentStr, "with", value)
-
 		if currentStr == value {
+			databaseContainer.Client.LRem(pluginCtx, queueName, 1, job)
 			return job, nil
 		}
 	}

@@ -1247,7 +1247,6 @@ func Run(
 				pluginGlobals.JobChannel <- internalGithub.QueueJob{Action: "finish"}
 				return pluginCtx, fmt.Errorf("problem getting original host job")
 			}
-			logger.InfoContext(pluginCtx, "originalHostJob", "originalHostJob", originalHostJob)
 			queuedJobString = originalHostJob
 			pausedQueuedJobString = "" // don't push back to the paused queue
 			break
