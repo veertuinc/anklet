@@ -162,6 +162,7 @@ func GetJobFromQueueByKeyAndValue(
 	if err != nil {
 		return "", fmt.Errorf("error getting queued jobs: %s", err.Error())
 	}
+	fmt.Println("queuedJobsString", queuedJobsString)
 	for _, job := range queuedJobsString {
 		queuedJob, err, typeErr := database.Unwrap[QueueJob](job)
 		if err != nil || typeErr != nil {
