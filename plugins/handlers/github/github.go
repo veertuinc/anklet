@@ -1248,6 +1248,8 @@ func Run(
 				pluginGlobals.JobChannel <- internalGithub.QueueJob{Action: "finish"}
 				return pluginCtx, fmt.Errorf("problem getting original host job")
 			}
+			// remove it from the old host queue
+			databaseContainer.Client.LRem(pluginCtx, "anklet/jobs/github/queued/"+pluginConfig.Owner+"/{"+pausedQueuedJob.PausedOn+"}", 1, originalHostJob)
 			queuedJobString = originalHostJob
 			pausedQueuedJobString = "" // don't push back to the paused queue
 			break
@@ -1271,11 +1273,12 @@ func Run(
 				pluginGlobals.JobChannel <- internalGithub.QueueJob{Action: "finish"}
 				return pluginCtx, nil
 			}
-			var typeErr error
-			queuedJob, err, typeErr = database.Unwrap[internalGithub.QueueJob](queuedJobString)
-			if err != nil || typeErr != nil {
-				return pluginCtx, fmt.Errorf("error unmarshalling job: %s", err.Error())
-			}
+		}
+
+		var typeErr error
+		queuedJob, err, typeErr = database.Unwrap[internalGithub.QueueJob](queuedJobString)
+		if err != nil || typeErr != nil {
+			return pluginCtx, fmt.Errorf("error unmarshalling job: %s", err.Error())
 		}
 
 		databaseContainer.Client.RPush(pluginCtx, pluginQueueName, queuedJobString)
