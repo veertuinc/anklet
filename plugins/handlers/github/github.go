@@ -1248,6 +1248,16 @@ func Run(
 				pluginGlobals.JobChannel <- internalGithub.QueueJob{Action: "finish"}
 				return pluginCtx, fmt.Errorf("problem getting original host job")
 			}
+			queuedJob, err, typeErr = database.Unwrap[internalGithub.QueueJob](originalHostJob)
+			if err != nil || typeErr != nil {
+				return pluginCtx, fmt.Errorf("error unmarshalling job: %s", err.Error())
+			}
+			// make sure it hasn't started running on the other host
+			if queuedJob.Action != "paused" {
+				logger.InfoContext(pluginCtx, "job is running on the other host, so we can't run it anymore")
+				pluginGlobals.JobChannel <- internalGithub.QueueJob{Action: "finish"}
+				return pluginCtx, nil
+			}
 			// remove it from the old host queue
 			databaseContainer.Client.LRem(pluginCtx, "anklet/jobs/github/queued/"+pluginConfig.Owner+"/{"+pausedQueuedJob.PausedOn+"}", 1, originalHostJob)
 			queuedJobString = originalHostJob
@@ -1273,12 +1283,11 @@ func Run(
 				pluginGlobals.JobChannel <- internalGithub.QueueJob{Action: "finish"}
 				return pluginCtx, nil
 			}
-		}
-
-		var typeErr error
-		queuedJob, err, typeErr = database.Unwrap[internalGithub.QueueJob](queuedJobString)
-		if err != nil || typeErr != nil {
-			return pluginCtx, fmt.Errorf("error unmarshalling job: %s", err.Error())
+			var typeErr error
+			queuedJob, err, typeErr = database.Unwrap[internalGithub.QueueJob](queuedJobString)
+			if err != nil || typeErr != nil {
+				return pluginCtx, fmt.Errorf("error unmarshalling job: %s", err.Error())
+			}
 		}
 
 		databaseContainer.Client.RPush(pluginCtx, pluginQueueName, queuedJobString)
@@ -1508,6 +1517,8 @@ func Run(
 					return pluginCtx, fmt.Errorf("error removing job from paused queue: %s", err.Error())
 				}
 				logger.InfoContext(pluginCtx, "job removed from paused queue")
+				queuedJob.Action = "running"
+				internalGithub.UpdateJobInDB(pluginCtx, pluginQueueName, &queuedJob)
 				break
 			}
 		}
