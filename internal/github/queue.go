@@ -152,6 +152,8 @@ func GetJobFromQueueByKeyAndValue(
 	key string,
 	value string,
 ) (string, error) {
+	fmt.Println("key", key)
+	fmt.Println("value", value)
 	databaseContainer, err := database.GetDatabaseFromContext(pluginCtx)
 	if err != nil {
 		return "", fmt.Errorf("error getting database client from context: %s", err.Error())
@@ -170,7 +172,7 @@ func GetJobFromQueueByKeyAndValue(
 		// Dynamically access the field using reflection
 		val := reflect.ValueOf(queuedJob)
 		field := val.FieldByName(key)
-		fmt.Println("field", field.String())
+		fmt.Println("field", field)
 		fmt.Println("value", value)
 		if field.IsValid() && field.Kind() == reflect.String && field.String() == value {
 			return job, nil
