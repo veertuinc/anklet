@@ -197,6 +197,7 @@ func watchForJobCompletion(
 					alreadyLogged = true
 				}
 			}
+
 			var registrationTimeoutSeconds int
 			if pluginConfig.RegistrationTimeoutSeconds <= 0 {
 				registrationTimeoutSeconds = 60
