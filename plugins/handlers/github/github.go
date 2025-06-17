@@ -1179,7 +1179,7 @@ func Run(
 			defer func() {
 				fmt.Println(pluginConfig.Name, "end of paused jobs loop iteration")
 				if pausedQueuedJobString != "" {
-					logger.InfoContext(pluginCtx, "pushing job back to plugin queue", "pausedQueuedJobString", pausedQueuedJobString)
+					// logger.InfoContext(pluginCtx, "pushing job back to plugin queue", "pausedQueuedJobString", pausedQueuedJobString)
 					err := databaseContainer.Client.LPush(pluginCtx, pausedQueueName, pausedQueuedJobString).Err()
 					if err != nil {
 						logger.ErrorContext(pluginCtx, "error pushing job to plugin queue", "err", err)
