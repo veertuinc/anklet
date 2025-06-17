@@ -947,6 +947,7 @@ func Run(
 		CleanupMutex:                  &sync.Mutex{},
 		JobChannel:                    make(chan internalGithub.QueueJob, 1),
 		ReturnToMainQueue:             make(chan bool, 1),
+		PausedCancellationJobChannel:  make(chan internalGithub.QueueJob, 1),
 	}
 	pluginCtx = context.WithValue(pluginCtx, config.ContextKey("pluginglobals"), &pluginGlobals)
 

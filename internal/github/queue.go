@@ -167,13 +167,10 @@ func GetJobFromQueueByKeyAndValue(
 		if err != nil {
 			return "", fmt.Errorf("error unmarshalling job to map: %s", err.Error())
 		}
-
 		// Split the key by dots to navigate through nested fields
 		keyParts := strings.Split(key, ".")
-
 		// Start with the root of the JSON
 		var current any = jobMap
-
 		// Navigate through each part of the key
 		for _, part := range keyParts {
 			// Check if current is a map
@@ -188,7 +185,6 @@ func GetJobFromQueueByKeyAndValue(
 				break
 			}
 		}
-
 		// Convert the found value to string for comparison
 		var currentStr string
 		if current != nil {
@@ -209,7 +205,6 @@ func GetJobFromQueueByKeyAndValue(
 			}
 		}
 		if currentStr == value {
-			databaseContainer.Client.LRem(pluginCtx, queueName, 1, job)
 			return job, nil
 		}
 	}
