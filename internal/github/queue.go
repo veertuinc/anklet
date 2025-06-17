@@ -170,7 +170,7 @@ func GetJobFromQueueByKeyAndValue(
 		// Dynamically access the field using reflection
 		val := reflect.ValueOf(queuedJob)
 		field := val.FieldByName(key)
-		fmt.Println("field", field)
+		fmt.Println("field", field.String())
 		fmt.Println("value", value)
 		if field.IsValid() && field.Kind() == reflect.String && field.String() == value {
 			return job, nil
