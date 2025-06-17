@@ -389,7 +389,7 @@ func checkForCompletedJobs(
 			return
 		case <-pluginGlobals.PausedCancellationJobChannel:
 			fmt.Println(pluginConfig.Name, " checkForCompletedJobs -> pausedCancellationJobChannel", randomInt)
-			pluginGlobals.JobChannel <- internalGithub.QueueJob{Action: "finish"}
+			pluginGlobals.PausedCancellationJobChannel <- internalGithub.QueueJob{Action: "finish"} // send second one so cleanup doesn't run
 			return
 		case <-pluginGlobals.RetryChannel:
 			fmt.Println(pluginConfig.Name, " checkForCompletedJobs -> retryChannel", randomInt)
