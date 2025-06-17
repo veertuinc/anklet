@@ -71,6 +71,7 @@ func DeleteFromQueue(pluginCtx context.Context, logger *slog.Logger, jobID int64
 		logger.ErrorContext(pluginCtx, "error getting list of queued jobs", "err", err)
 		return err
 	}
+	logger.InfoContext(pluginCtx, "deleting job from queue", "jobID", jobID, "queue", queue, "queued", queued)
 	for _, queueItem := range queued {
 		queueJob, err, typeErr := database.Unwrap[QueueJob](queueItem)
 		if err != nil {
@@ -80,6 +81,11 @@ func DeleteFromQueue(pluginCtx context.Context, logger *slog.Logger, jobID int64
 		if typeErr != nil { // not the type we want
 			continue
 		}
+		fmt.Println("queueJob", queueJob.WorkflowJob.ID)
+		fmt.Println("queueItem", queueItem)
+		fmt.Println("jobID", jobID)
+		fmt.Println("queueJob.WorkflowJob.ID", *queueJob.WorkflowJob.ID)
+		fmt.Println("queueJob.WorkflowJob.ID == jobID", *queueJob.WorkflowJob.ID == jobID)
 		if *queueJob.WorkflowJob.ID == jobID {
 			// logger.WarnContext(pluginCtx, "WorkflowJob.ID already in queue", "WorkflowJob.ID", jobID)
 			_, err = databaseContainer.Client.LRem(innerContext, queue, 1, queueItem).Result()
