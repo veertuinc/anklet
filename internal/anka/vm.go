@@ -90,6 +90,10 @@ func VmHasEnoughHostResources(pluginCtx context.Context, vm VM) error {
 
 // compared to other VMs potentially running, do we have enough resources to run this VM?
 func VmHasEnoughResources(pluginCtx context.Context, vm VM) error {
+	logger, err := logging.GetLoggerFromContext(pluginCtx)
+	if err != nil {
+		return fmt.Errorf("error getting logger: %s", err.Error())
+	}
 	workerGlobals, err := config.GetWorkerGlobalsFromContext(pluginCtx)
 	if err != nil {
 		return fmt.Errorf("error getting globals from context: %s", err.Error())
@@ -121,9 +125,11 @@ func VmHasEnoughResources(pluginCtx context.Context, vm VM) error {
 	// logger.DebugContext(pluginCtx, "totalVMMEMBytesUsed", "totalVMMEMBytesUsed", totalVMMEMBytesUsed)
 	// check if the host has enough resources to run the VM given other VMs already running
 	if (vm.CPUCount + totalVMCPUUsed) > workerGlobals.HostCPUCount {
+		logger.DebugContext(pluginCtx, "host does not have enough CPU cores to run VM", "vm.CPUCount", vm.CPUCount, "totalVMCPUUsed", totalVMCPUUsed, "hostCPUCount", workerGlobals.HostCPUCount)
 		return fmt.Errorf("host does not have enough CPU cores to run VM")
 	}
 	if (vm.MEMBytes + totalVMMEMBytesUsed) > workerGlobals.HostMemoryBytes {
+		logger.DebugContext(pluginCtx, "host does not have enough memory to run VM", "vm.MEMBytes", vm.MEMBytes, "totalVMMEMBytesUsed", totalVMMEMBytesUsed, "hostMemoryBytes", workerGlobals.HostMemoryBytes)
 		return fmt.Errorf("host does not have enough memory to run VM")
 	}
 	return nil
