@@ -207,6 +207,7 @@ func main() {
 		APluginIsPreparing:             atomic.Value{},
 		HostCPUCount:                   hostCPUCount,
 		HostMemoryBytes:                hostMemoryBytes,
+		QueueTargetIndex:               0,
 		FinishedInitialRunOfEachPlugin: make([]bool, len(loadedConfig.Plugins)),
 		PluginList: func() []string {
 			pluginNames := make([]string, len(loadedConfig.Plugins))
