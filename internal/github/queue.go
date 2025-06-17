@@ -2,7 +2,6 @@ package github
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"reflect"
@@ -174,11 +173,7 @@ func GetJobFromQueueByKeyAndValue(
 		fmt.Println("field", field)
 		fmt.Println("value", value)
 		if field.IsValid() && field.Kind() == reflect.String && field.String() == value {
-			jsonString, err := json.Marshal(queuedJob)
-			if err != nil {
-				return "", fmt.Errorf("error marshalling job: %s", err.Error())
-			}
-			return string(jsonString), nil
+			return job, nil
 		}
 	}
 	return "", nil
