@@ -1176,17 +1176,6 @@ func Run(
 		// paused jobs take priority since they were higher in the queue and something picked them up already
 		var pausedQueuedJobString string
 		for {
-			defer func() {
-				fmt.Println(pluginConfig.Name, "end of paused jobs loop iteration")
-				if pausedQueuedJobString != "" {
-					// logger.InfoContext(pluginCtx, "pushing job back to plugin queue", "pausedQueuedJobString", pausedQueuedJobString)
-					err := databaseContainer.Client.LPush(pluginCtx, pausedQueueName, pausedQueuedJobString).Err()
-					if err != nil {
-						logger.ErrorContext(pluginCtx, "error pushing job to plugin queue", "err", err)
-					}
-					fmt.Println(pluginConfig.Name, "pushed job back to plugin queue")
-				}
-			}()
 			fmt.Println(pluginConfig.Name, "checking for paused jobs")
 			// Check the length of the paused queue
 			pausedQueueLength, err := databaseContainer.Client.LLen(pluginCtx, pausedQueueName).Result()
@@ -1198,6 +1187,17 @@ func Run(
 				break
 			}
 			pausedQueuedJobString, err = internalGithub.PopJobOffQueue(pluginCtx, pausedQueueName, workerGlobals.QueueTargetIndex)
+			defer func() {
+				fmt.Println(pluginConfig.Name, "end of paused jobs loop iteration")
+				if pausedQueuedJobString != "" {
+					// logger.InfoContext(pluginCtx, "pushing job back to plugin queue", "pausedQueuedJobString", pausedQueuedJobString)
+					err := databaseContainer.Client.LPush(pluginCtx, pausedQueueName, pausedQueuedJobString).Err()
+					if err != nil {
+						logger.ErrorContext(pluginCtx, "error pushing job to plugin queue", "err", err)
+					}
+					fmt.Println(pluginConfig.Name, "pushed job back to plugin queue")
+				}
+			}()
 			if err != nil {
 				return pluginCtx, fmt.Errorf("error getting paused jobs: %s", err.Error())
 			}
@@ -1378,6 +1378,8 @@ func Run(
 
 	logger.InfoContext(pluginCtx, "handling anka workflow run job")
 	metricsData.SetStatus(pluginCtx, logger, "in_progress")
+	queuedJob.Action = "in_progress"
+	internalGithub.UpdateJobInDB(pluginCtx, pluginQueueName, &queuedJob)
 
 	if queuedJob.AnkaVM.CPUCount == 0 || queuedJob.AnkaVM.MEMBytes == 0 { // no need to get VM info if we already have it
 
@@ -1517,7 +1519,7 @@ func Run(
 					return pluginCtx, fmt.Errorf("error removing job from paused queue: %s", err.Error())
 				}
 				logger.InfoContext(pluginCtx, "job removed from paused queue")
-				queuedJob.Action = "running"
+				queuedJob.Action = "in_progress"
 				internalGithub.UpdateJobInDB(pluginCtx, pluginQueueName, &queuedJob)
 				break
 			}
