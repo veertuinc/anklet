@@ -161,9 +161,7 @@ func GetJobFromQueueByKeyAndValue(
 	if err != nil {
 		return "", fmt.Errorf("error getting database client from context: %s", err.Error())
 	}
-	logger.DebugContext(pluginCtx, "getting queued jobs from queue", "queueName", queueName)
 	queuedJobsString, err := databaseContainer.Client.LRange(pluginCtx, queueName, 0, -1).Result()
-	logger.DebugContext(pluginCtx, "queuedJobsString", "queuedJobsString", queuedJobsString)
 	if err != nil {
 		return "", fmt.Errorf("error getting queued jobs: %s", err.Error())
 	}
@@ -172,12 +170,9 @@ func GetJobFromQueueByKeyAndValue(
 		if err != nil || typeErr != nil {
 			return "", fmt.Errorf("error unmarshalling job: %s", err.Error())
 		}
-		logger.InfoContext(pluginCtx, "queuedJob", "queuedJob", queuedJob)
 		// Dynamically access the field using reflection
 		val := reflect.ValueOf(queuedJob)
 		field := val.FieldByName(key)
-		logger.InfoContext(pluginCtx, "field", "field", field)
-		logger.InfoContext(pluginCtx, "value", "value", value)
 		if field.IsValid() && field.Kind() == reflect.String && field.String() == value {
 			jsonString, err := json.Marshal(queuedJob)
 			if err != nil {

@@ -1235,7 +1235,7 @@ func Run(
 			// pull the workflow job from the currently paused host's queue and put it in the current queue instead
 			originalHostJob, err := internalGithub.GetJobFromQueueByKeyAndValue(
 				pluginCtx,
-				"anklet/jobs/github/queued/"+pluginConfig.Owner+"/"+pausedQueuedJob.PausedOn,
+				"anklet/jobs/github/queued/"+pluginConfig.Owner+"/{"+pausedQueuedJob.PausedOn+"}",
 				"workflowJobID",
 				strconv.FormatInt(*pausedQueuedJob.WorkflowJob.ID, 10),
 			)
