@@ -210,9 +210,6 @@ func watchForJobCompletion(
 				// if not, then the runner registration failed
 				if mainInProgressQueueJobJSON == "" {
 					logger.ErrorContext(pluginCtx, "waiting for runner registration timed out, will retry")
-					queuedJob.WorkflowJob.Conclusion = github.String("failure") // support removeSelfHostedRunner
-					queuedJob.WorkflowJob.Status = github.String("completed")
-					internalGithub.UpdateJobInDB(pluginCtx, pluginQueueName, &queuedJob)
 					pluginGlobals.RetryChannel <- true
 					return pluginCtx, nil
 				}
