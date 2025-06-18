@@ -388,7 +388,6 @@ func checkForCompletedJobs(
 		case <-workerGlobals.ReturnAllToMainQueue:
 			logger.WarnContext(pluginCtx, "main worker is returning all jobs to main queue")
 			pluginGlobals.ReturnToMainQueue <- true
-			return
 		case <-pluginGlobals.PausedCancellationJobChannel:
 			fmt.Println(pluginConfig.Name, " checkForCompletedJobs -> pausedCancellationJobChannel", randomInt)
 			pluginGlobals.PausedCancellationJobChannel <- internalGithub.QueueJob{Action: "finish"} // send second one so cleanup doesn't run
@@ -400,7 +399,6 @@ func checkForCompletedJobs(
 		case job := <-pluginGlobals.JobChannel:
 			if job.Action == "finish" {
 				fmt.Println(pluginConfig.Name, " checkForCompletedJobs -> finished", randomInt)
-				workerGlobals.ResetQueueTargetIndex()
 				return
 			}
 			if job.Action == "cancel" {
@@ -1308,6 +1306,7 @@ func Run(
 					workerGlobals.UnsetAPluginIsPreparing()
 				}
 				pluginGlobals.JobChannel <- internalGithub.QueueJob{Action: "finish"}
+				workerGlobals.ResetQueueTargetIndex()
 				return pluginCtx, nil
 			}
 			var typeErr error
