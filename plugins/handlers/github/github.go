@@ -8,6 +8,7 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -1230,6 +1231,15 @@ func Run(
 			if err != nil || typeErr != nil {
 				return pluginCtx, fmt.Errorf("error unmarshalling job: %s", err.Error())
 			}
+			// check if the job is aleady paused on this same host (matches any plugin names)
+			if slices.Contains(workerGlobals.PluginList, pluginConfig.Name) {
+				logger.InfoContext(pluginCtx, "job is already paused on this host by another plugin, skipping")
+				workerGlobals.IncrementQueueTargetIndex()
+				if pausedQueueLength == 1 { // don't go into a forever loop
+					break
+				}
+				continue
+			}
 			err = internalAnka.VmHasEnoughHostResources(pluginCtx, pausedQueuedJob.AnkaVM)
 			if err != nil {
 				fmt.Println(pluginConfig.Name, "paused job does not have enough host resources to run")
@@ -1351,6 +1361,11 @@ func Run(
 		"queued job found",
 		"queuedJob", queuedJob,
 	)
+
+	pluginCtx = logging.AppendCtx(pluginCtx, slog.String("workflowJobID", strconv.FormatInt(*queuedJob.WorkflowJob.ID, 10)))
+	pluginCtx = logging.AppendCtx(pluginCtx, slog.String("workflowJobRunID", strconv.FormatInt(*queuedJob.WorkflowJob.RunID, 10)))
+	pluginCtx = logging.AppendCtx(pluginCtx, slog.String("workflowName", *queuedJob.WorkflowJob.WorkflowName))
+	pluginCtx = logging.AppendCtx(pluginCtx, slog.String("workflowJobURL", *queuedJob.WorkflowJob.HTMLURL))
 
 	// now that the job is in the plugin's queue,check if the job is already completed so we don't orphan if there is
 	// a job in anklet/jobs/github/queued and also a anklet/jobs/github/completed
