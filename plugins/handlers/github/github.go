@@ -407,7 +407,6 @@ func checkForCompletedJobs(
 				if err != nil {
 					logger.ErrorContext(pluginCtx, "error sending cancel workflow run", "err", err)
 				}
-				return
 			}
 		case <-pluginCtx.Done():
 			logging.DevContext(pluginCtx, "checkForCompletedJobs "+pluginConfig.Name+" pluginCtx.Done()")
