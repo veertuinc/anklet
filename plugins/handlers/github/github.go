@@ -396,6 +396,7 @@ func checkForCompletedJobs(
 		case <-pluginGlobals.RetryChannel:
 			fmt.Println(pluginConfig.Name, " checkForCompletedJobs -> retryChannel", randomInt)
 			pluginGlobals.ReturnToMainQueue <- true
+			pluginGlobals.JobChannel <- internalGithub.QueueJob{Action: "finish"}
 		case job := <-pluginGlobals.JobChannel:
 			if job.Action == "finish" {
 				fmt.Println(pluginConfig.Name, " checkForCompletedJobs -> finished", randomInt)
