@@ -1347,19 +1347,15 @@ func Run(
 	if !isRepoSet && queuedJob.Repository.Name != nil {
 		pluginCtx = logging.AppendCtx(pluginCtx, slog.String("repo", *queuedJob.Repository.Name))
 	}
-	// pluginCtx = logging.AppendCtx(pluginCtx, slog.Int64("workflowJobID", *queuedJob.WorkflowJob.ID))
-	// pluginCtx = logging.AppendCtx(pluginCtx, slog.String("workflowJobName", *queuedJob.WorkflowJob.Name))
-	// pluginCtx = logging.AppendCtx(pluginCtx, slog.Int64("workflowJobRunID", *queuedJob.WorkflowJob.RunID))
-	// pluginCtx = logging.AppendCtx(pluginCtx, slog.String("workflowName", *queuedJob.WorkflowJob.WorkflowName))
-	// pluginCtx = logging.AppendCtx(pluginCtx, slog.String("jobURL", *queuedJob.WorkflowJob.HTMLURL))
+
 	logger.InfoContext(
 		pluginCtx,
 		"queued job found",
 		"queuedJob", queuedJob,
 	)
 
-	pluginCtx = logging.AppendCtx(pluginCtx, slog.String("workflowJobID", strconv.FormatInt(*queuedJob.WorkflowJob.ID, 10)))
-	pluginCtx = logging.AppendCtx(pluginCtx, slog.String("workflowJobRunID", strconv.FormatInt(*queuedJob.WorkflowJob.RunID, 10)))
+	pluginCtx = logging.AppendCtx(pluginCtx, slog.Int64("workflowJobID", *queuedJob.WorkflowJob.ID))
+	pluginCtx = logging.AppendCtx(pluginCtx, slog.Int64("workflowJobRunID", *queuedJob.WorkflowJob.RunID))
 	pluginCtx = logging.AppendCtx(pluginCtx, slog.String("workflowName", *queuedJob.WorkflowJob.WorkflowName))
 	pluginCtx = logging.AppendCtx(pluginCtx, slog.String("workflowJobURL", *queuedJob.WorkflowJob.HTMLURL))
 
