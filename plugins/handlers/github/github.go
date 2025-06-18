@@ -368,6 +368,7 @@ func checkForCompletedJobs(
 		logger.ErrorContext(pluginCtx, "error getting metrics data from context", "err", err)
 		os.Exit(1)
 	}
+	checkForCompletedJobsContext := context.Background() // needed so we can finalize database changes without orphaning or losing jobs
 	defer func() {
 		fmt.Println(pluginConfig.Name, " checkForCompletedJobs defer start")
 		if pluginGlobals.CheckForCompletedJobsMutex != nil {
@@ -493,7 +494,7 @@ func checkForCompletedJobs(
 			if mainCompletedQueueJobJSON != "" {
 				fmt.Println(pluginConfig.Name, " checkForCompletedJobs -> job is in mainCompletedQueue, handling", randomInt)
 				// remove the completed job we found
-				success, err := databaseContainer.Client.LRem(pluginCtx, mainCompletedQueueName, 1, mainCompletedQueueJobJSON).Result()
+				success, err := databaseContainer.Client.LRem(checkForCompletedJobsContext, mainCompletedQueueName, 1, mainCompletedQueueJobJSON).Result()
 				if err != nil {
 					logger.ErrorContext(pluginCtx,
 						"error removing completedJob from "+mainCompletedQueueName,
@@ -533,7 +534,7 @@ func checkForCompletedJobs(
 				// 	return
 				// }
 				// add a task for the completed job so we know the clean up
-				_, err = databaseContainer.Client.LPush(pluginCtx, pluginCompletedQueueName, mainCompletedQueueJobJSON).Result()
+				_, err = databaseContainer.Client.LPush(checkForCompletedJobsContext, pluginCompletedQueueName, mainCompletedQueueJobJSON).Result()
 				if err != nil {
 					logger.ErrorContext(pluginCtx, "error inserting completed job into list", "err", err)
 					return
