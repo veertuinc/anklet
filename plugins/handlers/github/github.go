@@ -1489,13 +1489,13 @@ func Run(
 			}
 			internalGithub.UpdateJobInDB(pluginCtx, pluginQueueName, &queuedJob)
 			// check if it's already in the paused queue
-			InQueue, err := internalGithub.GetJobFromQueue(pluginCtx, *queuedJob.WorkflowJob.ID, pausedQueueName)
+			pausedQueuedJob, err := internalGithub.GetJobFromQueue(pluginCtx, *queuedJob.WorkflowJob.ID, pausedQueueName)
 			if err != nil {
 				logger.ErrorContext(pluginCtx, "error checking if job is in paused queue", "err", err)
 				pluginGlobals.RetryChannel <- true
 				return pluginCtx, nil
 			}
-			if InQueue != "" {
+			if pausedQueuedJob != "" {
 				logger.InfoContext(pluginCtx, "job already in paused queue")
 			} else {
 				success, err := databaseContainer.Client.RPush(pluginCtx, pausedQueueName, queuedJobJSON).Result()
@@ -1538,8 +1538,8 @@ func Run(
 				}
 				fmt.Println(pluginConfig.Name, "removing job from paused queue 1")
 				// remove from paused queue so other hosts won't try to pick it up anymore.
-				_, err = databaseContainer.Client.LRem(pluginCtx, pausedQueueName, 1, queuedJobJSON).Result()
-				if err != nil {
+				success, err := databaseContainer.Client.LRem(pluginCtx, pausedQueueName, 1, pausedQueuedJob).Result()
+				if err != nil || success == 0 {
 					logger.ErrorContext(pluginCtx, "error removing job from paused queue", "err", err)
 					return pluginCtx, fmt.Errorf("error removing job from paused queue: %s", err.Error())
 				}
