@@ -1520,12 +1520,12 @@ func Run(
 				time.Sleep(5 * time.Second)
 				logger.WarnContext(pluginCtx, "waiting for enough resources to be available...")
 				// check if the job was picked up by another host
-				existingJob, err := internalGithub.GetJobFromQueue(pluginCtx, *queuedJob.WorkflowJob.ID, pausedQueueName)
+				existingJobJSON, err := internalGithub.GetJobFromQueue(pluginCtx, *queuedJob.WorkflowJob.ID, pausedQueueName)
 				if err != nil {
 					pluginGlobals.RetryChannel <- true
 					return pluginCtx, fmt.Errorf("error checking if queue has job: %s", err.Error())
 				}
-				if existingJob == "" { // some other host has taken the job from this host
+				if existingJobJSON == "" { // some other host has taken the job from this host
 					logger.WarnContext(pluginCtx, "job was picked up by another host")
 					pluginGlobals.PausedCancellationJobChannel <- queuedJob
 					return pluginCtx, nil
@@ -1538,10 +1538,14 @@ func Run(
 				}
 				fmt.Println(pluginConfig.Name, "removing job from paused queue 1")
 				// remove from paused queue so other hosts won't try to pick it up anymore.
-				success, err := databaseContainer.Client.LRem(pluginCtx, pausedQueueName, 1, pausedQueuedJob).Result()
-				if err != nil || success == 0 {
+				success, err := databaseContainer.Client.LRem(pluginCtx, pausedQueueName, 1, existingJobJSON).Result()
+				if err != nil {
 					logger.ErrorContext(pluginCtx, "error removing job from paused queue", "err", err)
 					return pluginCtx, fmt.Errorf("error removing job from paused queue: %s", err.Error())
+				}
+				if success == 0 {
+					logger.ErrorContext(pluginCtx, "failed to remove job from paused queue - no items removed")
+					return pluginCtx, fmt.Errorf("failed to remove job from paused queue - no items removed")
 				}
 				logger.InfoContext(pluginCtx, "job removed from paused queue")
 				queuedJob.Action = "in_progress"
