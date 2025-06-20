@@ -170,7 +170,8 @@ func Run(
 				Repository: internalGithub.Repository{
 					Name: workflowJob.Repo.Name,
 				},
-				AnkaVM: anka.VM{},
+				AnkaVM:   anka.VM{},
+				Attempts: 0,
 			}
 			logger.InfoContext(pluginCtx, "received workflow job to consider",
 				"workflowJob.WorkflowJob.Labels", simplifiedWorkflowJobEvent.WorkflowJob.Labels,

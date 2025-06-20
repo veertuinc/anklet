@@ -7,7 +7,9 @@ import (
 	"log/slog"
 	"strings"
 
+	"github.com/google/go-github/v66/github"
 	"github.com/redis/go-redis/v9"
+	"github.com/veertuinc/anklet/internal/config"
 	"github.com/veertuinc/anklet/internal/database"
 	"github.com/veertuinc/anklet/internal/logging"
 )
@@ -215,4 +217,95 @@ func GetJobFromQueueByKeyAndValue(
 		}
 	}
 	return "", nil
+}
+
+func UpdateJobWorkflowJobStatus(
+	workerCtx context.Context,
+	pluginCtx context.Context,
+	queuedJob *QueueJob,
+) (QueueJob, error) {
+	logger, err := logging.GetLoggerFromContext(pluginCtx)
+	if err != nil {
+		return *queuedJob, err
+	}
+	githubClient, err := GetGitHubClientFromContext(pluginCtx)
+	if err != nil {
+		logger.ErrorContext(pluginCtx, "error getting github client from context", "err", err)
+		return *queuedJob, err
+	}
+	pluginConfig, err := config.GetPluginFromContext(pluginCtx)
+	if err != nil {
+		logger.ErrorContext(pluginCtx, "error getting plugin from context", "err", err)
+		return *queuedJob, err
+	}
+	pluginCtx, currentWorkflowJob, _, err := ExecuteGitHubClientFunction(workerCtx, pluginCtx, logger, func() (*github.WorkflowJob, *github.Response, error) {
+		workflowJob, response, err := githubClient.Actions.GetWorkflowJobByID(pluginCtx, pluginConfig.Owner, *queuedJob.Repository.Name, *queuedJob.WorkflowJob.ID)
+		return workflowJob, response, err
+	})
+	if err != nil {
+		logger.ErrorContext(pluginCtx, "error getting workflow run", "err", err)
+		return *queuedJob, err
+	}
+	logger.DebugContext(pluginCtx, "workflowJob from API", "workflowJob", currentWorkflowJob)
+	// logger.DebugContext(pluginCtx, "response", "response", response)
+	// Handle each workflow job status with a log message
+	// completed = we clean up everything
+	// failed = we clean up everything
+	// queued = let it run, don't do anything
+	// running = let it run, don't do anything
+	if currentWorkflowJob.Status != nil {
+		status := *currentWorkflowJob.Status
+		switch status {
+		case "completed":
+			logger.InfoContext(pluginCtx, "workflow job is completed")
+			queuedJob.WorkflowJob.Status = github.String("completed")
+		case "action_required":
+			logger.InfoContext(pluginCtx, "workflow job requires action")
+			queuedJob.WorkflowJob.Conclusion = github.String("failure")
+			queuedJob.WorkflowJob.Status = github.String("completed")
+		case "cancelled":
+			logger.InfoContext(pluginCtx, "workflow job was cancelled")
+			queuedJob.WorkflowJob.Status = github.String("completed")
+		case "failure":
+			logger.InfoContext(pluginCtx, "workflow job failed")
+			queuedJob.WorkflowJob.Conclusion = github.String("failure")
+			queuedJob.WorkflowJob.Status = github.String("completed")
+		case "neutral":
+			logger.InfoContext(pluginCtx, "workflow job ended with neutral status")
+			queuedJob.WorkflowJob.Status = github.String("completed")
+		case "skipped":
+			logger.InfoContext(pluginCtx, "workflow job was skipped")
+			queuedJob.WorkflowJob.Status = github.String("completed")
+		case "stale":
+			logger.InfoContext(pluginCtx, "workflow job is stale")
+			queuedJob.WorkflowJob.Status = github.String("completed")
+		case "success":
+			logger.InfoContext(pluginCtx, "workflow job succeeded")
+			queuedJob.WorkflowJob.Status = github.String("completed")
+		case "timed_out":
+			logger.InfoContext(pluginCtx, "workflow job timed out")
+			queuedJob.WorkflowJob.Conclusion = github.String("failure")
+			queuedJob.WorkflowJob.Status = github.String("completed")
+		case "in_progress":
+			logger.InfoContext(pluginCtx, "workflow job is in progress")
+			queuedJob.WorkflowJob.Status = github.String("in_progress")
+		case "queued":
+			logger.InfoContext(pluginCtx, "workflow job is queued")
+			queuedJob.WorkflowJob.Status = github.String("queued")
+		case "requested":
+			logger.InfoContext(pluginCtx, "workflow job was requested")
+			queuedJob.WorkflowJob.Status = github.String("queued")
+		case "waiting":
+			logger.InfoContext(pluginCtx, "workflow job is waiting")
+			queuedJob.WorkflowJob.Status = github.String("in_progress")
+		case "pending":
+			logger.InfoContext(pluginCtx, "workflow job is pending")
+			queuedJob.WorkflowJob.Status = github.String("in_progress")
+		default:
+			logger.InfoContext(pluginCtx, "workflow job has unknown status", "status", status)
+		}
+	} else {
+		logger.WarnContext(pluginCtx, "workflow job status is nil")
+	}
+	return *queuedJob, nil
 }

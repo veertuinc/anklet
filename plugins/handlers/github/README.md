@@ -111,6 +111,7 @@ The following logic consumes [API limits](https://docs.github.com/en/rest/using-
   2. Should the job request a template or tag that doesn't exist, we need to forcefully cancel the job in github or else other anklets will attempt processing indefinitely. (one call to check if already cancelled, one to cancel)
   3. Should the runner be orphaned and not have been shut down cleanly so it unregistred itself, we will send a removal request. It can not happen with #2. (one to check if already removed, one to remove)
   4. If jobs were `in_progress` when anklet was exited, we will make a single API call to see if the job finished successfully or not. If the job is still running, the VM will stay running and the plugin will wait for it to finish. Otherwise, we'll proceed with the cleanup.
+  5. If a job failed for some reason and is being retried, we will make a single API call to see if the job finished successfully or not in github.
 
 This means in the worst case scenario it could make a total of 3 api calls total. Otherwise only one should happen on job success.
 

@@ -35,6 +35,7 @@ type QueueJob struct {
 	Repository  Repository            `json:"repository"`
 	Action      string                `json:"action"`
 	PausedOn    string                `json:"paused_on"`
+	Attempts    int                   `json:"attempts"`
 }
 
 type Repository struct {
