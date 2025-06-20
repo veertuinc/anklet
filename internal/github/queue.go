@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"strings"
 
 	"github.com/google/go-github/v66/github"
@@ -62,7 +61,11 @@ func GetJobFromQueue(
 	return "", nil
 }
 
-func DeleteFromQueue(pluginCtx context.Context, logger *slog.Logger, jobID int64, queue string) error {
+func DeleteFromQueue(pluginCtx context.Context, jobID int64, queue string) error {
+	logger, err := logging.GetLoggerFromContext(pluginCtx)
+	if err != nil {
+		return fmt.Errorf("error getting logger from context: %s", err.Error())
+	}
 	innerContext := context.Background() // avoids context cancellation preventing cleanup
 	databaseContainer, err := database.GetDatabaseFromContext(pluginCtx)
 	if err != nil {
@@ -90,10 +93,15 @@ func DeleteFromQueue(pluginCtx context.Context, logger *slog.Logger, jobID int64
 		fmt.Println("queueJob.WorkflowJob.ID == jobID", *queueJob.WorkflowJob.ID == jobID)
 		if *queueJob.WorkflowJob.ID == jobID {
 			// logger.WarnContext(pluginCtx, "WorkflowJob.ID already in queue", "WorkflowJob.ID", jobID)
-			_, err = databaseContainer.Client.LRem(innerContext, queue, 1, queueItem).Result()
+			success, err := databaseContainer.Client.LRem(innerContext, queue, 1, queueItem).Result()
 			if err != nil {
 				logger.ErrorContext(pluginCtx, "error removing job from queue", "err", err)
 				return err
+			}
+			if success == 1 {
+				logger.InfoContext(pluginCtx, "job removed from queue", "jobID", jobID, "queue", queue)
+			} else {
+				return fmt.Errorf("job not removed from queue")
 			}
 			return nil
 		}
@@ -219,6 +227,8 @@ func GetJobFromQueueByKeyAndValue(
 	return "", nil
 }
 
+// UpdateJobWorkflowJobStatus updates the workflow job status of a queued job.
+// It should only set
 func UpdateJobWorkflowJobStatus(
 	workerCtx context.Context,
 	pluginCtx context.Context,

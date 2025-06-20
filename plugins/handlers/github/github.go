@@ -755,7 +755,7 @@ func cleanup(
 		case "WorkflowJobPayload": // MUST COME LAST
 			logger.DebugContext(pluginCtx, "cleanup | WorkflowJobPayload | queuedJob", "queuedJob", queuedJob)
 			// delete the in_progress queue's index that matches the wrkflowJobID
-			err = internalGithub.DeleteFromQueue(cleanupContext, logger, *queuedJob.WorkflowJob.ID, mainInProgressQueueName)
+			err = internalGithub.DeleteFromQueue(cleanupContext, *queuedJob.WorkflowJob.ID, mainInProgressQueueName)
 			if err != nil {
 				logger.ErrorContext(pluginCtx, "error deleting from in_progress queue", "err", err)
 			}
@@ -775,22 +775,7 @@ func cleanup(
 				databaseContainer.Client.Del(cleanupContext, pluginQueueName+"/cleaning")
 				return
 			case reason := <-pluginGlobals.ReturnToMainQueue:
-				logger.WarnContext(pluginCtx, "returning job to main queue because of "+reason)
-
-				// TODO: IS THIS NEEDED?
-				var targetQueueName string
-				if *queuedJobFromPausedQueue {
-					targetQueueName = pausedQueueName
-				} else {
-					targetQueueName = mainQueueName
-				}
-
-				logger.WarnContext(pluginCtx, "pushing job from "+pluginQueueName+"/cleaning back to "+targetQueueName)
-				// queuedJobJSON, err := json.Marshal(queuedJob)
-				// if err != nil {
-				// 	logger.ErrorContext(pluginCtx, "error marshalling queued job", "err", err)
-				// 	return
-				// }
+				logger.WarnContext(pluginCtx, "pushing job from "+pluginQueueName+"/cleaning back to "+mainQueueName, "reason", reason)
 				// do not use RPopLPush due to hash tag issue
 				// remove from cleaning queue so other hosts won't try to pick it up anymore.
 				cleaningJobJSON, err = databaseContainer.Client.RPop(cleanupContext, pluginQueueName+"/cleaning").Result()
@@ -816,7 +801,7 @@ func cleanup(
 					return
 				}
 				// push to the target queue
-				_, err = databaseContainer.Client.LPush(cleanupContext, targetQueueName, cleaningJobJSON).Result()
+				_, err = databaseContainer.Client.LPush(cleanupContext, mainQueueName, cleaningJobJSON).Result()
 				if err != nil {
 					logger.ErrorContext(pluginCtx, "error pushing job back to queued", "err", err)
 					return
@@ -1515,14 +1500,9 @@ func Run(
 				}
 				fmt.Println(pluginConfig.Name, "removing job from paused queue 1")
 				// remove from paused queue so other hosts won't try to pick it up anymore.
-				success, err := databaseContainer.Client.LRem(pluginCtx, pausedQueueName, 1, existingJobJSON).Result()
+				err = internalGithub.DeleteFromQueue(pluginCtx, *queuedJob.WorkflowJob.ID, pausedQueueName)
 				if err != nil {
-					logger.ErrorContext(pluginCtx, "error removing job from paused queue", "err", err)
-					return pluginCtx, fmt.Errorf("error removing job from paused queue: %s", err.Error())
-				}
-				if success == 0 {
-					logger.ErrorContext(pluginCtx, "failed to remove job from paused queue - no items removed")
-					return pluginCtx, fmt.Errorf("failed to remove job from paused queue - no items removed")
+					logger.ErrorContext(pluginCtx, "error deleting from in_progress queue", "err", err)
 				}
 				logger.InfoContext(pluginCtx, "job removed from paused queue")
 				queuedJob.Action = "in_progress"
