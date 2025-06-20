@@ -755,7 +755,7 @@ func cleanup(
 		case "WorkflowJobPayload": // MUST COME LAST
 			logger.DebugContext(pluginCtx, "cleanup | WorkflowJobPayload | queuedJob", "queuedJob", queuedJob)
 			// delete the in_progress queue's index that matches the wrkflowJobID
-			err = internalGithub.DeleteFromQueue(cleanupContext, *queuedJob.WorkflowJob.ID, mainInProgressQueueName)
+			err = internalGithub.DeleteFromQueue(cleanupContext, logger, *queuedJob.WorkflowJob.ID, mainInProgressQueueName)
 			if err != nil {
 				logger.ErrorContext(pluginCtx, "error deleting from in_progress queue", "err", err)
 			}
@@ -1500,7 +1500,7 @@ func Run(
 				}
 				fmt.Println(pluginConfig.Name, "removing job from paused queue 1")
 				// remove from paused queue so other hosts won't try to pick it up anymore.
-				err = internalGithub.DeleteFromQueue(pluginCtx, *queuedJob.WorkflowJob.ID, pausedQueueName)
+				err = internalGithub.DeleteFromQueue(pluginCtx, logger, *queuedJob.WorkflowJob.ID, pausedQueueName)
 				if err != nil {
 					logger.ErrorContext(pluginCtx, "error deleting from in_progress queue", "err", err)
 				}

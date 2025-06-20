@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/google/go-github/v66/github"
@@ -61,26 +62,23 @@ func GetJobFromQueue(
 	return "", nil
 }
 
-func DeleteFromQueue(pluginCtx context.Context, jobID int64, queue string) error {
-	logger, err := logging.GetLoggerFromContext(pluginCtx)
-	if err != nil {
-		return fmt.Errorf("error getting logger from context: %s", err.Error())
-	}
+func DeleteFromQueue(ctx context.Context, logger *slog.Logger, jobID int64, queue string) error {
+	// can't use GetLoggerFromContext here because the ctx might not be the actual pluginCtx
 	innerContext := context.Background() // avoids context cancellation preventing cleanup
-	databaseContainer, err := database.GetDatabaseFromContext(pluginCtx)
+	databaseContainer, err := database.GetDatabaseFromContext(ctx)
 	if err != nil {
-		logging.Panic(pluginCtx, pluginCtx, "error getting database client from context: "+err.Error())
+		logging.Panic(ctx, "error getting database client from context: "+err.Error())
 	}
 	queued, err := databaseContainer.Client.LRange(innerContext, queue, 0, -1).Result()
 	if err != nil {
-		logger.ErrorContext(pluginCtx, "error getting list of queued jobs", "err", err)
+		logger.ErrorContext(ctx, "error getting list of queued jobs", "err", err)
 		return err
 	}
-	logger.InfoContext(pluginCtx, "deleting job from queue", "jobID", jobID, "queue", queue, "queued", queued)
+	logger.InfoContext(ctx, "deleting job from queue", "jobID", jobID, "queue", queue, "queued", queued)
 	for _, queueItem := range queued {
 		queueJob, err, typeErr := database.Unwrap[QueueJob](queueItem)
 		if err != nil {
-			logger.ErrorContext(pluginCtx, "error unmarshalling job", "err", err)
+			logger.ErrorContext(ctx, "error unmarshalling job", "err", err)
 			return err
 		}
 		if typeErr != nil { // not the type we want
@@ -95,11 +93,11 @@ func DeleteFromQueue(pluginCtx context.Context, jobID int64, queue string) error
 			// logger.WarnContext(pluginCtx, "WorkflowJob.ID already in queue", "WorkflowJob.ID", jobID)
 			success, err := databaseContainer.Client.LRem(innerContext, queue, 1, queueItem).Result()
 			if err != nil {
-				logger.ErrorContext(pluginCtx, "error removing job from queue", "err", err)
+				logger.ErrorContext(ctx, "error removing job from queue", "err", err)
 				return err
 			}
 			if success == 1 {
-				logger.InfoContext(pluginCtx, "job removed from queue", "jobID", jobID, "queue", queue)
+				logger.InfoContext(ctx, "job removed from queue", "jobID", jobID, "queue", queue)
 			} else {
 				return fmt.Errorf("job not removed from queue")
 			}
