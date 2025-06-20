@@ -150,7 +150,7 @@ func watchForJobCompletion(
 			if queuedJob.WorkflowJob.Status != nil && *queuedJob.WorkflowJob.Status == "completed" {
 				logger.InfoContext(pluginCtx, "job completed",
 					"job_id", queuedJob.WorkflowJob.ID,
-					"conclusion", *queuedJob.WorkflowJob.Conclusion,
+					"conclusion", queuedJob.WorkflowJob.Conclusion,
 				)
 				metricsData, err := metrics.GetMetricsDataFromContext(workerCtx)
 				if err != nil {
