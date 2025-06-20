@@ -67,7 +67,7 @@ func DeleteFromQueue(ctx context.Context, logger *slog.Logger, jobID int64, queu
 	innerContext := context.Background() // avoids context cancellation preventing cleanup
 	databaseContainer, err := database.GetDatabaseFromContext(ctx)
 	if err != nil {
-		logging.Panic(ctx, "error getting database client from context: "+err.Error())
+		return fmt.Errorf("error getting database client from context: %s", err.Error())
 	}
 	queued, err := databaseContainer.Client.LRange(innerContext, queue, 0, -1).Result()
 	if err != nil {
