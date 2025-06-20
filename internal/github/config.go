@@ -13,11 +13,11 @@ import (
 type PluginGlobals struct {
 	FirstCheckForCompletedJobsRan bool
 	CheckForCompletedJobsMutex    *sync.Mutex
-	RetryChannel                  chan bool
+	RetryChannel                  chan string
 	CleanupMutex                  *sync.Mutex
 	JobChannel                    chan QueueJob
 	PausedCancellationJobChannel  chan QueueJob
-	ReturnToMainQueue             chan bool
+	ReturnToMainQueue             chan string
 }
 
 func GetPluginGlobalsFromContext(ctx context.Context) (*PluginGlobals, error) {
