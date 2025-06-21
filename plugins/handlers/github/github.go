@@ -393,6 +393,7 @@ func checkForCompletedJobs(
 		case retryReason := <-pluginGlobals.RetryChannel:
 			logger.WarnContext(pluginCtx, "retrying job because of "+retryReason)
 			pluginGlobals.ReturnToMainQueue <- retryReason
+			pluginGlobals.JobChannel <- internalGithub.QueueJob{Action: "finish"}
 		case job := <-pluginGlobals.JobChannel:
 			if job.Action == "finish" {
 				fmt.Println(pluginConfig.Name, " checkForCompletedJobs -> finished", randomInt)
@@ -535,6 +536,10 @@ func checkForCompletedJobs(
 				if err != nil {
 					logger.ErrorContext(pluginCtx, "error inserting completed job into list", "err", err)
 					return
+				}
+				select { // handle when pluginGlobals.RetryChannel sends something to pluginGlobals.JobChannel already so we don't orphan anything
+				case <-pluginGlobals.JobChannel:
+				default:
 				}
 				pluginGlobals.JobChannel <- queuedJob
 				updateDB = true
