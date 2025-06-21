@@ -1113,6 +1113,7 @@ func Run(
 		// Check if there are any paused jobs we can pick up
 		// paused jobs take priority since they were higher in the queue and something picked them up already
 		var pausedQueuedJobString string
+		var pausedQueueTargetIndex int64 = 0
 		for {
 			fmt.Println(pluginConfig.Name, "checking for paused jobs")
 			// Check the length of the paused queue
@@ -1124,11 +1125,7 @@ func Run(
 				fmt.Println(pluginConfig.Name, "no paused jobs found (length 0)")
 				break
 			}
-			// handle when there is only one job in the paused queue and our index is 1, avoiding missing the paused job
-			if pausedQueueLength == 1 {
-				workerGlobals.ResetQueueTargetIndex()
-			}
-			pausedQueuedJobString, err = internalGithub.PopJobOffQueue(pluginCtx, pausedQueueName, *workerGlobals.QueueTargetIndex)
+			pausedQueuedJobString, err = internalGithub.PopJobOffQueue(pluginCtx, pausedQueueName, pausedQueueTargetIndex)
 			defer func() {
 				fmt.Println(pluginConfig.Name, "end of paused jobs loop iteration")
 				if pausedQueuedJobString != "" {
@@ -1158,7 +1155,7 @@ func Run(
 			fmt.Println(pluginConfig.Name, "pluginConfig.Name", pluginConfig.Name)
 			if slices.Contains(workerGlobals.PluginList, pluginConfig.Name) {
 				logger.InfoContext(pluginCtx, "job is already paused on this host by another plugin, skipping")
-				workerGlobals.IncrementQueueTargetIndex()
+				pausedQueueTargetIndex++
 				if pausedQueueLength == 1 { // don't go into a forever loop
 					break
 				}
@@ -1167,7 +1164,7 @@ func Run(
 			err = internalAnka.VmHasEnoughHostResources(pluginCtx, pausedQueuedJob.AnkaVM)
 			if err != nil {
 				fmt.Println(pluginConfig.Name, "paused job does not have enough host resources to run")
-				workerGlobals.IncrementQueueTargetIndex()
+				pausedQueueTargetIndex++
 				if pausedQueueLength == 1 { // don't go into a forever loop
 					break
 				}
@@ -1176,7 +1173,7 @@ func Run(
 			err = internalAnka.VmHasEnoughResources(pluginCtx, pausedQueuedJob.AnkaVM)
 			if err != nil {
 				fmt.Println(pluginConfig.Name, "paused job does not have enough resources yet on the host")
-				workerGlobals.IncrementQueueTargetIndex()
+				pausedQueueTargetIndex++
 				if pausedQueueLength == 1 { // don't go into a forever loop
 					break
 				}
