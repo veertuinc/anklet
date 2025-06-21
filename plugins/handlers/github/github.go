@@ -1155,6 +1155,8 @@ func Run(
 				return pluginCtx, fmt.Errorf("error unmarshalling job: %s", err.Error())
 			}
 			// check if the job is aleady paused on this same host (matches any plugin names)
+			fmt.Println(pluginConfig.Name, "workerGlobals.PluginList", workerGlobals.PluginList)
+			fmt.Println(pluginConfig.Name, "pluginConfig.Name", pluginConfig.Name)
 			if slices.Contains(workerGlobals.PluginList, pluginConfig.Name) {
 				logger.InfoContext(pluginCtx, "job is already paused on this host by another plugin, skipping")
 				workerGlobals.IncrementQueueTargetIndex()
@@ -1487,7 +1489,8 @@ func Run(
 				time.Sleep(5 * time.Second)
 				logger.WarnContext(pluginCtx, "waiting for enough resources to be available...")
 				// check if the job was picked up by another host
-				existingJobJSON, err := internalGithub.GetJobFromQueue(pluginCtx, *queuedJob.WorkflowJob.ID, pausedQueueName)
+				// the other host would have pulled the job from the current host's plugin queue, so we check that
+				existingJobJSON, err := internalGithub.GetJobFromQueue(pluginCtx, *queuedJob.WorkflowJob.ID, pluginQueueName)
 				if err != nil {
 					pluginGlobals.RetryChannel <- "error_checking_if_queue_has_job"
 					return pluginCtx, fmt.Errorf("error checking if queue has job: %s", err.Error())
