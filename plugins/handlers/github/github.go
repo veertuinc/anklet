@@ -1288,6 +1288,7 @@ func Run(
 	pluginCtx = logging.AppendCtx(pluginCtx, slog.Int64("workflowJobRunID", *queuedJob.WorkflowJob.RunID))
 	pluginCtx = logging.AppendCtx(pluginCtx, slog.String("workflowName", *queuedJob.WorkflowJob.WorkflowName))
 	pluginCtx = logging.AppendCtx(pluginCtx, slog.String("workflowJobURL", *queuedJob.WorkflowJob.HTMLURL))
+	pluginCtx = logging.AppendCtx(pluginCtx, slog.Int("attempts", queuedJob.Attempts))
 
 	// now that the job is in the plugin's queue,check if the job is already completed so we don't orphan if there is
 	// a job in anklet/jobs/github/queued and also a anklet/jobs/github/completed
@@ -1311,9 +1312,9 @@ func Run(
 	}
 	// if the job has attempts > 0, we need to check the status from the API to see if the job is still even running
 	if queuedJob.Attempts > 0 {
-		//TODO: if attempts is > 2, cancel it
-		if queuedJob.Attempts > 2 {
-			logger.WarnContext(pluginCtx, "job has attempts > 2, cancelling it")
+		//TODO: if attempts is > 5, cancel it
+		if queuedJob.Attempts > 5 {
+			logger.WarnContext(pluginCtx, "job has attempts > 5, cancelling it")
 			queuedJob.Action = "cancel"
 			queuedJob.WorkflowJob.Status = github.String("completed")
 			internalGithub.UpdateJobInDB(pluginCtx, pluginQueueName, &queuedJob)
