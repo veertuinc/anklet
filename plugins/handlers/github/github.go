@@ -1490,6 +1490,11 @@ func Run(
 				if existingJobJSON == "" { // some other host has taken the job from this host
 					logger.WarnContext(pluginCtx, "job was picked up by another host")
 					pluginGlobals.PausedCancellationJobChannel <- queuedJob
+					// remove from paused queue so other hosts won't try to pick it up anymore.
+					err = internalGithub.DeleteFromQueue(pluginCtx, logger, *queuedJob.WorkflowJob.ID, pausedQueueName)
+					if err != nil {
+						logger.ErrorContext(pluginCtx, "error deleting from in_progress queue", "err", err)
+					}
 					return pluginCtx, nil
 				}
 				// If there is still a queued job, check if the host has enough resources to run it
