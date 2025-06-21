@@ -1145,7 +1145,6 @@ func Run(
 			}
 			if pausedQueuedJobString == "" {
 				fmt.Println(pluginConfig.Name, "no paused jobs found (empty string)")
-				workerGlobals.ResetQueueTargetIndex()
 				break
 			}
 			// Process each paused job and find one we can run
@@ -1224,7 +1223,6 @@ func Run(
 			if err != nil {
 				metricsData.IncrementTotalFailedRunsSinceStart(workerCtx, pluginCtx, logger)
 				fmt.Printf("resetting queue target index 1\n")
-				workerGlobals.ResetQueueTargetIndex()
 				return pluginCtx, fmt.Errorf("error getting queued jobs: %s", err.Error())
 			}
 			if queuedJobString == "" { // no queued jobs
