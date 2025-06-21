@@ -298,6 +298,7 @@ func (g *Globals) DecrementQueueTargetIndex() {
 }
 
 func (g *Globals) ResetQueueTargetIndex() {
+	fmt.Println("ResetQueueTargetIndex")
 	g.QueueTargetIndex = 0
 }
 
