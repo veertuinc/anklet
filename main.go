@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -20,6 +21,7 @@ import (
 	"github.com/veertuinc/anklet/internal/anka"
 	"github.com/veertuinc/anklet/internal/config"
 	"github.com/veertuinc/anklet/internal/database"
+	"github.com/veertuinc/anklet/internal/host"
 	"github.com/veertuinc/anklet/internal/logging"
 	"github.com/veertuinc/anklet/internal/metrics"
 	"github.com/veertuinc/anklet/internal/run"
@@ -101,7 +103,7 @@ func main() {
 	}
 	parentLogger.InfoContext(parentCtx, "loaded config", slog.Any("config", loadedConfig))
 
-	parentCtx = logging.AppendCtx(parentCtx, slog.String("ankletVersion", version))
+	parentCtx = logging.AppendCtx(parentCtx, slog.String("version", version))
 
 	var suffix string
 	if loadedConfig.Metrics.Aggregator {
@@ -181,11 +183,39 @@ func main() {
 
 	parentLogger.InfoContext(parentCtx, "plugins path", slog.String("pluginsPath", pluginsPath))
 
-	parentCtx = context.WithValue(parentCtx, config.ContextKey("globals"), config.Globals{
-		RunOnce:      runOnce,
-		PullLock:     &sync.Mutex{},
-		PluginsPath:  pluginsPath,
-		DebugEnabled: logging.IsDebugEnabled(),
+	hostCPUCount, err := host.GetHostCPUCount(parentCtx)
+	if err != nil {
+		parentLogger.ErrorContext(parentCtx, "error getting host cpu count", "error", err)
+		os.Exit(1)
+	}
+	parentCtx = logging.AppendCtx(parentCtx, slog.Int("hostCPUCount", hostCPUCount))
+	hostMemoryBytes, err := host.GetHostMemoryBytes(parentCtx)
+	if err != nil {
+		parentLogger.ErrorContext(parentCtx, "error getting host memory bytes", "error", err)
+		os.Exit(1)
+	}
+	parentCtx = logging.AppendCtx(parentCtx, slog.Uint64("hostMemoryBytes", hostMemoryBytes))
+
+	parentCtx = context.WithValue(parentCtx, config.ContextKey("globals"), &config.Globals{
+		RunPluginsOnce:                 runOnce == "true",
+		FirstPluginStarted:             make(chan bool, 1),
+		ReturnAllToMainQueue:           make(chan bool, 1),
+		PullLock:                       &sync.Mutex{},
+		PluginsPath:                    pluginsPath,
+		DebugEnabled:                   logging.IsDebugEnabled(),
+		PluginsPaused:                  atomic.Bool{},
+		APluginIsPreparing:             atomic.Value{},
+		HostCPUCount:                   hostCPUCount,
+		HostMemoryBytes:                hostMemoryBytes,
+		QueueTargetIndex:               new(int64),
+		FinishedInitialRunOfEachPlugin: make([]bool, len(loadedConfig.Plugins)),
+		PluginList: func() []string {
+			pluginNames := make([]string, len(loadedConfig.Plugins))
+			for i, p := range loadedConfig.Plugins {
+				pluginNames[i] = p.Name
+			}
+			return pluginNames
+		}(),
 	})
 
 	httpTransport := http.DefaultTransport
@@ -236,35 +266,34 @@ func worker(
 	loadedConfig config.Config,
 	sigChan chan os.Signal,
 ) {
-	globals, err := config.GetGlobalsFromContext(parentCtx)
+	workerGlobals, err := config.GetWorkerGlobalsFromContext(parentCtx)
 	if err != nil {
 		parentLogger.ErrorContext(parentCtx, "unable to get globals from context", "error", err)
 		os.Exit(1)
 	}
-	toRunOnce := globals.RunOnce
+	toRunOnce := workerGlobals.RunPluginsOnce
 	workerCtx, workerCancel := context.WithCancel(parentCtx)
 	suffix := parentCtx.Value(config.ContextKey("suffix")).(string)
 	parentLogger.InfoContext(workerCtx, "starting anklet"+suffix)
-	returnToMainQueue := make(chan bool, 1)
-	jobFailureChannel := make(chan bool, 1)
-	workerCtx = context.WithValue(workerCtx, config.ContextKey("returnToMainQueue"), returnToMainQueue)
-	workerCtx = context.WithValue(workerCtx, config.ContextKey("jobFailureChannel"), jobFailureChannel)
 	var wg sync.WaitGroup
 	go func() {
 		defer signal.Stop(sigChan)
 		defer close(sigChan)
+		var sigCount int
 		for sig := range sigChan {
 			switch sig {
-			// case syscall.SIGTERM:
-			// 	logger.WarnContext(workerCtx, "best effort graceful shutdown, interrupting the job as soon as possible...")
-			// 	workerCancel()
 			case syscall.SIGQUIT: // doesn't work for receivers since they don't loop
 				parentLogger.WarnContext(workerCtx, "graceful shutdown, waiting for jobs to finish...")
-				toRunOnce = "true"
+				toRunOnce = true
 			default:
+				sigCount++
+				if sigCount >= 2 {
+					parentLogger.WarnContext(workerCtx, "forceful shutdown after second interrupt... be sure to clean up any self-hosted runners and VMs!")
+					os.Exit(1)
+				}
 				parentLogger.WarnContext(workerCtx, "best effort graceful shutdown, interrupting the job as soon as possible...")
 				workerCancel()
-				returnToMainQueue <- true
+				workerGlobals.ReturnAllToMainQueue <- true
 			}
 		}
 	}()
@@ -339,7 +368,7 @@ func worker(
 				parentLogger.WarnContext(pluginCtx, shutDownMessage)
 				return
 			default:
-				if workerCtx.Err() != nil || toRunOnce == "true" {
+				if workerCtx.Err() != nil || toRunOnce {
 					pluginCancel()
 					break
 				}
@@ -351,10 +380,9 @@ func worker(
 			}
 		}
 	} else {
-		// firstPluginStarted: always make sure the first plugin in the config starts first before any others.
+		// workerGlobals.FirstPluginStarted: always make sure the first plugin in the config starts first before any others.
 		// this allows users to mix a receiver with multiple other plugins,
 		// and let the receiver do its thing to prepare the db first.
-		firstPluginStarted := make(chan bool, 1)
 		metricsData := &metrics.MetricsDataLock{}
 		workerCtx = context.WithValue(workerCtx, config.ContextKey("metrics"), metricsData)
 		parentLogger.InfoContext(workerCtx, "metrics server started on port "+metricsPort)
@@ -368,7 +396,7 @@ func worker(
 			waitLoop:
 				for {
 					select {
-					case <-firstPluginStarted:
+					case <-workerGlobals.FirstPluginStarted:
 						break waitLoop
 					case <-workerCtx.Done():
 						return
@@ -380,6 +408,14 @@ func worker(
 			go func(plugin config.Plugin) {
 				defer wg.Done()
 				pluginCtx, pluginCancel := context.WithCancel(workerCtx) // Inherit from parent context
+
+				workerGlobals, err := config.GetWorkerGlobalsFromContext(workerCtx)
+				if err != nil {
+					parentLogger.ErrorContext(pluginCtx, "unable to get globals from context", "error", err)
+					pluginCancel()
+					workerCancel()
+					return
+				}
 
 				if plugin.Name == "" {
 					parentLogger.ErrorContext(pluginCtx, "name is required for plugins")
@@ -484,12 +520,32 @@ func worker(
 						pluginCancel()
 						return
 					default:
+
+						if workerGlobals.IsAPluginPreparingState() != "" {
+							logging.DevContext(pluginCtx, "pausing due to global plugin preparing state")
+							// When paused, sleep briefly and continue checking
+							metricsData.SetStatus(pluginCtx, pluginLogger, "paused")
+							time.Sleep(time.Second + 1)
+							continue
+						}
+
+						if workerGlobals.ArePluginsPaused() {
+							logging.DevContext(pluginCtx, "pausing due to global pause state")
+							// When paused, sleep briefly and continue checking
+							metricsData.SetStatus(pluginCtx, pluginLogger, "paused")
+							time.Sleep(time.Second + 1)
+							continue
+						}
+
+						pluginRunCount := workerGlobals.IncrementPluginRunCount()
+						pluginCtx = logging.AppendCtx(pluginCtx, slog.String("pluginRunCount", strconv.Itoa(int(pluginRunCount))))
+						pluginCtx = logging.AppendCtx(pluginCtx, slog.Int64("QueueTargetIndex", *workerGlobals.QueueTargetIndex))
+
 						updatedPluginCtx, err := run.Plugin(
 							workerCtx,
 							pluginCtx,
 							pluginCancel,
 							pluginLogger,
-							firstPluginStarted,
 							metricsData,
 						)
 						if err != nil {
@@ -508,7 +564,7 @@ func worker(
 							}
 							return
 						}
-						if workerCtx.Err() != nil || toRunOnce == "true" {
+						if workerCtx.Err() != nil || toRunOnce {
 							pluginLogger.WarnContext(updatedPluginCtx, shutDownMessage)
 							pluginCancel()
 							return
