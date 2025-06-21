@@ -393,7 +393,6 @@ func checkForCompletedJobs(
 		case retryReason := <-pluginGlobals.RetryChannel:
 			logger.WarnContext(pluginCtx, "retrying job because of "+retryReason)
 			pluginGlobals.ReturnToMainQueue <- retryReason
-			pluginGlobals.JobChannel <- internalGithub.QueueJob{Action: "finish"}
 		case job := <-pluginGlobals.JobChannel:
 			if job.Action == "finish" {
 				fmt.Println(pluginConfig.Name, " checkForCompletedJobs -> finished", randomInt)
@@ -531,6 +530,7 @@ func checkForCompletedJobs(
 				// 	return
 				// }
 				// add a task for the completed job so we know the clean up
+				fmt.Println(pluginConfig.Name, " checkForCompletedJobs -> adding completed job to pluginCompletedQueue", randomInt)
 				_, err = databaseContainer.Client.LPush(checkForCompletedJobsContext, pluginCompletedQueueName, mainCompletedQueueJobJSON).Result()
 				if err != nil {
 					logger.ErrorContext(pluginCtx, "error inserting completed job into list", "err", err)
@@ -599,7 +599,6 @@ func cleanup(
 	mainInProgressQueueName string,
 	pluginCompletedQueueName string,
 	pausedQueueName string,
-	queuedJobFromPausedQueue *bool,
 	onStartRun bool,
 ) {
 	fmt.Println(pluginQueueName, "cleanup | plugin cleanup started")
@@ -644,13 +643,6 @@ func cleanup(
 	// create an idependent copy of the pluginCtx so we can do cleanup even if pluginCtx got "context canceled"
 	cleanupContext := context.Background()
 
-	select {
-	case <-pluginGlobals.PausedCancellationJobChannel: // no cleanup necessary, it was picked up by another host
-		logger.DebugContext(pluginCtx, "cleanup pausedCancellationJobChannel")
-		return
-	default:
-	}
-
 	serviceDatabase, err := database.GetDatabaseFromContext(pluginCtx)
 	if err != nil {
 		logger.ErrorContext(pluginCtx, "error getting database from context", "err", err)
@@ -680,6 +672,18 @@ func cleanup(
 	if err != nil || typeErr != nil {
 		logger.ErrorContext(pluginCtx, "error unmarshalling job", "err", err, "typeErr", typeErr, "originalJobJSON", originalJobJSON)
 		return
+	}
+
+	select {
+	case <-pluginGlobals.PausedCancellationJobChannel: // no cleanup necessary, it was picked up by another host
+		logger.DebugContext(pluginCtx, "cleanup pausedCancellationJobChannel")
+		// remove from paused queue so other hosts won't try to pick it up anymore.
+		err = internalGithub.DeleteFromQueue(pluginCtx, logger, *originalQueuedJob.WorkflowJob.ID, pausedQueueName)
+		if err != nil {
+			logger.ErrorContext(pluginCtx, "error deleting from in_progress queue", "err", err)
+		}
+		return
+	default:
 	}
 
 	// if the job is running, we don't need to clean it up yet
@@ -933,8 +937,6 @@ func Run(
 	}
 	pluginCtx = logging.AppendCtx(pluginCtx, slog.String("owner", pluginConfig.Owner))
 
-	queuedJobFromPausedQueue := false
-
 	// wait group so we can wait for the goroutine to finish before exiting the service
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -963,7 +965,6 @@ func Run(
 			mainInProgressQueueName,
 			pluginCompletedQueueName,
 			pausedQueueName,
-			&queuedJobFromPausedQueue,
 			false,
 		)
 		fmt.Println(pluginConfig.Name, "cleanup done")
@@ -1026,7 +1027,6 @@ func Run(
 		mainInProgressQueueName,
 		pluginCompletedQueueName,
 		pausedQueueName,
-		&queuedJobFromPausedQueue,
 		true,
 	)
 	select {
@@ -1490,11 +1490,6 @@ func Run(
 				if existingJobJSON == "" { // some other host has taken the job from this host
 					logger.WarnContext(pluginCtx, "job was picked up by another host")
 					pluginGlobals.PausedCancellationJobChannel <- queuedJob
-					// remove from paused queue so other hosts won't try to pick it up anymore.
-					err = internalGithub.DeleteFromQueue(pluginCtx, logger, *queuedJob.WorkflowJob.ID, pausedQueueName)
-					if err != nil {
-						logger.ErrorContext(pluginCtx, "error deleting from in_progress queue", "err", err)
-					}
 					return pluginCtx, nil
 				}
 				// If there is still a queued job, check if the host has enough resources to run it
