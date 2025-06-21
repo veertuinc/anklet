@@ -207,7 +207,7 @@ func main() {
 		APluginIsPreparing:             atomic.Value{},
 		HostCPUCount:                   hostCPUCount,
 		HostMemoryBytes:                hostMemoryBytes,
-		QueueTargetIndex:               0,
+		QueueTargetIndex:               new(int64),
 		FinishedInitialRunOfEachPlugin: make([]bool, len(loadedConfig.Plugins)),
 		PluginList: func() []string {
 			pluginNames := make([]string, len(loadedConfig.Plugins))
@@ -539,7 +539,7 @@ func worker(
 
 						pluginRunCount := workerGlobals.IncrementPluginRunCount()
 						pluginCtx = logging.AppendCtx(pluginCtx, slog.String("pluginRunCount", strconv.Itoa(int(pluginRunCount))))
-						pluginCtx = logging.AppendCtx(pluginCtx, slog.Int64("QueueTargetIndex", workerGlobals.QueueTargetIndex))
+						pluginCtx = logging.AppendCtx(pluginCtx, slog.Int64("QueueTargetIndex", *workerGlobals.QueueTargetIndex))
 
 						updatedPluginCtx, err := run.Plugin(
 							workerCtx,

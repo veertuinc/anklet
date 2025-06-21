@@ -217,7 +217,7 @@ type Globals struct {
 	APluginIsPreparing atomic.Value
 	HostCPUCount       int
 	HostMemoryBytes    uint64
-	QueueTargetIndex   int64
+	QueueTargetIndex   *int64
 	// We want each plugin to run at least once so that any VMs/jobs that were orphaned
 	// on this host get a chance to be cleaned or continue where they left off
 	FinishedInitialRunOfEachPlugin []bool
@@ -288,18 +288,18 @@ func (g *Globals) IsAPluginPreparingState() string {
 }
 
 func (g *Globals) IncrementQueueTargetIndex() {
-	g.QueueTargetIndex++
+	*g.QueueTargetIndex++
 }
 
 func (g *Globals) DecrementQueueTargetIndex() {
-	if g.QueueTargetIndex > 0 {
-		g.QueueTargetIndex--
+	if *g.QueueTargetIndex > 0 {
+		*g.QueueTargetIndex--
 	}
 }
 
 func (g *Globals) ResetQueueTargetIndex() {
 	fmt.Println("ResetQueueTargetIndex")
-	g.QueueTargetIndex = 0
+	*g.QueueTargetIndex = 0
 }
 
 func GetLoadedConfigFromContext(ctx context.Context) (*Config, error) {

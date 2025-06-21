@@ -1128,7 +1128,7 @@ func Run(
 			if pausedQueueLength == 1 {
 				workerGlobals.ResetQueueTargetIndex()
 			}
-			pausedQueuedJobString, err = internalGithub.PopJobOffQueue(pluginCtx, pausedQueueName, workerGlobals.QueueTargetIndex)
+			pausedQueuedJobString, err = internalGithub.PopJobOffQueue(pluginCtx, pausedQueueName, *workerGlobals.QueueTargetIndex)
 			defer func() {
 				fmt.Println(pluginConfig.Name, "end of paused jobs loop iteration")
 				if pausedQueuedJobString != "" {
@@ -1220,7 +1220,7 @@ func Run(
 
 		// If not paused job to get, get a job from the main queue
 		if queuedJobString == "" {
-			queuedJobString, err = internalGithub.PopJobOffQueue(pluginCtx, mainQueueName, workerGlobals.QueueTargetIndex)
+			queuedJobString, err = internalGithub.PopJobOffQueue(pluginCtx, mainQueueName, *workerGlobals.QueueTargetIndex)
 			if err != nil {
 				metricsData.IncrementTotalFailedRunsSinceStart(workerCtx, pluginCtx, logger)
 				fmt.Printf("resetting queue target index 1\n")
