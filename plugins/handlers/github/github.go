@@ -1216,6 +1216,14 @@ func Run(
 
 		// If not paused job to get, get a job from the main queue
 		if queuedJobString == "" {
+			// check if the queue length is less than the index and then reset the index if so
+			mainQueueLength, err := databaseContainer.Client.LLen(pluginCtx, mainQueueName).Result()
+			if err != nil {
+				return pluginCtx, fmt.Errorf("error getting main queue length: %s", err.Error())
+			}
+			if *workerGlobals.QueueTargetIndex > mainQueueLength {
+				workerGlobals.ResetQueueTargetIndex()
+			}
 			queuedJobString, err = internalGithub.PopJobOffQueue(pluginCtx, mainQueueName, *workerGlobals.QueueTargetIndex)
 			if err != nil {
 				metricsData.IncrementTotalFailedRunsSinceStart(workerCtx, pluginCtx, logger)
