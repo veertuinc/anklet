@@ -1134,7 +1134,7 @@ func Run(
 					if err != nil {
 						logger.ErrorContext(pluginCtx, "error pushing job to plugin queue", "err", err)
 					}
-					fmt.Println(pluginConfig.Name, "pushed job back to plugin queue")
+					fmt.Println(pluginConfig.Name, "pushed job back to plugin queue", pausedQueuedJobString)
 				}
 			}()
 			if err != nil {
@@ -1483,7 +1483,7 @@ func Run(
 					pluginGlobals.RetryChannel <- "error_pushing_job_to_paused_queue"
 					return pluginCtx, nil
 				}
-				fmt.Println(pluginConfig.Name, "pushed job to paused queue", success)
+				fmt.Println(pluginConfig.Name, "pushed job to paused queue", success, *queuedJob.WorkflowJob.ID)
 			}
 			logger.WarnContext(pluginCtx, "cannot run vm yet, waiting for enough resources to be available...")
 			for {
@@ -1498,7 +1498,11 @@ func Run(
 				existingJobJSON, err := internalGithub.GetJobFromQueue(pluginCtx, *queuedJob.WorkflowJob.ID, pluginQueueName)
 				if err != nil {
 					pluginGlobals.RetryChannel <- "error_checking_if_queue_has_job"
-					return pluginCtx, fmt.Errorf("error checking if queue has job: %s", err.Error())
+					err = internalGithub.DeleteFromQueue(pluginCtx, logger, *queuedJob.WorkflowJob.ID, pausedQueueName)
+					if err != nil {
+						logger.ErrorContext(pluginCtx, "error deleting from paused queue", "err", err)
+					}
+					return pluginCtx, nil
 				}
 				if existingJobJSON == "" { // some other host has taken the job from this host
 					logger.WarnContext(pluginCtx, "job was picked up by another host")
@@ -1511,13 +1515,12 @@ func Run(
 					logger.WarnContext(pluginCtx, err.Error())
 					continue
 				}
-				fmt.Println(pluginConfig.Name, "removing job from paused queue 1")
+				fmt.Println(pluginConfig.Name, "removing job from paused queue 1", *queuedJob.WorkflowJob.ID)
 				// remove from paused queue so other hosts won't try to pick it up anymore.
 				err = internalGithub.DeleteFromQueue(pluginCtx, logger, *queuedJob.WorkflowJob.ID, pausedQueueName)
 				if err != nil {
-					logger.ErrorContext(pluginCtx, "error deleting from in_progress queue", "err", err)
+					logger.ErrorContext(pluginCtx, "error deleting from paused queue", "err", err)
 				}
-				logger.InfoContext(pluginCtx, "job removed from paused queue")
 				queuedJob.Action = "in_progress"
 				internalGithub.UpdateJobInDB(pluginCtx, pluginQueueName, &queuedJob)
 				break

@@ -75,6 +75,10 @@ func DeleteFromQueue(ctx context.Context, logger *slog.Logger, jobID int64, queu
 		return err
 	}
 	logger.InfoContext(ctx, "deleting job from queue", "jobID", jobID, "queue", queue, "queued", queued)
+	if len(queued) == 0 {
+		logger.InfoContext(ctx, "no jobs in queue", "queue", queue)
+		return nil
+	}
 	for _, queueItem := range queued {
 		queueJob, err, typeErr := database.Unwrap[QueueJob](queueItem)
 		if err != nil {
