@@ -1328,7 +1328,8 @@ func Run(
 		queuedJob, err = internalGithub.UpdateJobWorkflowJobStatus(workerCtx, pluginCtx, &queuedJob)
 		if err != nil {
 			logger.ErrorContext(pluginCtx, "error updating job workflow job status", "err", err)
-			return pluginCtx, fmt.Errorf("error updating job workflow job status: %s", err.Error())
+			pluginGlobals.RetryChannel <- "error_updating_job_workflow_job_status"
+			return pluginCtx, nil
 		}
 		if queuedJob.WorkflowJob.Status != nil && *queuedJob.WorkflowJob.Status == "completed" {
 			pluginGlobals.JobChannel <- queuedJob

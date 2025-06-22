@@ -112,7 +112,7 @@ func ExecuteGitHubClientFunction[T any](
 	logger *slog.Logger,
 	executeFunc func() (*T, *github.Response, error),
 ) (context.Context, *T, *github.Response, error) {
-	innerPluginCtx, cancel := context.WithCancel(pluginCtx) // Inherit from parent context
+	executeGitHubClientFunctionCtx, cancel := context.WithCancel(pluginCtx) // Inherit from parent context
 	defer cancel()
 	result, response, err := executeFunc()
 	if response != nil {
@@ -124,7 +124,7 @@ func ExecuteGitHubClientFunction[T any](
 		)
 		if response.Rate.Remaining <= 10 { // handle primary rate limiting
 			sleepDuration := time.Until(response.Rate.Reset.Time) + time.Second // Adding a second to ensure we're past the reset time
-			logger.WarnContext(innerPluginCtx, "GitHub API rate limit exceeded, sleeping until reset")
+			logger.WarnContext(executeGitHubClientFunctionCtx, "GitHub API rate limit exceeded, sleeping until reset")
 			metricsData, err := metrics.GetMetricsDataFromContext(pluginCtx)
 			if err != nil {
 				return pluginCtx, nil, nil, err
@@ -145,7 +145,7 @@ func ExecuteGitHubClientFunction[T any](
 					Status:      "running",
 					StatusSince: time.Now(),
 				})
-				return ExecuteGitHubClientFunction(workerCtx, pluginCtx, logger, executeFunc) // Retry the function after waiting
+				return ExecuteGitHubClientFunction(workerCtx, executeGitHubClientFunctionCtx, logger, executeFunc) // Retry the function after waiting
 			case <-pluginCtx.Done():
 				return pluginCtx, nil, nil, pluginCtx.Err()
 			}
