@@ -1153,7 +1153,7 @@ func Run(
 			// check if the job is aleady paused on this same host (matches any plugin names)
 			fmt.Println(pluginConfig.Name, "workerGlobals.PluginList", workerGlobals.PluginList)
 			fmt.Println(pluginConfig.Name, "pluginConfig.Name", pluginConfig.Name)
-			if slices.Contains(workerGlobals.PluginList, pluginConfig.Name) {
+			if slices.Contains(workerGlobals.PluginList, pausedQueuedJob.PausedOn) {
 				logger.InfoContext(pluginCtx, "job is already paused on this host by another plugin, skipping")
 				pausedQueueTargetIndex++
 				if pausedQueueLength == 1 { // don't go into a forever loop
@@ -1318,7 +1318,7 @@ func Run(
 		}
 		return pluginCtx, nil
 	case <-pluginCtx.Done():
-		logger.WarnContext(pluginCtx, "context canceled before completed job found")
+		logger.WarnContext(pluginCtx, "context canceled before vm startup")
 		return pluginCtx, nil
 	default:
 	}
