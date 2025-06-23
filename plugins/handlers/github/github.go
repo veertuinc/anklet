@@ -1219,6 +1219,7 @@ func Run(
 				logger.ErrorContext(pluginCtx, "error pushing job to paused queue", "err", err)
 			}
 			fmt.Println(pluginConfig.Name, "pushed job back to paused queue", pausedQueuedJobString)
+			pausedQueuedJobString = "" // don't let the defer function push it back
 		}
 
 		// If not paused job to get, get a job from the main queue
