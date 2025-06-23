@@ -1151,8 +1151,6 @@ func Run(
 				return pluginCtx, fmt.Errorf("error unmarshalling job: %s", err.Error())
 			}
 			// check if the job is aleady paused on this same host (matches any plugin names)
-			fmt.Println(pluginConfig.Name, "workerGlobals.PluginList", workerGlobals.PluginList)
-			fmt.Println(pluginConfig.Name, "pluginConfig.Name", pluginConfig.Name)
 			if slices.Contains(workerGlobals.PluginList, pausedQueuedJob.PausedOn) {
 				logger.InfoContext(pluginCtx, "job is already paused on this host by another plugin, skipping")
 				pausedQueueTargetIndex++
