@@ -444,6 +444,7 @@ func checkForCompletedJobs(
 				if *queuedJob.WorkflowJob.Status != *mainInProgressQueueJob.WorkflowJob.Status { // prevent running the dbUpdate more than once if not needed
 					updateDB = true
 				}
+				queuedJob.Action = "in_progress"
 				queuedJob.WorkflowJob.Status = github.String("in_progress")
 			}
 
@@ -549,31 +550,37 @@ func checkForCompletedJobs(
 			if !pluginGlobals.FirstCheckForCompletedJobsRan &&
 				mainCompletedQueueJobJSON == "" && pluginCompletedQueueJobJSON == "" &&
 				mainInProgressQueueJobJSON != "" {
-				fmt.Println(pluginConfig.Name, " checkForCompletedJobs -> job is in mainInProgressQueue, checking status from API", randomInt)
-
-				queuedJob, err = internalGithub.UpdateJobWorkflowJobStatus(workerCtx, pluginCtx, &queuedJob)
-				if err != nil {
-					logger.ErrorContext(pluginCtx, "error checking workflow job status", "err", err)
-					return
-				}
-				internalGithub.UpdateJobInDB(pluginCtx, pluginQueueName, &queuedJob)
-
-				if queuedJob.WorkflowJob.Status != nil &&
-					(*queuedJob.WorkflowJob.Status == "completed" ||
-						*queuedJob.WorkflowJob.Status == "failed" ||
-						*queuedJob.WorkflowJob.Status == "cancelled") {
-					// add a task for the completed job so we know the clean up
-					queuedJobJSON, err := json.Marshal(queuedJob)
-					if err != nil {
-						logger.ErrorContext(pluginCtx, "error marshalling queued job", "err", err)
-						return
-					}
-					_, err = databaseContainer.Client.LPush(pluginCtx, pluginCompletedQueueName, queuedJobJSON).Result()
-					if err != nil {
-						logger.ErrorContext(pluginCtx, "error inserting completed job into list", "err", err)
-						return
-					}
-				}
+				// We don't do this because it will chew up the API rate limit
+				// Instead, we just fail it. The things that get stuck in this status are bugs on github's side anyway
+				// fmt.Println(pluginConfig.Name, " checkForCompletedJobs -> job is in mainInProgressQueue, checking status from API", randomInt)
+				// queuedJob, err = internalGithub.UpdateJobWorkflowJobStatus(workerCtx, pluginCtx, &queuedJob)
+				// if err != nil {
+				// 	logger.ErrorContext(pluginCtx, "error checking workflow job status", "err", err)
+				// 	return
+				// }
+				// if queuedJob.WorkflowJob.Status != nil &&
+				// 	(*queuedJob.WorkflowJob.Status == "completed" ||
+				// 		*queuedJob.WorkflowJob.Status == "failed" ||
+				// 		*queuedJob.WorkflowJob.Status == "cancelled") {
+				// 	// add a task for the completed job so we clean it up
+				// 	queuedJobJSON, err := json.Marshal(queuedJob)
+				// 	if err != nil {
+				// 		logger.ErrorContext(pluginCtx, "error marshalling queued job", "err", err)
+				// 		return
+				// 	}
+				// 	_, err = databaseContainer.Client.LPush(pluginCtx, pluginCompletedQueueName, queuedJobJSON).Result()
+				// 	if err != nil {
+				// 		logger.ErrorContext(pluginCtx, "error inserting completed job into list", "err", err)
+				// 		return
+				// 	}
+				// }
+				// if queuedJob.WorkflowJob.Status != nil && *queuedJob.WorkflowJob.Status == "in_progress" {
+				// 	queuedJob.Action = "in_progress"
+				// 	internalGithub.UpdateJobInDB(pluginCtx, pluginQueueName, &queuedJob)
+				// }
+				queuedJob.Action = "finish"
+				queuedJob.WorkflowJob.Status = github.String("completed")
+				queuedJob.WorkflowJob.Conclusion = github.String("failure")
 				pluginGlobals.JobChannel <- queuedJob
 				updateDB = true
 			}
