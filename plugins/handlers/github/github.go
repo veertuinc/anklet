@@ -1127,14 +1127,14 @@ func Run(
 			}
 			pausedQueuedJobString, err = internalGithub.PopJobOffQueue(pluginCtx, pausedQueueName, pausedQueueTargetIndex)
 			defer func() {
+				// there is a chance a failure could cause the paused job to be permanently removed, so make sure it gets put back no matter what
 				fmt.Println(pluginConfig.Name, "end of paused jobs loop iteration")
 				if pausedQueuedJobString != "" {
-					// logger.InfoContext(pluginCtx, "pushing job back to plugin queue", "pausedQueuedJobString", pausedQueuedJobString)
 					err := databaseContainer.Client.LPush(pluginCtx, pausedQueueName, pausedQueuedJobString).Err()
 					if err != nil {
-						logger.ErrorContext(pluginCtx, "error pushing job to plugin queue", "err", err)
+						logger.ErrorContext(pluginCtx, "error pushing job to paused queue", "err", err)
 					}
-					fmt.Println(pluginConfig.Name, "pushed job back to plugin queue", pausedQueuedJobString)
+					fmt.Println(pluginConfig.Name, "pushed job back to paused queue", pausedQueuedJobString)
 				}
 			}()
 			if err != nil {
@@ -1212,6 +1212,15 @@ func Run(
 			queuedJobString = originalHostJob
 			pausedQueuedJobString = "" // don't push back to the paused queue
 			break
+		}
+
+		// don't hold on to paused jobs
+		if pausedQueuedJobString != "" {
+			err := databaseContainer.Client.LPush(pluginCtx, pausedQueueName, pausedQueuedJobString).Err()
+			if err != nil {
+				logger.ErrorContext(pluginCtx, "error pushing job to paused queue", "err", err)
+			}
+			fmt.Println(pluginConfig.Name, "pushed job back to paused queue", pausedQueuedJobString)
 		}
 
 		// If not paused job to get, get a job from the main queue
