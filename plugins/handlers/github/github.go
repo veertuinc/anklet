@@ -145,7 +145,6 @@ func watchForJobCompletion(
 				logger.ErrorContext(pluginCtx, "error unmarshalling job", "err", err, "typeErr", typeErr, "queuedJobJSON", queuedJobJSON)
 				return pluginCtx, err
 			}
-			logger.DebugContext(pluginCtx, "queuedJob", "queuedJob", queuedJob)
 			if queuedJob.WorkflowJob.Status != nil && *queuedJob.WorkflowJob.Status == "completed" {
 				logger.InfoContext(pluginCtx, "job completed",
 					"job_id", queuedJob.WorkflowJob.ID,
@@ -337,6 +336,7 @@ func checkForCompletedJobs(
 		logger.ErrorContext(pluginCtx, "error getting logger from context", "err", err)
 		os.Exit(1)
 	}
+	pluginCtx = logging.AppendCtx(pluginCtx, slog.String("id", strconv.Itoa(randomInt)))
 	workerGlobals, err := config.GetWorkerGlobalsFromContext(pluginCtx)
 	if err != nil {
 		logger.ErrorContext(pluginCtx, "error getting globals from context", "err", err)
@@ -376,7 +376,6 @@ func checkForCompletedJobs(
 		// BE VERY CAREFUL when you use return here. You could orphan the job if you're not careful.
 		pluginGlobals.CheckForCompletedJobsMutex.Lock()
 		pluginGlobals.IncrementCheckForCompletedJobsRunCount()
-		fmt.Println(pluginConfig.Name, " checkForCompletedJobs start loop", randomInt)
 		// logger.DebugContext(pluginCtx, "checkForCompletedJobsMu locked")
 		// do not use 'continue' in the loop or else the ranOnce won't happen
 		// logging.DevContext(pluginCtx, "checkForCompletedJobs "+pluginConfig.Name+" | runOnce "+fmt.Sprint(runOnce))
@@ -385,7 +384,7 @@ func checkForCompletedJobs(
 			logger.WarnContext(pluginCtx, "main worker is returning all jobs to main queue")
 			pluginGlobals.ReturnToMainQueue <- "return_all_to_main_queue"
 		case <-pluginGlobals.PausedCancellationJobChannel:
-			fmt.Println(pluginConfig.Name, " checkForCompletedJobs -> pausedCancellationJobChannel", randomInt)
+			// logger.DebugContext(pluginCtx, " checkForCompletedJobs -> pausedCancellationJobChannel")
 			pluginGlobals.PausedCancellationJobChannel <- internalGithub.QueueJob{Action: "finish"} // send second one so cleanup doesn't run
 			return
 		case retryReason := <-pluginGlobals.RetryChannel:
@@ -394,7 +393,7 @@ func checkForCompletedJobs(
 			pluginGlobals.JobChannel <- internalGithub.QueueJob{Action: "finish"}
 		case job := <-pluginGlobals.JobChannel:
 			if job.Action == "finish" {
-				fmt.Println(pluginConfig.Name, " checkForCompletedJobs -> finished", randomInt)
+				// logger.DebugContext(pluginCtx, " checkForCompletedJobs -> finished")
 				return
 			}
 			if job.Action == "cancel" {
@@ -412,9 +411,9 @@ func checkForCompletedJobs(
 		// get the job ID
 		existingJobString, err := databaseContainer.Client.LIndex(pluginCtx, pluginQueueName, 0).Result()
 		if err == redis.Nil || existingJobString == "" {
-			fmt.Println(pluginConfig.Name, " checkForCompletedJobs -> no job found in pluginQueue", randomInt)
+			logger.DebugContext(pluginCtx, " checkForCompletedJobs -> no job found in pluginQueue")
 		} else {
-			fmt.Println(pluginConfig.Name, " checkForCompletedJobs -> job found in pluginQueue", randomInt)
+			logger.DebugContext(pluginCtx, " checkForCompletedJobs -> job found in pluginQueue", randomInt)
 			queuedJob, err, typeErr := database.Unwrap[internalGithub.QueueJob](existingJobString)
 			if err != nil || typeErr != nil {
 				logger.ErrorContext(pluginCtx,
@@ -434,7 +433,13 @@ func checkForCompletedJobs(
 			}
 			if mainInProgressQueueJobJSON != "" {
 				if pluginGlobals.CheckForCompletedJobsRunCount%5 == 0 {
-					logger.InfoContext(pluginCtx, "job is still in progress", "job_id", *queuedJob.WorkflowJob.ID)
+					logger.InfoContext(
+						pluginCtx,
+						"job is still in progress",
+						"job_id", *queuedJob.WorkflowJob.ID,
+						"run_count", pluginGlobals.CheckForCompletedJobsRunCount,
+						"html_url", *queuedJob.WorkflowJob.HTMLURL,
+					)
 				}
 				// fmt.Println(pluginConfig.Name, " checkForCompletedJobs -> job is in mainInProgressQueue", randomInt)
 				mainInProgressQueueJob, err, typeErr := database.Unwrap[internalGithub.QueueJob](mainInProgressQueueJobJSON)
@@ -457,10 +462,8 @@ func checkForCompletedJobs(
 				logger.ErrorContext(pluginCtx, "error searching in queue", "error", err)
 				return
 			}
-			if pluginCompletedQueueJobJSON != "" {
-				fmt.Println(pluginConfig.Name, " checkForCompletedJobs -> job is in pluginCompletedQueue", randomInt)
-			} else {
-				fmt.Println(pluginConfig.Name, " checkForCompletedJobs -> job is not in pluginCompletedQueue", randomInt)
+			if pluginCompletedQueueJobJSON == "" {
+				// logger.DebugContext(pluginCtx, " checkForCompletedJobs -> job is not in pluginCompletedQueue")
 				// check if there is already a completed job queued in the mainCompletedQueue
 				mainCompletedQueueJobJSON, err = internalGithub.GetJobFromQueue(pluginCtx, *queuedJob.WorkflowJob.ID, mainCompletedQueueName)
 				if err != nil {
@@ -468,12 +471,12 @@ func checkForCompletedJobs(
 					return
 				}
 				if mainCompletedQueueJobJSON != "" {
-					fmt.Println(pluginConfig.Name, " checkForCompletedJobs -> job is in mainCompletedQueue", randomInt)
+					logger.DebugContext(pluginCtx, "checkForCompletedJobs -> job is in mainCompletedQueue")
 				}
 			}
 
 			if pluginCompletedQueueJobJSON != "" {
-				fmt.Println(pluginConfig.Name, " checkForCompletedJobs -> job is in pluginCompletedQueue, handling", randomInt)
+				logger.DebugContext(pluginCtx, "checkForCompletedJobs -> job is in pluginCompletedQueue")
 				queuedJob.WorkflowJob.Status = github.String("completed")
 				queuedJob.Action = "finish"
 				select {
@@ -491,7 +494,7 @@ func checkForCompletedJobs(
 			}
 
 			if mainCompletedQueueJobJSON != "" {
-				fmt.Println(pluginConfig.Name, " checkForCompletedJobs -> job is in mainCompletedQueue, handling", randomInt)
+				logger.DebugContext(pluginCtx, "checkForCompletedJobs -> job is in mainCompletedQueue")
 				// remove the completed job we found
 				success, err := databaseContainer.Client.LRem(checkForCompletedJobsContext, mainCompletedQueueName, 1, mainCompletedQueueJobJSON).Result()
 				if err != nil {
@@ -502,9 +505,7 @@ func checkForCompletedJobs(
 					)
 					return
 				}
-				if success == 1 {
-					fmt.Println(pluginConfig.Name, " checkForCompletedJobs -> removed job from mainCompletedQueue", randomInt)
-				} else { // handle if another host removed the job
+				if success != 1 {
 					logger.ErrorContext(
 						pluginCtx,
 						"non-successful removal of completedJob from "+mainCompletedQueueName,
@@ -527,7 +528,7 @@ func checkForCompletedJobs(
 				queuedJob.WorkflowJob.Status = completedQueuedJob.WorkflowJob.Status
 				queuedJob.WorkflowJob.Conclusion = completedQueuedJob.WorkflowJob.Conclusion
 				// add a task for the completed job so we know the clean up
-				fmt.Println(pluginConfig.Name, " checkForCompletedJobs -> adding completed job to pluginCompletedQueue", randomInt)
+				logger.DebugContext(pluginCtx, "checkForCompletedJobs -> adding completed job to pluginCompletedQueue")
 				_, err = databaseContainer.Client.LPush(checkForCompletedJobsContext, pluginCompletedQueueName, mainCompletedQueueJobJSON).Result()
 				if err != nil {
 					logger.ErrorContext(pluginCtx, "error inserting completed job into list", "err", err)
@@ -537,7 +538,7 @@ func checkForCompletedJobs(
 				case <-pluginGlobals.JobChannel:
 				default:
 				}
-				// reset the queue target index every other run so we don't leave any jobs behind at the lower indexes
+				// reset the queue target index every other run so we don't leave any jobs behind at the lower indexes but still keep moving ahead
 				if workerGlobals.Plugins[pluginConfig.Name].PluginRunCount.Load()%2 == 0 {
 					workerGlobals.ResetQueueTargetIndex() // make sure we reset the index so we don't leave any jobs behind at the lower indexes
 				}
@@ -550,7 +551,7 @@ func checkForCompletedJobs(
 			if !pluginGlobals.FirstCheckForCompletedJobsRan &&
 				mainCompletedQueueJobJSON == "" && pluginCompletedQueueJobJSON == "" &&
 				mainInProgressQueueJobJSON != "" {
-				fmt.Println(pluginConfig.Name, " checkForCompletedJobs -> job is in mainInProgressQueue, checking status from API", randomInt)
+				logger.DebugContext(pluginCtx, "checkForCompletedJobs -> job is in mainInProgressQueue, checking status from API")
 				queuedJob, err = internalGithub.UpdateJobsWorkflowJobStatus(workerCtx, pluginCtx, &queuedJob)
 				if err != nil {
 					logger.ErrorContext(pluginCtx, "error checking workflow job status", "err", err)
@@ -581,7 +582,7 @@ func checkForCompletedJobs(
 
 			// update the job in the database so we can get the new status for subsequent steps
 			if updateDB {
-				fmt.Println(pluginConfig.Name, " checkForCompletedJobs -> updating job in database", *queuedJob.WorkflowJob.Status)
+				// logger.DebugContext(pluginCtx, "checkForCompletedJobs -> updating job in database")
 				internalGithub.UpdateJobInDB(pluginCtx, pluginQueueName, &queuedJob)
 			}
 		}
@@ -590,7 +591,7 @@ func checkForCompletedJobs(
 		if pluginGlobals.CheckForCompletedJobsMutex != nil {
 			pluginGlobals.CheckForCompletedJobsMutex.Unlock()
 		}
-		fmt.Println(pluginConfig.Name, " checkForCompletedJobs end loop", randomInt)
+		// logger.DebugContext(pluginCtx, "checkForCompletedJobs end loop")
 		time.Sleep(3 * time.Second)
 	}
 }
