@@ -542,6 +542,11 @@ func checkForCompletedJobs(
 				case <-pluginGlobals.JobChannel:
 				default:
 				}
+				// TODO: This can cause plugins to reset back to the start of the queue
+				// and there may be a ton of jobs the host can never run that it has to go through
+				// one by one, delaying the running of other jobs that could be ran.
+				// Find a better way to handle this by maybe resetting every other successful job
+				workerGlobals.ResetQueueTargetIndex() // make sure we reset the index so we don't leave any jobs behind at the lower indexes
 				pluginGlobals.JobChannel <- queuedJob
 				updateDB = true
 			}
