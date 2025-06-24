@@ -1366,9 +1366,10 @@ func Run(
 	// get anka template
 	ankaTemplate := extractLabelValue(queuedJob.WorkflowJob.Labels, "anka-template:")
 	if ankaTemplate == "" {
-		// logger.WarnContext(pluginCtx, "warning: unable to find Anka Template specified in labels - skipping")
+		logger.WarnContext(pluginCtx, "warning: unable to find Anka Template specified in labels, cancelling job")
+		sendCancelWorkflowRun(workerCtx, pluginCtx, logger, queuedJob, metricsData)
 		pluginGlobals.JobChannel <- internalGithub.QueueJob{Action: "finish"}
-		return pluginCtx, fmt.Errorf("warning: unable to find Anka Template specified in labels - skipping")
+		return pluginCtx, nil
 	}
 	pluginCtx = logging.AppendCtx(pluginCtx, slog.String("ankaTemplate", ankaTemplate))
 	ankaTemplateTag := extractLabelValue(queuedJob.WorkflowJob.Labels, "anka-template-tag:")
