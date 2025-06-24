@@ -539,6 +539,8 @@ func worker(
 							continue
 						}
 
+						workerGlobals.IncrementPluginRunCount(plugin.Name)
+
 						pluginCtx = logging.AppendCtx(pluginCtx, slog.Int64("QueueTargetIndex", *workerGlobals.QueueTargetIndex))
 
 						updatedPluginCtx, err := run.Plugin(

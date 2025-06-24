@@ -879,6 +879,7 @@ func Run(
 	// Block other plugins from running until we're done preparing the VM so that
 	// VmHasEnoughResources has a running VM to compare resources against
 	workerGlobals.SetAPluginIsPreparing(pluginConfig.Name)
+	pluginCtx = logging.AppendCtx(pluginCtx, slog.String("pluginRunCount", strconv.Itoa(int(workerGlobals.Plugins[pluginConfig.Name].PluginRunCount.Load()))))
 
 	// must come after first cleanup
 	pluginGlobals := internalGithub.PluginGlobals{

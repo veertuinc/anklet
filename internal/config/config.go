@@ -234,8 +234,8 @@ func (g *Globals) GetPluginRunCount(pluginName string) uint64 {
 }
 
 // IncrementPluginRunCount increments the shared plugin run counter and returns the new value
-func (g *Globals) IncrementPluginRunCount(pluginName string) uint64 {
-	return g.Plugins[pluginName].PluginRunCount.Add(1)
+func (g *Globals) IncrementPluginRunCount(pluginName string) {
+	g.Plugins[pluginName].PluginRunCount.Add(1)
 }
 
 // // Returns true if it's the given plugin's turn to acquire the prep lock
