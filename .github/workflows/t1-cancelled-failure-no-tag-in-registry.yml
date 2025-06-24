@@ -1,4 +1,4 @@
-name: 't1-cancelled-failure-no-tag'
+name: 't1-cancelled-failure-no-tag-in-registry'
 on:
   workflow_dispatch:
 
