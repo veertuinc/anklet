@@ -115,6 +115,18 @@ The following logic consumes [API limits](https://docs.github.com/en/rest/using-
 
 This means in the worst case scenario it could make a total of 3 api calls total. Otherwise only one should happen on job success.
 
+---
+
+## FAQS
+
+1. My Jobs are taking a long time to be picked up.
+
+This can happen for several reasons. It's important to understand that the Github Actions plugin will go one-by-one through the queue starting with the eldest item to find a job it can run. This is necessary so that the plugins can clean up the queue of older cancelled jobs that are still queued in the DB.
+
+Check that:
+
+1. You don't have too many queued jobs piled up. If your target template needs 12 CPU cores, but almost all of your hosts only have 8 cores, the few hosts with 12 may take a while to get the job off the queue and out of the way. Remember, the plugin on completion of a job will reset the queue target index so it starts from the beginning of the queue. It will need to crawl through all of the jobs it can't run each time.
+2. The jobs you're running are just long running jobs. You may need more hosts to handle the demand.
 
 ## Development
 
