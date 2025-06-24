@@ -188,8 +188,6 @@ func watchForJobCompletion(
 					if firstLog {
 						logger.InfoContext(pluginCtx, "job found registered runner and is now in progress", "job_id", *queuedJob.WorkflowJob.ID)
 						firstLog = false
-					} else {
-						logger.InfoContext(pluginCtx, "job is still in progress", "job_id", *queuedJob.WorkflowJob.ID)
 					}
 				}
 			} else {
@@ -201,7 +199,7 @@ func watchForJobCompletion(
 
 			var registrationTimeoutSeconds int
 			if pluginConfig.RegistrationTimeoutSeconds <= 0 {
-				registrationTimeoutSeconds = 120
+				registrationTimeoutSeconds = 80
 			} else {
 				registrationTimeoutSeconds = pluginConfig.RegistrationTimeoutSeconds
 			}
@@ -377,6 +375,7 @@ func checkForCompletedJobs(
 		var updateDB bool = false
 		// BE VERY CAREFUL when you use return here. You could orphan the job if you're not careful.
 		pluginGlobals.CheckForCompletedJobsMutex.Lock()
+		pluginGlobals.IncrementCheckForCompletedJobsRunCount()
 		fmt.Println(pluginConfig.Name, " checkForCompletedJobs start loop", randomInt)
 		// logger.DebugContext(pluginCtx, "checkForCompletedJobsMu locked")
 		// do not use 'continue' in the loop or else the ranOnce won't happen
@@ -434,7 +433,10 @@ func checkForCompletedJobs(
 				return
 			}
 			if mainInProgressQueueJobJSON != "" {
-				fmt.Println(pluginConfig.Name, " checkForCompletedJobs -> job is in mainInProgressQueue", randomInt)
+				if pluginGlobals.CheckForCompletedJobsRunCount%5 == 0 {
+					logger.InfoContext(pluginCtx, "job is still in progress", "job_id", *queuedJob.WorkflowJob.ID)
+				}
+				// fmt.Println(pluginConfig.Name, " checkForCompletedJobs -> job is in mainInProgressQueue", randomInt)
 				mainInProgressQueueJob, err, typeErr := database.Unwrap[internalGithub.QueueJob](mainInProgressQueueJobJSON)
 				if err != nil || typeErr != nil {
 					logger.ErrorContext(pluginCtx, "error unmarshalling job", "err", err, "typeErr", typeErr, "mainInProgressQueueJobJSON", mainInProgressQueueJobJSON)
@@ -627,9 +629,7 @@ func cleanup(
 		return
 	}
 
-	fmt.Println(pluginConfig.Name, "cleanup | locking plugin cleanup mutex")
 	pluginGlobals.CleanupMutex.Lock()
-	fmt.Println(pluginConfig.Name, "cleanup | locked plugin cleanup mutex 2")
 
 	defer func() {
 		if pluginGlobals.CleanupMutex != nil {
@@ -680,7 +680,7 @@ func cleanup(
 
 	select {
 	case <-pluginGlobals.PausedCancellationJobChannel: // no cleanup necessary, it was picked up by another host
-		logger.DebugContext(pluginCtx, "cleanup pausedCancellationJobChannel")
+		logger.DebugContext(pluginCtx, "cleanup | pausedCancellationJobChannel")
 		// remove from paused queue so other hosts won't try to pick it up anymore.
 		err = internalGithub.DeleteFromQueue(pluginCtx, logger, *originalQueuedJob.WorkflowJob.ID, pausedQueueName)
 		if err != nil {
@@ -692,11 +692,11 @@ func cleanup(
 
 	// if the job is running, we don't need to clean it up yet
 	if originalQueuedJob.WorkflowJob.Status != nil && *originalQueuedJob.WorkflowJob.Status == "in_progress" {
-		logger.DebugContext(pluginCtx, "job is still running; skipping cleanup")
+		logger.DebugContext(pluginCtx, "cleanup | job is still running; skipping cleanup")
 		return
 	}
 
-	logger.DebugContext(pluginCtx, "starting cleanup loop")
+	logger.DebugContext(pluginCtx, "cleanup | starting loop")
 	for {
 		var queuedJob internalGithub.QueueJob
 		var typeErr error
@@ -719,7 +719,7 @@ func cleanup(
 				pluginQueueName+"/cleaning",
 			).Result()
 			if err == redis.Nil {
-				fmt.Println(pluginConfig.Name, "cleanup | no job to clean up from "+pluginQueueName)
+				logger.DebugContext(pluginCtx, "cleanup | no job to clean up from "+pluginQueueName)
 				return // nothing to clean up
 			} else if err != nil {
 				logger.ErrorContext(pluginCtx, "error popping job from the list", "err", err)
@@ -890,6 +890,7 @@ func Run(
 		JobChannel:                    make(chan internalGithub.QueueJob, 1),
 		ReturnToMainQueue:             make(chan string, 1),
 		PausedCancellationJobChannel:  make(chan internalGithub.QueueJob, 1),
+		CheckForCompletedJobsRunCount: 0,
 	}
 	pluginCtx = context.WithValue(pluginCtx, config.ContextKey("pluginglobals"), &pluginGlobals)
 
@@ -1345,7 +1346,7 @@ func Run(
 			return pluginCtx, nil
 		}
 		if queuedJob.WorkflowJob.Status != nil && *queuedJob.WorkflowJob.Status == "in_progress" {
-			logger.InfoContext(pluginCtx, "job is still in progress, so we can't run it anymore")
+			logger.InfoContext(pluginCtx, "job is in progress, so we'll wait for it to finish")
 			if workerGlobals.IsAPluginPreparingState() == pluginConfig.Name {
 				workerGlobals.UnsetAPluginIsPreparing()
 			}

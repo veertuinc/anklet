@@ -18,6 +18,11 @@ type PluginGlobals struct {
 	JobChannel                    chan QueueJob
 	PausedCancellationJobChannel  chan QueueJob
 	ReturnToMainQueue             chan string
+	CheckForCompletedJobsRunCount int
+}
+
+func (p *PluginGlobals) IncrementCheckForCompletedJobsRunCount() {
+	p.CheckForCompletedJobsRunCount++
 }
 
 func GetPluginGlobalsFromContext(ctx context.Context) (*PluginGlobals, error) {

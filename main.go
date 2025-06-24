@@ -516,7 +516,7 @@ func worker(
 				for {
 					select {
 					case <-pluginCtx.Done():
-						logging.DevContext(pluginCtx, "plugin for loop::pluginCtx.Done()")
+						// logging.DevContext(pluginCtx, "plugin for loop::pluginCtx.Done()")
 						metricsData.SetStatus(pluginCtx, pluginLogger, "stopped")
 						pluginLogger.WarnContext(pluginCtx, shutDownMessage)
 						pluginCancel()
@@ -524,18 +524,18 @@ func worker(
 					default:
 
 						if workerGlobals.IsAPluginPreparingState() != "" {
-							logging.DevContext(pluginCtx, "pausing due to global plugin preparing state")
+							logging.DevContext(pluginCtx, "paused for another plugin to finish preparing")
 							// When paused, sleep briefly and continue checking
 							metricsData.SetStatus(pluginCtx, pluginLogger, "paused")
-							time.Sleep(time.Second + 1)
+							time.Sleep(time.Second + 3)
 							continue
 						}
 
 						if workerGlobals.ArePluginsPaused() {
-							logging.DevContext(pluginCtx, "pausing due to global pause state")
+							logging.DevContext(pluginCtx, "paused for another plugin to finish running")
 							// When paused, sleep briefly and continue checking
 							metricsData.SetStatus(pluginCtx, pluginLogger, "paused")
-							time.Sleep(time.Second + 1)
+							time.Sleep(time.Second + 3)
 							continue
 						}
 
@@ -575,7 +575,7 @@ func worker(
 						select {
 						case <-time.After(time.Duration(plugin.SleepInterval) * time.Second):
 						case <-pluginCtx.Done():
-							logging.DevContext(pluginCtx, "plugin for loop::default::pluginCtx.Done()")
+							//logging.DevContext(pluginCtx, "plugin for loop::default::pluginCtx.Done()")
 							break
 						}
 					}

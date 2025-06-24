@@ -132,7 +132,7 @@ Check that:
 
 ## Development
 
-This plugin handles running jobs queued in the DB. It also is responsible for finding completed jobs in the DB and cleaning them up.
+This plugin handles running jobs queued in the DB. It checks queued items one by one (starting at 0 index) to find one that it can run. It is also responsible for finding completed jobs in the DB and cleaning the jobs up, even if it can't run the job according to requirements.
 
 ### Functions
 
