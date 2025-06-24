@@ -108,12 +108,12 @@ However, there are more complex failures that happen with the registration of th
 The following logic consumes [API limits](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api?apiVersion=2022-11-28). Should you run out, all processing will pause until the limits are reset after the specific github duration and then resume where it left off.
 
   1. Obtaining a registration token. (single call)
-  2. Should the job request a template or tag that doesn't exist, we need to forcefully cancel the job in github or else other anklets will attempt processing indefinitely. (one call to check if already cancelled, one to cancel)
-  3. Should the runner be orphaned and not have been shut down cleanly so it unregistred itself, we will send a removal request. It can not happen with #2. (one to check if already removed, one to remove)
+  2. Should the job request a template that doesn't exist, we need to forcefully cancel the job in github or else other anklets will attempt processing indefinitely.
+  3. Should the runner be orphaned and not have been shut down cleanly, we will send a removal request to the API. (one to check if already removed, one to remove)
   4. If jobs were `in_progress` when anklet was exited, we will make a single API call to see if the job finished successfully or not. If the job is still running, the VM will stay running and the plugin will wait for it to finish. Otherwise, we'll proceed with the cleanup.
-  5. If a job failed for some reason and is being retried, we will make a single API call to see if the job finished successfully or not in github.
+  5. If a job failed for some reason and is being retried, on the next attempts to run the job, we will make a single API call to see if the job finished successfully or not in github. This is necessary since github will sometimes not send updates to the webhook. There is a limit of 5 attempts before we cancel the job forcefully.
 
-This means in the worst case scenario it could make a total of 3 api calls total. Otherwise only one should happen on job success.
+This means worst case scenario it could make a total of 3 api calls total. Otherwise only one should happen on job success.
 
 ---
 
@@ -125,8 +125,10 @@ This can happen for several reasons. It's important to understand that the Githu
 
 Check that:
 
-1. You don't have too many queued jobs piled up. If your target template needs 12 CPU cores, but almost all of your hosts only have 8 cores, the few hosts with 12 may take a while to get the job off the queue and out of the way. Remember, the plugin on completion of a job will reset the queue target index so it starts from the beginning of the queue. It will need to crawl through all of the jobs it can't run each time.
-2. The jobs you're running are just long running jobs. You may need more hosts to handle the demand.
+  1. You don't have too many queued jobs piled up. If your target template needs 12 CPU cores, but almost all of your hosts only have 8 cores, the few hosts with 12 may take a while to get the job off the queue and out of the way. Remember, the plugin on completion of a job will reset the queue target index so it starts from the beginning of the queue. It will need to crawl through all of the jobs it can't run each time.
+  2. The jobs you're running are just long running jobs. You may need more hosts to handle the demand.
+
+2. Debug logging can be enabled with `LOG_LEVEL=dev` in the environment. All output of debug logging will be in JSON.
 
 ## Development
 
