@@ -1,0 +1,14 @@
+name: 't1-cancelled-failure-no-template'
+on:
+  workflow_dispatch:
+
+jobs:
+  testJob:
+    runs-on: [ 
+      "anka-template:c092c6f6-198c-470f-9526-9c998efe7ab5", 
+      "anka-template-tag:vanilla+port-forward-22+brew-git",
+    ]
+    steps:
+      - uses: actions/checkout@v3
+      - run: |
+          echo "hello"
