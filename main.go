@@ -197,24 +197,26 @@ func main() {
 	parentCtx = logging.AppendCtx(parentCtx, slog.Uint64("hostMemoryBytes", hostMemoryBytes))
 
 	parentCtx = context.WithValue(parentCtx, config.ContextKey("globals"), &config.Globals{
-		RunPluginsOnce:                 runOnce == "true",
-		FirstPluginStarted:             make(chan bool, 1),
-		ReturnAllToMainQueue:           make(chan bool, 1),
-		PullLock:                       &sync.Mutex{},
-		PluginsPath:                    pluginsPath,
-		DebugEnabled:                   logging.IsDebugEnabled(),
-		PluginsPaused:                  atomic.Bool{},
-		APluginIsPreparing:             atomic.Value{},
-		HostCPUCount:                   hostCPUCount,
-		HostMemoryBytes:                hostMemoryBytes,
-		QueueTargetIndex:               new(int64),
-		FinishedInitialRunOfEachPlugin: make([]bool, len(loadedConfig.Plugins)),
-		PluginList: func() []string {
-			pluginNames := make([]string, len(loadedConfig.Plugins))
-			for i, p := range loadedConfig.Plugins {
-				pluginNames[i] = p.Name
+		RunPluginsOnce:       runOnce == "true",
+		FirstPluginStarted:   make(chan bool, 1),
+		ReturnAllToMainQueue: make(chan bool, 1),
+		PullLock:             &sync.Mutex{},
+		PluginsPath:          pluginsPath,
+		DebugEnabled:         logging.IsDebugEnabled(),
+		PluginsPaused:        atomic.Bool{},
+		APluginIsPreparing:   atomic.Value{},
+		HostCPUCount:         hostCPUCount,
+		HostMemoryBytes:      hostMemoryBytes,
+		QueueTargetIndex:     new(int64),
+		Plugins: func() map[string]*config.PluginGlobal {
+			plugins := make(map[string]*config.PluginGlobal)
+			for _, p := range loadedConfig.Plugins {
+				plugins[p.Name] = &config.PluginGlobal{
+					PluginRunCount:     atomic.Uint64{},
+					FinishedInitialRun: false,
+				}
 			}
-			return pluginNames
+			return plugins
 		}(),
 	})
 
@@ -537,8 +539,6 @@ func worker(
 							continue
 						}
 
-						pluginRunCount := workerGlobals.IncrementPluginRunCount()
-						pluginCtx = logging.AppendCtx(pluginCtx, slog.String("pluginRunCount", strconv.Itoa(int(pluginRunCount))))
 						pluginCtx = logging.AppendCtx(pluginCtx, slog.Int64("QueueTargetIndex", *workerGlobals.QueueTargetIndex))
 
 						updatedPluginCtx, err := run.Plugin(

@@ -229,9 +229,9 @@ func GetJobFromQueueByKeyAndValue(
 	return "", nil
 }
 
-// UpdateJobWorkflowJobStatus updates the workflow job status of a queued job.
+// UpdateJobsWorkflowJobStatus updates the workflow job status of a queued job.
 // It should only set
-func UpdateJobWorkflowJobStatus(
+func UpdateJobsWorkflowJobStatus(
 	workerCtx context.Context,
 	pluginCtx context.Context,
 	queuedJob *QueueJob,

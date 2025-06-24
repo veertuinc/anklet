@@ -8,7 +8,6 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
-	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -525,12 +524,6 @@ func checkForCompletedJobs(
 				}
 				queuedJob.WorkflowJob.Status = completedQueuedJob.WorkflowJob.Status
 				queuedJob.WorkflowJob.Conclusion = completedQueuedJob.WorkflowJob.Conclusion
-				// delete the existing service task
-				// _, err = databaseContainer.Client.Del(pluginCtx, serviceQueueDatabaseKeyName).Result()
-				// if err != nil {
-				// 	logger.ErrorContext(pluginCtx, "error deleting all objects from "+serviceQueueDatabaseKeyName, "err", err)
-				// 	return
-				// }
 				// add a task for the completed job so we know the clean up
 				fmt.Println(pluginConfig.Name, " checkForCompletedJobs -> adding completed job to pluginCompletedQueue", randomInt)
 				_, err = databaseContainer.Client.LPush(checkForCompletedJobsContext, pluginCompletedQueueName, mainCompletedQueueJobJSON).Result()
@@ -542,11 +535,11 @@ func checkForCompletedJobs(
 				case <-pluginGlobals.JobChannel:
 				default:
 				}
-				// TODO: This can cause plugins to reset back to the start of the queue
-				// and there may be a ton of jobs the host can never run that it has to go through
-				// one by one, delaying the running of other jobs that could be ran.
-				// Find a better way to handle this by maybe resetting every other successful job
-				workerGlobals.ResetQueueTargetIndex() // make sure we reset the index so we don't leave any jobs behind at the lower indexes
+				// reset the queue target index every other run so we don't leave any jobs behind at the lower indexes
+				if workerGlobals.Plugins[pluginConfig.Name].PluginRunCount.Load()%2 == 0 {
+					workerGlobals.ResetQueueTargetIndex() // make sure we reset the index so we don't leave any jobs behind at the lower indexes
+				}
+
 				pluginGlobals.JobChannel <- queuedJob
 				updateDB = true
 			}
@@ -556,7 +549,7 @@ func checkForCompletedJobs(
 				mainCompletedQueueJobJSON == "" && pluginCompletedQueueJobJSON == "" &&
 				mainInProgressQueueJobJSON != "" {
 				fmt.Println(pluginConfig.Name, " checkForCompletedJobs -> job is in mainInProgressQueue, checking status from API", randomInt)
-				queuedJob, err = internalGithub.UpdateJobWorkflowJobStatus(workerCtx, pluginCtx, &queuedJob)
+				queuedJob, err = internalGithub.UpdateJobsWorkflowJobStatus(workerCtx, pluginCtx, &queuedJob)
 				if err != nil {
 					logger.ErrorContext(pluginCtx, "error checking workflow job status", "err", err)
 					return
@@ -1057,16 +1050,16 @@ func Run(
 
 	// We want each plugin to run at least once so that any VMs/jobs that were orphaned
 	// on this host get a chance to be cleaned or continue where they left off
-	if !workerGlobals.FinishedInitialRunOfEachPlugin[config.FindIndex(workerGlobals.PluginList, pluginConfig.Name)] {
-		workerGlobals.FinishedInitialRunOfEachPlugin[config.FindIndex(workerGlobals.PluginList, pluginConfig.Name)] = true
+	if !workerGlobals.Plugins[pluginConfig.Name].FinishedInitialRun {
+		workerGlobals.Plugins[pluginConfig.Name].FinishedInitialRun = true
 		pluginGlobals.JobChannel <- internalGithub.QueueJob{Action: "finish"}
 		return pluginCtx, nil
 	}
 
 	// Check if all plugins have completed their initial run
 	allPluginsFinishedInitialRun := true
-	for _, finished := range workerGlobals.FinishedInitialRunOfEachPlugin {
-		if !finished {
+	for _, plugin := range workerGlobals.Plugins {
+		if !plugin.FinishedInitialRun {
 			allPluginsFinishedInitialRun = false
 			break
 		}
@@ -1158,7 +1151,7 @@ func Run(
 				return pluginCtx, fmt.Errorf("error unmarshalling job: %s", err.Error())
 			}
 			// check if the job is aleady paused on this same host (matches any plugin names)
-			if slices.Contains(workerGlobals.PluginList, pausedQueuedJob.PausedOn) {
+			if workerGlobals.Plugins[pausedQueuedJob.PausedOn] != nil {
 				logger.InfoContext(pluginCtx, "job is already paused on this host by another plugin, skipping")
 				pausedQueueTargetIndex++
 				if pausedQueueLength == 1 { // don't go into a forever loop
@@ -1329,8 +1322,8 @@ func Run(
 	default:
 	}
 	// if the job has attempts > 0, we need to check the status from the API to see if the job is still even running
+	// Github can mark a job completed, but it's not sending the webhook event for completed and it can sit like this for hours
 	if queuedJob.Attempts > 0 {
-		//TODO: if attempts is > 5, cancel it
 		if queuedJob.Attempts > 5 {
 			logger.WarnContext(pluginCtx, "job has attempts > 5, cancelling it")
 			queuedJob.Action = "cancel"
@@ -1340,7 +1333,7 @@ func Run(
 			return pluginCtx, nil
 		}
 		logger.InfoContext(pluginCtx, "job has attempts > 0, checking status from API to see if the job is still even running")
-		queuedJob, err = internalGithub.UpdateJobWorkflowJobStatus(workerCtx, pluginCtx, &queuedJob)
+		queuedJob, err = internalGithub.UpdateJobsWorkflowJobStatus(workerCtx, pluginCtx, &queuedJob)
 		if err != nil {
 			logger.ErrorContext(pluginCtx, "error updating job workflow job status", "err", err)
 			pluginGlobals.RetryChannel <- "error_updating_job_workflow_job_status"

@@ -203,6 +203,11 @@ func GetPluginFromContext(ctx context.Context) (Plugin, error) {
 	return plugin, nil
 }
 
+type PluginGlobal struct {
+	PluginRunCount     atomic.Uint64
+	FinishedInitialRun bool
+}
+
 type Globals struct {
 	RunPluginsOnce bool
 	// block the second plugin until the first plugin is done
@@ -220,10 +225,17 @@ type Globals struct {
 	QueueTargetIndex   *int64
 	// We want each plugin to run at least once so that any VMs/jobs that were orphaned
 	// on this host get a chance to be cleaned or continue where they left off
-	FinishedInitialRunOfEachPlugin []bool
-	PluginList                     []string
-	// Shared run count across all plugins
-	PluginRunCount atomic.Uint64
+	Plugins map[string]*PluginGlobal
+}
+
+// GetPluginRunCount returns the current value of the shared plugin run counter
+func (g *Globals) GetPluginRunCount(pluginName string) uint64 {
+	return g.Plugins[pluginName].PluginRunCount.Load()
+}
+
+// IncrementPluginRunCount increments the shared plugin run counter and returns the new value
+func (g *Globals) IncrementPluginRunCount(pluginName string) uint64 {
+	return g.Plugins[pluginName].PluginRunCount.Add(1)
 }
 
 // // Returns true if it's the given plugin's turn to acquire the prep lock
@@ -323,16 +335,6 @@ func GetConfigFileNameFromContext(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("GetConfigFileNameFromContext failed")
 	}
 	return configFileName, nil
-}
-
-// GetPluginRunCount returns the current value of the shared plugin run counter
-func (g *Globals) GetPluginRunCount() uint64 {
-	return g.PluginRunCount.Load()
-}
-
-// IncrementPluginRunCount increments the shared plugin run counter and returns the new value
-func (g *Globals) IncrementPluginRunCount() uint64 {
-	return g.PluginRunCount.Add(1)
 }
 
 func FindIndex(slice []string, value string) int {
