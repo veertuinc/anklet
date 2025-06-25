@@ -5,6 +5,7 @@ on:
 jobs:
   testJob:
     runs-on: [ 
+      "${{ github.run_id }}-${{ strategy.job-index }}",
       "anka-template-tag:vanilla+port-forward-22+brew-git",
     ]
     steps:

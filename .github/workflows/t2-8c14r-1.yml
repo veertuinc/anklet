@@ -6,6 +6,7 @@ on:
 jobs:
   t2-8c14r-1:
     runs-on: [ 
+      "${{ github.run_id }}-${{ strategy.job-index }}",
       "anka-template:84266873-da90-4e0d-903b-ed0233471f9f", 
       "anka-template-tag:8c14r",
     ]
