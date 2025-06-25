@@ -295,6 +295,7 @@ func worker(
 					os.Exit(1)
 				}
 				parentLogger.WarnContext(workerCtx, "best effort graceful shutdown, interrupting the job as soon as possible...")
+				workerGlobals.ReturnAllToMainQueue.Store(true)
 				workerCancel()
 			}
 		}

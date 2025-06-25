@@ -374,21 +374,33 @@ func checkForCompletedJobs(
 		// BE VERY CAREFUL when you use return here. You could orphan the job if you're not careful.
 		pluginGlobals.CheckForCompletedJobsMutex.Lock()
 		pluginGlobals.IncrementCheckForCompletedJobsRunCount()
-		// logger.DebugContext(pluginCtx, "checkForCompletedJobsMu locked")
 		// do not use 'continue' in the loop or else the ranOnce won't happen
 		// logging.DevContext(pluginCtx, "checkForCompletedJobs "+pluginConfig.Name+" | runOnce "+fmt.Sprint(runOnce))
+
+		// must come before the select below
+		if workerGlobals.ReturnAllToMainQueue.Load() {
+			logger.WarnContext(pluginCtx, "main worker is returning all jobs to main queue")
+			if !pluginGlobals.IsUnreturnable() {
+				pluginGlobals.ReturnToMainQueue <- "return_all_to_main_queue"
+			}
+			pluginGlobals.JobChannel <- internalGithub.QueueJob{Action: "finish"}
+		}
+
 		select {
 		case <-pluginGlobals.PausedCancellationJobChannel:
 			// logger.DebugContext(pluginCtx, " checkForCompletedJobs -> pausedCancellationJobChannel")
 			pluginGlobals.PausedCancellationJobChannel <- internalGithub.QueueJob{Action: "finish"} // send second one so cleanup doesn't run
 			return
 		case retryReason := <-pluginGlobals.RetryChannel:
+			if retryReason == "context_canceled" {
+				return
+			}
 			logger.WarnContext(pluginCtx, "retrying job because of "+retryReason)
 			pluginGlobals.ReturnToMainQueue <- retryReason
 			pluginGlobals.JobChannel <- internalGithub.QueueJob{Action: "finish"}
 		case job := <-pluginGlobals.JobChannel:
 			if job.Action == "finish" {
-				// logger.DebugContext(pluginCtx, " checkForCompletedJobs -> finished")
+				logger.DebugContext(pluginCtx, " checkForCompletedJobs -> finished")
 				return
 			}
 			if job.Action == "cancel" {
@@ -397,13 +409,9 @@ func checkForCompletedJobs(
 					logger.ErrorContext(pluginCtx, "error sending cancel workflow run", "err", err)
 				}
 			}
-		case <-pluginCtx.Done():
-			if workerGlobals.ReturnAllToMainQueue.Load() {
-				logger.WarnContext(pluginCtx, "main worker is returning all jobs to main queue")
-				pluginGlobals.ReturnToMainQueue <- "return_all_to_main_queue"
-			}
-			// logging.DevContext(pluginCtx, "checkForCompletedJobs "+pluginConfig.Name+" pluginCtx.Done()")
-			return
+		// case <-pluginCtx.Done():
+		// 	// logging.DevContext(pluginCtx, "checkForCompletedJobs "+pluginConfig.Name+" pluginCtx.Done()")
+		// 	return
 		default:
 		}
 
@@ -692,7 +700,8 @@ func cleanup(
 	}
 
 	// if the job is running, we don't need to clean it up yet
-	if originalQueuedJob.WorkflowJob.Status != nil && *originalQueuedJob.WorkflowJob.Status == "in_progress" {
+	if originalQueuedJob.WorkflowJob.Status != nil &&
+		(*originalQueuedJob.WorkflowJob.Status == "in_progress" || originalQueuedJob.Action == "in_progress") {
 		logger.DebugContext(pluginCtx, "cleanup | job is still running; skipping cleanup")
 		return
 	}
@@ -889,6 +898,7 @@ func Run(
 		ReturnToMainQueue:             make(chan string, 1),
 		PausedCancellationJobChannel:  make(chan internalGithub.QueueJob, 1),
 		CheckForCompletedJobsRunCount: 0,
+		Unreturnable:                  false,
 	}
 	pluginCtx = context.WithValue(pluginCtx, config.ContextKey("pluginglobals"), &pluginGlobals)
 
@@ -1388,7 +1398,7 @@ func Run(
 
 	logger.InfoContext(pluginCtx, "handling anka workflow run job")
 	metricsData.SetStatus(pluginCtx, logger, "in_progress")
-	queuedJob.Action = "in_progress"
+	queuedJob.Action = "preparing"
 	internalGithub.UpdateJobInDB(pluginCtx, pluginQueueName, &queuedJob)
 
 	if queuedJob.AnkaVM.CPUCount == 0 || queuedJob.AnkaVM.MEMBytes == 0 { // no need to get VM info if we already have it
@@ -1551,6 +1561,10 @@ func Run(
 		}
 		if noTemplateTagExistsError != nil {
 			logger.ErrorContext(pluginCtx, "error ensuring vm template exists on host", "err", noTemplateTagExistsError)
+			if pluginCtx.Err() != nil {
+				pluginGlobals.RetryChannel <- "context_canceled"
+				return pluginCtx, fmt.Errorf("context canceled after EnsureVMTemplateExists")
+			}
 			err := sendCancelWorkflowRun(workerCtx, pluginCtx, logger, queuedJob, metricsData)
 			if err != nil {
 				logger.ErrorContext(pluginCtx, "error sending cancel workflow run", "err", err)
@@ -1728,6 +1742,9 @@ func Run(
 			pluginGlobals.RetryChannel <- "error_executing_register_runner_bash"
 			return pluginCtx, fmt.Errorf("error executing register-runner.bash: %s", registerRunnerErr.Error())
 		}
+		// make sure we can clean up properly if we interrupt early
+		queuedJob.Action = "registered"
+		internalGithub.UpdateJobInDB(pluginCtx, pluginQueueName, &queuedJob)
 		defer removeSelfHostedRunner(workerCtx, pluginCtx, *vm, &queuedJob, metricsData)
 		// Start runner
 		select {
@@ -1761,6 +1778,8 @@ func Run(
 	} // skipPrep
 
 	logger.InfoContext(pluginCtx, "finished preparing anka VM with actions runner")
+	queuedJob.Action = "in_progress"
+	internalGithub.UpdateJobInDB(pluginCtx, pluginQueueName, &queuedJob)
 
 	// Watch for job completion
 	pluginCtx, err = watchForJobCompletion(

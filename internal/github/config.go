@@ -19,6 +19,15 @@ type PluginGlobals struct {
 	PausedCancellationJobChannel  chan QueueJob
 	ReturnToMainQueue             chan string
 	CheckForCompletedJobsRunCount int
+	Unreturnable                  bool
+}
+
+func (p *PluginGlobals) SetUnreturnable(unreturnable bool) {
+	p.Unreturnable = unreturnable
+}
+
+func (p *PluginGlobals) IsUnreturnable() bool {
+	return p.Unreturnable
 }
 
 func (p *PluginGlobals) IncrementCheckForCompletedJobsRunCount() {
