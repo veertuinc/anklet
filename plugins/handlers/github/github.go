@@ -383,6 +383,10 @@ func checkForCompletedJobs(
 			if !pluginGlobals.IsUnreturnable() {
 				pluginGlobals.ReturnToMainQueue <- "return_all_to_main_queue"
 			}
+			select { // we don't care about other jobs in the channel
+			case <-pluginGlobals.JobChannel:
+			default:
+			}
 			pluginGlobals.JobChannel <- internalGithub.QueueJob{Action: "finish"}
 		}
 
@@ -400,7 +404,6 @@ func checkForCompletedJobs(
 			pluginGlobals.JobChannel <- internalGithub.QueueJob{Action: "finish"}
 		case job := <-pluginGlobals.JobChannel:
 			if job.Action == "finish" {
-				logger.DebugContext(pluginCtx, " checkForCompletedJobs -> finished")
 				return
 			}
 			if job.Action == "cancel" {
