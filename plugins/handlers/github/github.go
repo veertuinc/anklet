@@ -437,6 +437,7 @@ func checkForCompletedJobs(
 						"job_id", *queuedJob.WorkflowJob.ID,
 						"run_count", pluginGlobals.CheckForCompletedJobsRunCount,
 						"html_url", *queuedJob.WorkflowJob.HTMLURL,
+						"workflow_name", *queuedJob.WorkflowJob.Name,
 					)
 				}
 				// fmt.Println(pluginConfig.Name, " checkForCompletedJobs -> job is in mainInProgressQueue", randomInt)
@@ -590,7 +591,7 @@ func checkForCompletedJobs(
 			pluginGlobals.CheckForCompletedJobsMutex.Unlock()
 		}
 		// logger.DebugContext(pluginCtx, "checkForCompletedJobs end loop")
-		time.Sleep(3 * time.Second)
+		time.Sleep(time.Second * 3)
 	}
 }
 
@@ -986,6 +987,7 @@ func Run(
 		)
 		wg.Done()
 	}()
+	time.Sleep(1 * time.Second)
 	for !pluginGlobals.FirstCheckForCompletedJobsRan {
 		logger.DebugContext(pluginCtx, "waiting for first run checks to complete")
 		if pluginCtx.Err() != nil {
@@ -1018,7 +1020,7 @@ func Run(
 			return pluginCtx, nil
 		}
 	default:
-		logger.InfoContext(pluginCtx, "no existing jobs found on startup")
+		logger.InfoContext(pluginCtx, "no existing jobs found on initial startup")
 	}
 
 	// finalize cleanup if the service crashed mid-cleanup
@@ -1500,7 +1502,7 @@ func Run(
 					return pluginCtx, fmt.Errorf("context canceled while waiting for resources")
 				}
 				time.Sleep(5 * time.Second)
-				logger.WarnContext(pluginCtx, "waiting for enough resources to be available...")
+				logger.InfoContext(pluginCtx, "waiting for enough resources to be available...")
 				// check if the job was picked up by another host
 				// the other host would have pulled the job from the current host's plugin queue, so we check that
 				existingJobJSON, err := internalGithub.GetJobFromQueue(pluginCtx, *queuedJob.WorkflowJob.ID, pluginQueueName)

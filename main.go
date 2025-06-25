@@ -390,7 +390,7 @@ func worker(
 		parentLogger.InfoContext(workerCtx, "metrics server started on port "+metricsPort)
 		metrics.UpdateSystemMetrics(workerCtx, parentLogger, metricsData)
 		/////////////
-		// Plugins
+		// Plugins //
 		soloReceiver := false
 		for index, plugin := range loadedConfig.Plugins {
 			wg.Add(1)
@@ -454,10 +454,10 @@ func worker(
 				if plugin.Repo == "" {
 					pluginLogger.InfoContext(pluginCtx, "no repo set for plugin; assuming it's an organization level plugin")
 					pluginCtx = context.WithValue(pluginCtx, config.ContextKey("isRepoSet"), false)
-					logging.DevContext(pluginCtx, "set isRepoSet to false")
+					// logging.DevContext(pluginCtx, "set isRepoSet to false")
 				} else {
 					pluginCtx = context.WithValue(pluginCtx, config.ContextKey("isRepoSet"), true)
-					logging.DevContext(pluginCtx, "set isRepoSet to true")
+					// logging.DevContext(pluginCtx, "set isRepoSet to true")
 				}
 
 				if plugin.PrivateKey == "" && loadedConfig.GlobalPrivateKey != "" {
@@ -523,11 +523,12 @@ func worker(
 						return
 					default:
 
+						// preparing here means the first start up of a plugin
 						if workerGlobals.IsAPluginPreparingState() != "" {
 							logging.DevContext(pluginCtx, "paused for another plugin to finish preparing")
 							// When paused, sleep briefly and continue checking
 							metricsData.SetStatus(pluginCtx, pluginLogger, "paused")
-							time.Sleep(time.Second + 3)
+							time.Sleep(time.Second * 3)
 							continue
 						}
 
@@ -535,7 +536,7 @@ func worker(
 							logging.DevContext(pluginCtx, "paused for another plugin to finish running")
 							// When paused, sleep briefly and continue checking
 							metricsData.SetStatus(pluginCtx, pluginLogger, "paused")
-							time.Sleep(time.Second + 3)
+							time.Sleep(time.Second * 3)
 							continue
 						}
 

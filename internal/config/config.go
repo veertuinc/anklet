@@ -282,7 +282,6 @@ func (g *Globals) ArePluginsPaused() bool {
 }
 
 func (g *Globals) SetAPluginIsPreparing(pluginName string) {
-	fmt.Println("SetAPluginIsPreparing", pluginName)
 	g.APluginIsPreparing.Store(pluginName)
 }
 

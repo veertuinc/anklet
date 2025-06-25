@@ -134,6 +134,10 @@ Check that:
 
 This plugin handles running jobs queued in the DB. It checks queued items one by one (starting at 0 index) to find one that it can run. It is also responsible for finding completed jobs in the DB and cleaning the jobs up, even if it can't run the job according to requirements.
 
+When first starting up, the plugin will do an initial check to see if it has any job that was running last time it stopped. It picks up where it left off if so. Other plugins will be paused while this happens until it's their turn (`workerGlobals.IsAPluginPreparingState()`). They do this one by one in the order they're listed in the config.
+
+
+
 ### Functions
 
 #### `cleanup`
