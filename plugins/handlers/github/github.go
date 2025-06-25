@@ -336,7 +336,7 @@ func checkForCompletedJobs(
 		logger.ErrorContext(pluginCtx, "error getting logger from context", "err", err)
 		os.Exit(1)
 	}
-	pluginCtx = logging.AppendCtx(pluginCtx, slog.String("id", strconv.Itoa(randomInt)))
+	pluginCtx = logging.AppendCtx(pluginCtx, slog.Int("check_id", randomInt))
 	workerGlobals, err := config.GetWorkerGlobalsFromContext(pluginCtx)
 	if err != nil {
 		logger.ErrorContext(pluginCtx, "error getting globals from context", "err", err)
@@ -364,12 +364,10 @@ func checkForCompletedJobs(
 	}
 	checkForCompletedJobsContext := context.Background() // needed so we can finalize database changes without orphaning or losing jobs
 	defer func() {
-		fmt.Println(pluginConfig.Name, " checkForCompletedJobs defer start")
 		if pluginGlobals.CheckForCompletedJobsMutex != nil {
 			pluginGlobals.CheckForCompletedJobsMutex.Unlock()
 		}
 		pluginGlobals.FirstCheckForCompletedJobsRan = true
-		fmt.Println(pluginConfig.Name, " checkForCompletedJobs defer end")
 	}()
 	for {
 		var updateDB bool = false
@@ -403,7 +401,7 @@ func checkForCompletedJobs(
 				}
 			}
 		case <-pluginCtx.Done():
-			logging.DevContext(pluginCtx, "checkForCompletedJobs "+pluginConfig.Name+" pluginCtx.Done()")
+			// logging.DevContext(pluginCtx, "checkForCompletedJobs "+pluginConfig.Name+" pluginCtx.Done()")
 			return
 		default:
 		}
@@ -411,9 +409,9 @@ func checkForCompletedJobs(
 		// get the job ID
 		existingJobString, err := databaseContainer.Client.LIndex(pluginCtx, pluginQueueName, 0).Result()
 		if err == redis.Nil || existingJobString == "" {
-			logger.DebugContext(pluginCtx, " checkForCompletedJobs -> no job found in pluginQueue")
+			logger.DebugContext(pluginCtx, "checkForCompletedJobs -> no job found in pluginQueue")
 		} else {
-			logger.DebugContext(pluginCtx, " checkForCompletedJobs -> job found in pluginQueue", randomInt)
+			logger.DebugContext(pluginCtx, "checkForCompletedJobs -> job found in pluginQueue")
 			queuedJob, err, typeErr := database.Unwrap[internalGithub.QueueJob](existingJobString)
 			if err != nil || typeErr != nil {
 				logger.ErrorContext(pluginCtx,
@@ -1043,7 +1041,7 @@ func Run(
 			return pluginCtx, nil
 		}
 	case <-pluginCtx.Done():
-		logger.WarnContext(pluginCtx, "context canceled before completed job found")
+		// logger.WarnContext(pluginCtx, "context canceled before completed job found")
 		return pluginCtx, nil
 	default:
 	}
