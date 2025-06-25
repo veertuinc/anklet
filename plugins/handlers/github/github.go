@@ -1481,9 +1481,7 @@ func Run(
 				pluginGlobals.RetryChannel <- "error_checking_if_job_is_in_paused_queue"
 				return pluginCtx, nil
 			}
-			if pausedQueuedJob != "" {
-				logger.InfoContext(pluginCtx, "job already in paused queue")
-			} else {
+			if pausedQueuedJob == "" {
 				success, err := databaseContainer.Client.RPush(pluginCtx, pausedQueueName, queuedJobJSON).Result()
 				if err != nil {
 					logger.ErrorContext(pluginCtx, "error pushing job to paused queue", "err", err)
@@ -1495,7 +1493,7 @@ func Run(
 					pluginGlobals.RetryChannel <- "error_pushing_job_to_paused_queue"
 					return pluginCtx, nil
 				}
-				fmt.Println(pluginConfig.Name, "pushed job to paused queue", success, *queuedJob.WorkflowJob.ID)
+				logger.InfoContext(pluginCtx, "pushed job to paused queue", "queuedJob.WorkflowJob.ID", *queuedJob.WorkflowJob.ID)
 			}
 			logger.WarnContext(pluginCtx, "cannot run vm yet, waiting for enough resources to be available...")
 			for {
@@ -1524,10 +1522,9 @@ func Run(
 				// If there is still a queued job, check if the host has enough resources to run it
 				err = internalAnka.VmHasEnoughResources(pluginCtx, queuedJob.AnkaVM)
 				if err != nil {
-					logger.WarnContext(pluginCtx, err.Error())
+					logger.WarnContext(pluginCtx, "error from vm has enough resources check", "err", err)
 					continue
 				}
-				fmt.Println(pluginConfig.Name, "removing job from paused queue 1", *queuedJob.WorkflowJob.ID)
 				// remove from paused queue so other hosts won't try to pick it up anymore.
 				err = internalGithub.DeleteFromQueue(pluginCtx, logger, *queuedJob.WorkflowJob.ID, pausedQueueName)
 				if err != nil {
@@ -1540,7 +1537,7 @@ func Run(
 		}
 	}
 
-	logger.InfoContext(pluginCtx, "vm has enough resources to run; starting runner")
+	logger.InfoContext(pluginCtx, "vm has enough resources now to run; starting runner")
 
 	skipPrep := false // allows us to wait for the cancellation we sent to be received so we can clean up properly
 
@@ -1778,7 +1775,6 @@ func Run(
 		return pluginCtx, err
 	}
 
-	fmt.Println(pluginConfig.Name, "Run END ===================")
 	return pluginCtx, nil
 }
 
