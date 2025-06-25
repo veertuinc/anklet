@@ -1,0 +1,14 @@
+name: 't1-cancelled-failure-no-tag'
+on:
+  workflow_dispatch:
+
+jobs:
+  testJob:
+    runs-on: [ 
+      "anka-template:d792c6f6-198c-470f-9526-9c998efe7ab4", 
+      "anka-template-tag:not-a-tag",
+    ]
+    steps:
+      - uses: actions/checkout@v3
+      - run: |
+          echo "hello"
