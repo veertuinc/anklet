@@ -1,4 +1,4 @@
-name: 't1-cancelled-failure-no-template'
+name: 't1-cancelled-failure-no-template-in-registry'
 on:
   workflow_dispatch:
 
