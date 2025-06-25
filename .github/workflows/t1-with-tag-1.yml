@@ -5,6 +5,7 @@ on:
 jobs:
   t1-with-tag-1:
     runs-on: [ 
+      "${{ github.run_id }}-${{ strategy.job-index }}",
       "anka-template:d792c6f6-198c-470f-9526-9c998efe7ab4", 
       "anka-template-tag:vanilla+port-forward-22+brew-git",
     ]

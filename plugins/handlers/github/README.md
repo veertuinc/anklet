@@ -52,18 +52,11 @@ plugins:
 
 ---
 
-Next, in your Github Actions workflow yml you need to add several labels to `runs-on`. Here is the list and an example:
+Next, in your Github Actions workflow yml you need to/can add several labels to `runs-on`. Here is the list:
 
+1. `${{ github.run_id }}-${{ strategy.job-index }}` (required; prevents others jobs with the same `anka-template` and `anka-template-tag` from competing for the current runner)
 1. `anka-template:{UUID OF TEMPLATE HERE}` (required)
 1. `anka-template-tag:{TAG NAME OF TEMPLATE HERE}` (optional; uses latest if not populated)
-1. `unique-id:{A UNIQUE ID FOR THE JOB}` (optional; only needed for complex workflow runs)
-<!-- 1. `run-id:${{ github.run_id }}` (do not change this) - label that is used to ensure that jobs in the same workspace don't compete for the same runner. -->
-<!-- 1. `unique-id:{UNIQUE ID OF JOB HERE}` - a label that is used to ensure multiple jobs in the same run don't compete for the same runner. -->
-
-**IMPORTANT:** 
-
-- If you are using the same template/tag/labels in `runs-on` for multiple jobs, you will need to ensure that each job has a unique `unique-id` label or else they will compete for the same runner. To do this, set `"unique-id:${{ github.run_id }}"`.
-- If you are starting multiple Anka VM jobs in the same run, each job will need a unique `unique-id` label like `"unique-id:${{ github.run_id }}-1"` changing 1 to 2, 3, etc, for each job. For matrixes, you can use `"unique-id:${{ strategy.job-index }}"`.
 
 (from [t1-with-tag-1.yml](.github/workflows/t1-with-tag-1.yml))
 
@@ -75,6 +68,7 @@ on:
 jobs:
   testJob:
     runs-on: [ 
+      "${{ github.run_id }}-${{ strategy.job-index }}",
       "anka-template:d792c6f6-198c-470f-9526-9c998efe7ab4", 
       "anka-template-tag:vanilla+port-forward-22+brew-git",
     ]
@@ -127,6 +121,7 @@ Check that:
 
   1. You don't have too many queued jobs piled up. If your target template needs 12 CPU cores, but almost all of your hosts only have 8 cores, the few hosts with 12 may take a while to get the job off the queue and out of the way. Remember, the plugin on completion of a job will reset the queue target index so it starts from the beginning of the queue. It will need to crawl through all of the jobs it can't run each time.
   2. The jobs you're running are just long running jobs. You may need more hosts to handle the demand.
+  3. You're specifying `${{ github.run_id }}-${{ strategy.job-index }}` in your `runs-on` labels. Otherwise, jobs could timeout or fail and cause delays in cleanup, etc.
 
 2. Debug logging can be enabled with `LOG_LEVEL=dev` in the environment. All output of debug logging will be in JSON.
 

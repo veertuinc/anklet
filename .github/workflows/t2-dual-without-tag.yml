@@ -5,6 +5,7 @@ on:
 jobs:
   testJob:
     runs-on: [ 
+      "${{ github.run_id }}-${{ strategy.job-index }}",
       "anka-template:d792c6f6-198c-470f-9526-9c998efe7ab4",
     ]
     steps:
@@ -16,6 +17,7 @@ jobs:
           echo "123"
   testJob2:
     runs-on: [ 
+      "${{ github.run_id }}-${{ strategy.job-index }}",
       "anka-template:fa990c7f-d540-4c5b-bf72-b886c4692c3a",
     ]
     steps:
