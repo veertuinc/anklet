@@ -696,7 +696,6 @@ func cleanup(
 		return
 	}
 
-	logger.DebugContext(pluginCtx, "cleanup | starting loop")
 	for {
 		var queuedJob internalGithub.QueueJob
 		var typeErr error
@@ -742,7 +741,6 @@ func cleanup(
 			return
 		}
 
-		logger.DebugContext(pluginCtx, "cleaning queuedJob", "queuedJob", queuedJob)
 		switch queuedJob.Type {
 		case "anka.VM":
 			logger.DebugContext(pluginCtx, "cleanup | anka.VM | queuedJob", "queuedJob", queuedJob)
