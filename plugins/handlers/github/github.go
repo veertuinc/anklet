@@ -398,14 +398,13 @@ func checkForCompletedJobs(
 				}
 			}
 		case <-pluginCtx.Done():
-			// logging.DevContext(pluginCtx, "checkForCompletedJobs "+pluginConfig.Name+" pluginCtx.Done()")
-			return
-		default:
 			if workerGlobals.ReturnAllToMainQueue.Load() {
 				logger.WarnContext(pluginCtx, "main worker is returning all jobs to main queue")
 				pluginGlobals.ReturnToMainQueue <- "return_all_to_main_queue"
-				workerGlobals.ReturnAllToMainQueue.Store(false)
 			}
+			// logging.DevContext(pluginCtx, "checkForCompletedJobs "+pluginConfig.Name+" pluginCtx.Done()")
+			return
+		default:
 		}
 
 		// get the job ID
