@@ -608,7 +608,7 @@ func cleanup(
 	pausedQueueName string,
 	onStartRun bool,
 ) {
-	fmt.Println(pluginQueueName, "cleanup | plugin cleanup started")
+	// fmt.Println(pluginQueueName, "cleanup | plugin cleanup started")
 	logger, err := logging.GetLoggerFromContext(pluginCtx)
 	if err != nil {
 		logger.ErrorContext(pluginCtx, "error getting logger from context", "err", err)
@@ -634,11 +634,11 @@ func cleanup(
 
 	defer func() {
 		if pluginGlobals.CleanupMutex != nil {
-			fmt.Println(pluginConfig.Name, "cleanup | unlocking plugin cleanup mutex")
+			// fmt.Println(pluginConfig.Name, "cleanup | unlocking plugin cleanup mutex")
 			pluginGlobals.CleanupMutex.Unlock()
 		}
 		if !onStartRun {
-			fmt.Println(pluginConfig.Name, "cleanup | unlocking plugin preparing state")
+			// fmt.Println(pluginConfig.Name, "cleanup | unlocking plugin preparing state")
 			if workerGlobals.IsAPluginPreparingState() == pluginConfig.Name {
 				workerGlobals.UnsetAPluginIsPreparing()
 			}
@@ -762,7 +762,7 @@ func cleanup(
 			databaseContainer.Client.Del(cleanupContext, pluginQueueName+"/cleaning")
 			continue // required to keep processing tasks in the db list
 		case "WorkflowJobPayload": // MUST COME LAST
-			logger.DebugContext(pluginCtx, "cleanup | WorkflowJobPayload | queuedJob", "queuedJob", queuedJob)
+			// logger.DebugContext(pluginCtx, "cleanup | WorkflowJobPayload | queuedJob", "queuedJob", queuedJob)
 			// delete the in_progress queue's index that matches the wrkflowJobID
 			err = internalGithub.DeleteFromQueue(cleanupContext, logger, *queuedJob.WorkflowJob.ID, mainInProgressQueueName)
 			if err != nil {
@@ -770,7 +770,7 @@ func cleanup(
 			}
 
 			if queuedJob.WorkflowJob.Status != nil && *queuedJob.WorkflowJob.Status == "completed" {
-				fmt.Println(pluginConfig.Name, "cleanup | WorkflowJobPayload | status is completed, so clean everything up", "job.WorkflowJob.Status", *queuedJob.WorkflowJob.Status)
+				logger.DebugContext(pluginCtx, "cleanup | status is completed, cleaning up")
 				databaseContainer.Client.Del(cleanupContext, pluginCompletedQueueName)
 				databaseContainer.Client.Del(cleanupContext, pluginQueueName+"/cleaning")
 				break
@@ -779,7 +779,7 @@ func cleanup(
 			// if we don't, we could suffer from a situation where a completed job comes in and is orphaned
 			select {
 			case <-pluginGlobals.PausedCancellationJobChannel:
-				fmt.Println(pluginConfig.Name, "cleanup | WorkflowJobPayload | PausedCancellationJobChannel")
+				// logger.DebugContext(pluginCtx, "cleanup | WorkflowJobPayload | PausedCancellationJobChannel")
 				// if the job was paused, we need to remove it
 				databaseContainer.Client.Del(cleanupContext, pluginQueueName+"/cleaning")
 				return
@@ -851,7 +851,6 @@ func Run(
 	if err != nil {
 		return pluginCtx, err
 	}
-	fmt.Println(pluginConfig.Name, "Run START===================")
 
 	isRepoSet, err := config.GetIsRepoSetFromContext(pluginCtx)
 	if err != nil {
@@ -974,9 +973,7 @@ func Run(
 			pausedQueueName,
 			false,
 		)
-		fmt.Println(pluginConfig.Name, "cleanup done")
 		close(pluginGlobals.JobChannel)
-		fmt.Println(pluginConfig.Name, "pluginGlobals.JobChannel closed")
 	}()
 
 	// check constantly for a cancelled/completed webhook to be received for our job
@@ -1039,7 +1036,7 @@ func Run(
 	)
 	select {
 	case runningJob := <-pluginGlobals.JobChannel:
-		fmt.Println("after first cleanup status", runningJob.WorkflowJob.Status)
+		// fmt.Println("after first cleanup status", runningJob.WorkflowJob.Status)
 		if *runningJob.WorkflowJob.Status == "completed" || *runningJob.WorkflowJob.Status == "failed" {
 			logger.InfoContext(pluginCtx, "completed or failed job found at start")
 			pluginGlobals.JobChannel <- runningJob
@@ -1118,33 +1115,33 @@ func Run(
 		var pausedQueuedJobString string
 		var pausedQueueTargetIndex int64 = 0
 		for {
-			fmt.Println(pluginConfig.Name, "checking for paused jobs")
+			// fmt.Println(pluginConfig.Name, "checking for paused jobs")
 			// Check the length of the paused queue
 			pausedQueueLength, err := databaseContainer.Client.LLen(pluginCtx, pausedQueueName).Result()
 			if err != nil {
 				return pluginCtx, fmt.Errorf("error getting paused queue length: %s", err.Error())
 			}
 			if pausedQueueLength == 0 {
-				fmt.Println(pluginConfig.Name, "no paused jobs found (length 0)")
+				// fmt.Println(pluginConfig.Name, "no paused jobs found (length 0)")
 				break
 			}
 			pausedQueuedJobString, err = internalGithub.PopJobOffQueue(pluginCtx, pausedQueueName, pausedQueueTargetIndex)
 			defer func() {
 				// there is a chance a failure could cause the paused job to be permanently removed, so make sure it gets put back no matter what
-				fmt.Println(pluginConfig.Name, "end of paused jobs loop iteration")
+				// fmt.Println(pluginConfig.Name, "end of paused jobs loop iteration")
 				if pausedQueuedJobString != "" {
 					err := databaseContainer.Client.LPush(pluginCtx, pausedQueueName, pausedQueuedJobString).Err()
 					if err != nil {
 						logger.ErrorContext(pluginCtx, "error pushing job to paused queue", "err", err)
 					}
-					fmt.Println(pluginConfig.Name, "pushed job back to paused queue", pausedQueuedJobString)
+					// fmt.Println(pluginConfig.Name, "pushed job back to paused queue", pausedQueuedJobString)
 				}
 			}()
 			if err != nil {
 				return pluginCtx, fmt.Errorf("error getting paused jobs: %s", err.Error())
 			}
 			if pausedQueuedJobString == "" {
-				fmt.Println(pluginConfig.Name, "no paused jobs found (empty string)")
+				// fmt.Println(pluginConfig.Name, "no paused jobs found (empty string)")
 				break
 			}
 			// Process each paused job and find one we can run
@@ -1164,7 +1161,7 @@ func Run(
 			}
 			err = internalAnka.VmHasEnoughHostResources(pluginCtx, pausedQueuedJob.AnkaVM)
 			if err != nil {
-				fmt.Println(pluginConfig.Name, "paused job does not have enough host resources to run")
+				// fmt.Println(pluginConfig.Name, "paused job does not have enough host resources to run")
 				pausedQueueTargetIndex++
 				if pausedQueueLength == 1 { // don't go into a forever loop
 					break
@@ -1173,7 +1170,7 @@ func Run(
 			}
 			err = internalAnka.VmHasEnoughResources(pluginCtx, pausedQueuedJob.AnkaVM)
 			if err != nil {
-				fmt.Println(pluginConfig.Name, "paused job does not have enough resources yet on the host")
+				// fmt.Println(pluginConfig.Name, "paused job does not have enough resources yet on the host")
 				pausedQueueTargetIndex++
 				if pausedQueueLength == 1 { // don't go into a forever loop
 					break
@@ -1221,7 +1218,7 @@ func Run(
 			if err != nil {
 				logger.ErrorContext(pluginCtx, "error pushing job to paused queue", "err", err)
 			}
-			fmt.Println(pluginConfig.Name, "pushed job back to paused queue", pausedQueuedJobString)
+			logger.DebugContext(pluginCtx, "pushed job back to paused queue", "pausedQueuedJobString", pausedQueuedJobString)
 			pausedQueuedJobString = "" // don't let the defer function push it back
 		}
 
@@ -1238,7 +1235,6 @@ func Run(
 			queuedJobString, err = internalGithub.PopJobOffQueue(pluginCtx, mainQueueName, *workerGlobals.QueueTargetIndex)
 			if err != nil {
 				metricsData.IncrementTotalFailedRunsSinceStart(workerCtx, pluginCtx, logger)
-				fmt.Printf("resetting queue target index 1\n")
 				return pluginCtx, fmt.Errorf("error getting queued jobs: %s", err.Error())
 			}
 			if queuedJobString == "" { // no queued jobs
@@ -1307,9 +1303,13 @@ func Run(
 	// now that the job is in the plugin's queue,check if the job is already completed so we don't orphan if there is
 	// a job in anklet/jobs/github/queued and also a anklet/jobs/github/completed
 	pluginGlobals.FirstCheckForCompletedJobsRan = false
+	counter := 0
 	for !pluginGlobals.FirstCheckForCompletedJobsRan {
-		fmt.Println(pluginConfig.Name, "waiting for checkForCompletedJobs to run once more before we proceed")
 		time.Sleep(1 * time.Second)
+		counter++
+		if counter%5 == 0 {
+			logger.DebugContext(pluginCtx, "waiting for first check for completed jobs to run", "seconds_waited", counter)
+		}
 	}
 	select {
 	case job := <-pluginGlobals.JobChannel:
