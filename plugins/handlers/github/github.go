@@ -278,14 +278,20 @@ func sendCancelWorkflowRun(
 		return err
 	}
 	cancelSent := false
+	tries := 0
 	for {
 		newPluginCtx, workflowRun, _, err := internalGithub.ExecuteGitHubClientFunction(workerCtx, pluginCtx, logger, func() (*github.WorkflowRun, *github.Response, error) {
 			workflowRun, resp, err := githubClient.Actions.GetWorkflowRunByID(context.Background(), pluginConfig.Owner, *queuedJob.Repository.Name, *queuedJob.WorkflowJob.RunID)
 			return workflowRun, resp, err
 		})
 		if err != nil {
-			logger.ErrorContext(newPluginCtx, "error getting workflow run by ID", "err", err)
-			return err
+			logger.ErrorContext(newPluginCtx, "error getting workflow run by ID, will retry", "err", err, "tries", tries)
+			tries++
+			if tries > 3 {
+				return err
+			}
+			time.Sleep(10 * time.Second)
+			continue
 		}
 		pluginCtx = newPluginCtx
 		if *workflowRun.Status == "completed" ||
