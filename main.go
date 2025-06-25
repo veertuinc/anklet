@@ -199,7 +199,7 @@ func main() {
 	parentCtx = context.WithValue(parentCtx, config.ContextKey("globals"), &config.Globals{
 		RunPluginsOnce:       runOnce == "true",
 		FirstPluginStarted:   make(chan bool, 1),
-		ReturnAllToMainQueue: make(chan bool, 1),
+		ReturnAllToMainQueue: atomic.Bool{},
 		PullLock:             &sync.Mutex{},
 		PluginsPath:          pluginsPath,
 		DebugEnabled:         logging.IsDebugEnabled(),
@@ -295,7 +295,7 @@ func worker(
 				}
 				parentLogger.WarnContext(workerCtx, "best effort graceful shutdown, interrupting the job as soon as possible...")
 				workerCancel()
-				workerGlobals.ReturnAllToMainQueue <- true
+				workerGlobals.ReturnAllToMainQueue.Store(true)
 			}
 		}
 	}()

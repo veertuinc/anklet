@@ -212,7 +212,7 @@ type Globals struct {
 	RunPluginsOnce bool
 	// block the second plugin until the first plugin is done
 	FirstPluginStarted   chan bool
-	ReturnAllToMainQueue chan bool
+	ReturnAllToMainQueue atomic.Bool
 	PullLock             *sync.Mutex
 	PluginsPath          string
 	DebugEnabled         bool

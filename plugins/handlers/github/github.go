@@ -378,9 +378,6 @@ func checkForCompletedJobs(
 		// do not use 'continue' in the loop or else the ranOnce won't happen
 		// logging.DevContext(pluginCtx, "checkForCompletedJobs "+pluginConfig.Name+" | runOnce "+fmt.Sprint(runOnce))
 		select {
-		case <-workerGlobals.ReturnAllToMainQueue:
-			logger.WarnContext(pluginCtx, "main worker is returning all jobs to main queue")
-			pluginGlobals.ReturnToMainQueue <- "return_all_to_main_queue"
 		case <-pluginGlobals.PausedCancellationJobChannel:
 			// logger.DebugContext(pluginCtx, " checkForCompletedJobs -> pausedCancellationJobChannel")
 			pluginGlobals.PausedCancellationJobChannel <- internalGithub.QueueJob{Action: "finish"} // send second one so cleanup doesn't run
@@ -404,6 +401,11 @@ func checkForCompletedJobs(
 			// logging.DevContext(pluginCtx, "checkForCompletedJobs "+pluginConfig.Name+" pluginCtx.Done()")
 			return
 		default:
+			if workerGlobals.ReturnAllToMainQueue.Load() {
+				logger.WarnContext(pluginCtx, "main worker is returning all jobs to main queue")
+				pluginGlobals.ReturnToMainQueue <- "return_all_to_main_queue"
+				workerGlobals.ReturnAllToMainQueue.Store(false)
+			}
 		}
 
 		// get the job ID
@@ -1176,7 +1178,7 @@ func Run(
 				continue
 			}
 
-			logger.InfoContext(pluginCtx, "paused job found to run and passes checks", "pausedQueuedJob", pausedQueuedJob)
+			logger.InfoContext(pluginCtx, "paused job found to run", "pausedQueuedJob", pausedQueuedJob)
 
 			// pull the workflow job from the currently paused host's queue and put it in the current queue instead
 			originalHostJob, err := internalGithub.GetJobFromQueueByKeyAndValue(
