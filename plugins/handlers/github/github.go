@@ -704,7 +704,8 @@ func cleanup(
 
 	// if the job is running, we don't need to clean it up yet
 	if originalQueuedJob.WorkflowJob.Status != nil &&
-		(*originalQueuedJob.WorkflowJob.Status == "in_progress" || originalQueuedJob.Action == "in_progress") {
+		(*originalQueuedJob.WorkflowJob.Status == "in_progress" ||
+			(workerGlobals.ReturnAllToMainQueue.Load() && originalQueuedJob.Action == "in_progress")) {
 		logger.DebugContext(pluginCtx, "cleanup | job is still running; skipping cleanup")
 		return
 	}
