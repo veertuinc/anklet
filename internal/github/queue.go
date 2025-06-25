@@ -74,11 +74,11 @@ func DeleteFromQueue(ctx context.Context, logger *slog.Logger, jobID int64, queu
 		logger.ErrorContext(ctx, "error getting list of queued jobs", "err", err)
 		return err
 	}
-	logger.InfoContext(ctx, "deleting job from queue", "jobID", jobID, "queue", queue, "queued", queued)
 	if len(queued) == 0 {
-		logger.InfoContext(ctx, "no jobs in queue", "queue", queue)
+		// logger.DebugContext(ctx, "no jobs in queue to delete", "queue", queue)
 		return nil
 	}
+	logger.DebugContext(ctx, "deleting job from queue", "jobID", jobID, "queue", queue, "queued", queued)
 	for _, queueItem := range queued {
 		queueJob, err, typeErr := database.Unwrap[QueueJob](queueItem)
 		if err != nil {
@@ -88,11 +88,6 @@ func DeleteFromQueue(ctx context.Context, logger *slog.Logger, jobID int64, queu
 		if typeErr != nil { // not the type we want
 			continue
 		}
-		fmt.Println("queueJob", queueJob.WorkflowJob.ID)
-		fmt.Println("queueItem", queueItem)
-		fmt.Println("jobID", jobID)
-		fmt.Println("queueJob.WorkflowJob.ID", *queueJob.WorkflowJob.ID)
-		fmt.Println("queueJob.WorkflowJob.ID == jobID", *queueJob.WorkflowJob.ID == jobID)
 		if *queueJob.WorkflowJob.ID == jobID {
 			// logger.WarnContext(pluginCtx, "WorkflowJob.ID already in queue", "WorkflowJob.ID", jobID)
 			success, err := databaseContainer.Client.LRem(innerContext, queue, 1, queueItem).Result()
@@ -101,7 +96,7 @@ func DeleteFromQueue(ctx context.Context, logger *slog.Logger, jobID int64, queu
 				return err
 			}
 			if success == 1 {
-				logger.InfoContext(ctx, "job removed from queue", "jobID", jobID, "queue", queue)
+				logger.DebugContext(ctx, "job removed from queue", "jobID", jobID, "queue", queue)
 			} else {
 				return fmt.Errorf("job not removed from queue")
 			}
@@ -135,11 +130,6 @@ func PopJobOffQueue(
 	if err != nil {
 		return "", fmt.Errorf("error getting database client from context: %s", err.Error())
 	}
-	// logger, err := logging.GetLoggerFromContext(pluginCtx)
-	// if err != nil {
-	// 	return "", fmt.Errorf("error getting logger from context: %s", err.Error())
-	// }
-	// logger.WarnContext(pluginCtx, "getting queued job at index", "queueTargetIndex", queueTargetIndex)
 	// we use Range here + Rem instead of Pop so we can use QueueTargetIndex.
 	// QueueTargetIndex is the index we want to start at, allowing us to push
 	// past the jobs we can't run due to host limits but are still in the main queue.
