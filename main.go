@@ -286,6 +286,7 @@ func worker(
 			switch sig {
 			case syscall.SIGQUIT: // doesn't work for receivers since they don't loop
 				parentLogger.WarnContext(workerCtx, "graceful shutdown, waiting for jobs to finish...")
+				workerGlobals.ReturnAllToMainQueue.Store(true)
 				toRunOnce = true
 			default:
 				sigCount++
@@ -295,7 +296,6 @@ func worker(
 				}
 				parentLogger.WarnContext(workerCtx, "best effort graceful shutdown, interrupting the job as soon as possible...")
 				workerCancel()
-				workerGlobals.ReturnAllToMainQueue.Store(true)
 			}
 		}
 	}()
