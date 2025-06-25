@@ -14,14 +14,6 @@ type VM struct {
 	MEMBytes uint64 `json:"ram_size"`
 }
 
-// func GetAnkaVmFromContext(pluginCtx context.Context) (*VM, error) {
-// 	ankaVm, ok := pluginCtx.Value(config.ContextKey("ankavm")).(*VM)
-// 	if !ok {
-// 		return nil, fmt.Errorf("GetAnkaVmFromContext failed")
-// 	}
-// 	return ankaVm, nil
-// }
-
 func GetAnkaRegistryVmInfo(
 	pluginCtx context.Context,
 	template string,
