@@ -11,6 +11,7 @@ builds:
   - id: linux-amd64
     env:
       - CC=x86_64-linux-musl-gcc
+      - CXX=x86_64-linux-musl-g++
     mod_timestamp: '{{ .CommitTimestamp }}'
     hooks:
       post:
@@ -20,6 +21,7 @@ builds:
       - -trimpath #removes all file system paths from the compiled executable
     ldflags:
       - '-s -w -X main.version={{ .Version }} -X main.commit={{ .Commit }}'
+      - '-linkmode external -extldflags "-static"'
     goos:
       - linux
     goarch:
@@ -29,6 +31,7 @@ builds:
   - id: linux-arm64
     env:
       - CC=aarch64-linux-musl-gcc
+      - CXX=aarch64-linux-musl-g++
     mod_timestamp: '{{ .CommitTimestamp }}'
     hooks:
       post:
@@ -38,6 +41,7 @@ builds:
       - -trimpath #removes all file system paths from the compiled executable
     ldflags:
       - '-s -w -X main.version={{ .Version }} -X main.commit={{ .Commit }}'
+      - '-linkmode external -extldflags "-static"'
     goos:
       - linux
     goarch:
