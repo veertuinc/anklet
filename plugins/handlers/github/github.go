@@ -285,7 +285,6 @@ func sendCancelWorkflowRun(
 	}
 	cancelSent := false
 	tries := 0
-	id := rand.Intn(10)
 	for {
 		newPluginCtx, workflowRun, _, err := internalGithub.ExecuteGitHubClientFunction(workerCtx, pluginCtx, logger, func() (*github.WorkflowRun, *github.Response, error) {
 			workflowRun, resp, err := githubClient.Actions.GetWorkflowRunByID(context.Background(), pluginConfig.Owner, *queuedJob.Repository.Name, *queuedJob.WorkflowJob.RunID)
@@ -305,7 +304,6 @@ func sendCancelWorkflowRun(
 			(workflowRun.Conclusion != nil && *workflowRun.Conclusion == "cancelled") ||
 			cancelSent {
 			metricsData.IncrementTotalCanceledRunsSinceStart(workerCtx, pluginCtx, logger)
-			fmt.Println("incrementing total canceled runs since start", id)
 			err = metricsData.UpdatePlugin(workerCtx, pluginCtx, logger, metrics.Plugin{
 				PluginBase: &metrics.PluginBase{
 					Name: pluginConfig.Name,
@@ -1413,7 +1411,12 @@ func Run(
 	ankaTemplate := extractLabelValue(queuedJob.WorkflowJob.Labels, "anka-template:")
 	if ankaTemplate == "" {
 		logger.WarnContext(pluginCtx, "warning: unable to find Anka Template specified in labels, cancelling job")
-		pluginGlobals.JobChannel <- internalGithub.QueueJob{Action: "cancel"}
+		queuedJob.Action = "cancel"
+		err = internalGithub.UpdateJobInDB(pluginCtx, pluginQueueName, &queuedJob)
+		if err != nil {
+			logger.ErrorContext(pluginCtx, "error updating job in db", "err", err)
+		}
+		pluginGlobals.JobChannel <- queuedJob
 		return pluginCtx, nil
 	}
 	pluginCtx = logging.AppendCtx(pluginCtx, slog.String("ankaTemplate", ankaTemplate))
@@ -1619,7 +1622,12 @@ func Run(
 				pluginGlobals.RetryChannel <- "context_canceled"
 				return pluginCtx, fmt.Errorf("context canceled after EnsureVMTemplateExists")
 			}
-			pluginGlobals.JobChannel <- internalGithub.QueueJob{Action: "cancel"}
+			queuedJob.Action = "cancel"
+			err = internalGithub.UpdateJobInDB(pluginCtx, pluginQueueName, &queuedJob)
+			if err != nil {
+				logger.ErrorContext(pluginCtx, "error updating job in db", "err", err)
+			}
+			pluginGlobals.JobChannel <- queuedJob
 			skipPrep = true
 		}
 	}
@@ -1733,7 +1741,12 @@ func Run(
 		_, startRunnerErr := os.Stat(startRunnerPath)
 		if installRunnerErr != nil || registerRunnerErr != nil || startRunnerErr != nil {
 			// logger.ErrorContext(pluginCtx, "must include install-runner.bash, register-runner.bash, and start-runner.bash in "+globals.PluginsPath+"/handlers/github/", "err", err)
-			pluginGlobals.JobChannel <- internalGithub.QueueJob{Action: "cancel"}
+			queuedJob.Action = "cancel"
+			err = internalGithub.UpdateJobInDB(pluginCtx, pluginQueueName, &queuedJob)
+			if err != nil {
+				logger.ErrorContext(pluginCtx, "error updating job in db", "err", err)
+			}
+			pluginGlobals.JobChannel <- queuedJob
 			return pluginCtx, fmt.Errorf("must include install-runner.bash, register-runner.bash, and start-runner.bash in %s/handlers/github/", workerGlobals.PluginsPath)
 		}
 
