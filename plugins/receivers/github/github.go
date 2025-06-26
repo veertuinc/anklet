@@ -70,7 +70,7 @@ func Run(
 	if err != nil {
 		return pluginCtx, err
 	}
-	metricsData.AddPlugin(
+	err = metricsData.AddPlugin(
 		metrics.PluginBase{
 			Name:        pluginConfig.Name,
 			PluginName:  pluginConfig.Plugin,
@@ -80,7 +80,9 @@ func Run(
 			StatusSince: time.Now(),
 		},
 	)
-
+	if err != nil {
+		return pluginCtx, fmt.Errorf("error adding plugin to metrics: %s", err.Error())
+	}
 	once.Do(func() {
 		metrics.ExportMetricsToDB(pluginCtx, logger)
 	})
@@ -89,25 +91,25 @@ func Run(
 		return pluginCtx, err
 	}
 	if pluginConfig.Token == "" && pluginConfig.PrivateKey == "" {
-		return pluginCtx, fmt.Errorf("token or private_key are not set at global level or in " + configFileName + ":plugins:" + pluginConfig.Name)
+		return pluginCtx, fmt.Errorf("token or private_key are not set at global level or in %s:plugins:%s<token/private_key>", configFileName, pluginConfig.Name)
 	}
 	if strings.HasPrefix(pluginConfig.PrivateKey, "~/") {
 		homeDir, err := os.UserHomeDir()
 		if err != nil {
-			return pluginCtx, fmt.Errorf("unable to get user home directory: " + err.Error())
+			return pluginCtx, fmt.Errorf("unable to get user home directory: %s", err.Error())
 		}
 		pluginConfig.PrivateKey = filepath.Join(homeDir, pluginConfig.PrivateKey[2:])
 	}
 	if pluginConfig.Owner == "" {
-		return pluginCtx, fmt.Errorf("owner is not set in " + configFileName + ":plugins:" + pluginConfig.Name)
+		return pluginCtx, fmt.Errorf("owner is not set in %s:plugins:%s<owner>", configFileName, pluginConfig.Name)
 	}
 	if pluginConfig.Secret == "" {
-		return pluginCtx, fmt.Errorf("secret is not set in " + configFileName + ":plugins:" + pluginConfig.Name)
+		return pluginCtx, fmt.Errorf("secret is not set in %s:plugins:%s<secret>", configFileName, pluginConfig.Name)
 	}
 
 	databaseContainer, err := database.GetDatabaseFromContext(pluginCtx)
 	if err != nil {
-		return pluginCtx, fmt.Errorf("error getting database client from context: " + err.Error())
+		return pluginCtx, fmt.Errorf("error getting database client from context: %s", err.Error())
 	}
 
 	var githubClient *github.Client
@@ -127,13 +129,16 @@ func Run(
 	// clean up in_progress queue if it exists
 	err = databaseContainer.Client.Del(pluginCtx, "anklet/jobs/github/in_progress/"+pluginConfig.Owner).Err()
 	if err != nil {
-		return pluginCtx, fmt.Errorf("error deleting in_progress queue: " + err.Error())
+		return pluginCtx, fmt.Errorf("error deleting in_progress queue: %s", err.Error())
 	}
 
 	server := &http.Server{Addr: ":" + pluginConfig.Port}
 	http.HandleFunc("/healthcheck", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("ok"))
+		_, err := w.Write([]byte("ok"))
+		if err != nil {
+			logger.ErrorContext(pluginCtx, "error writing response", "error", err)
+		}
 	})
 	http.HandleFunc("/jobs/v1/receiver", func(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
@@ -364,7 +369,10 @@ func Run(
 	})
 	http.HandleFunc("/jobs", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotImplemented)
-		w.Write([]byte("please use /jobs/v1"))
+		_, err := w.Write([]byte("please use /jobs/v1"))
+		if err != nil {
+			logger.ErrorContext(pluginCtx, "error writing response", "error", err)
+		}
 	})
 	go func() {
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -536,7 +544,7 @@ func Run(
 						otherHookDelivery.GUID != nil && hookDelivery.GUID != nil && *otherHookDelivery.GUID == *hookDelivery.GUID &&
 						otherHookDelivery.Redelivery != nil && *otherHookDelivery.Redelivery &&
 						otherHookDelivery.StatusCode != nil && *otherHookDelivery.StatusCode == 200 &&
-						otherHookDelivery.DeliveredAt.Time.After(hookDelivery.DeliveredAt.Time) {
+						otherHookDelivery.DeliveredAt.After(hookDelivery.DeliveredAt.Time) {
 						found = otherHookDelivery
 						break
 					}
@@ -706,7 +714,7 @@ MainLoop:
 			// check if a completed hook exists, so we don't re-queue something already finished
 			for _, otherHookDelivery := range *hookDeliveries {
 				if *otherHookDelivery.Action == "completed" &&
-					otherHookDelivery.DeliveredAt != nil && otherHookDelivery.DeliveredAt.Time.After(hookDelivery.DeliveredAt.Time) &&
+					otherHookDelivery.DeliveredAt != nil && otherHookDelivery.DeliveredAt.After(hookDelivery.DeliveredAt.Time) &&
 					otherHookDelivery.RepositoryID != nil && *otherHookDelivery.RepositoryID == *hookDelivery.RepositoryID {
 					var otherGottenHookDelivery *github.HookDelivery
 					var err error
@@ -792,10 +800,13 @@ MainLoop:
 		close(workerGlobals.FirstPluginStarted)
 	}
 	logger.InfoContext(pluginCtx, "started plugin")
-	metrics.UpdatePlugin(workerCtx, pluginCtx, logger, metrics.PluginBase{
+	err = metrics.UpdatePlugin(workerCtx, pluginCtx, logger, metrics.PluginBase{
 		Status:      "running",
 		StatusSince: time.Now(),
 	})
+	if err != nil {
+		return pluginCtx, fmt.Errorf("error updating plugin metrics: %s", err.Error())
+	}
 	// wait for the context to be canceled
 	<-pluginCtx.Done()
 	logger.InfoContext(pluginCtx, "shutting down receiver")

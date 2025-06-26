@@ -324,7 +324,11 @@ func worker(
 		for {
 			ln, err := net.Listen("tcp", ":"+metricsPort)
 			if err == nil {
-				ln.Close()
+				err = ln.Close()
+				if err != nil {
+					parentLogger.ErrorContext(workerCtx, "error closing metrics port", "port", metricsPort, "error", err)
+					os.Exit(1)
+				}
 				break
 			}
 			port, _ := strconv.Atoi(metricsPort)
@@ -337,7 +341,11 @@ func worker(
 		parentLogger.ErrorContext(workerCtx, "metrics port already in use", "port", metricsPort, "error", err)
 		os.Exit(1)
 	}
-	ln.Close()
+	err = ln.Close()
+	if err != nil {
+		parentLogger.ErrorContext(workerCtx, "error closing metrics port", "port", metricsPort, "error", err)
+		os.Exit(1)
+	}
 	metricsService := metrics.NewServer(metricsPort)
 	if loadedConfig.Metrics.Aggregator {
 		if databaseURL == "" { // if no global database URL is set, use the metrics database URL
@@ -518,7 +526,10 @@ func worker(
 					select {
 					case <-pluginCtx.Done():
 						// logging.DevContext(pluginCtx, "plugin for loop::pluginCtx.Done()")
-						metricsData.SetStatus(pluginCtx, pluginLogger, "stopped")
+						err = metricsData.SetStatus(pluginCtx, pluginLogger, "stopped")
+						if err != nil {
+							pluginLogger.ErrorContext(pluginCtx, "error setting plugin status", "error", err)
+						}
 						pluginLogger.WarnContext(pluginCtx, shutDownMessage)
 						pluginCancel()
 						return
@@ -528,7 +539,10 @@ func worker(
 						if workerGlobals.IsAPluginPreparingState() != "" {
 							logging.DevContext(pluginCtx, "paused for another plugin to finish preparing")
 							// When paused, sleep briefly and continue checking
-							metricsData.SetStatus(pluginCtx, pluginLogger, "paused")
+							err = metricsData.SetStatus(pluginCtx, pluginLogger, "paused")
+							if err != nil {
+								pluginLogger.ErrorContext(pluginCtx, "error setting plugin status", "error", err)
+							}
 							time.Sleep(time.Second * 3)
 							continue
 						}
@@ -536,7 +550,10 @@ func worker(
 						if workerGlobals.ArePluginsPaused() {
 							logging.DevContext(pluginCtx, "paused for another plugin to finish running")
 							// When paused, sleep briefly and continue checking
-							metricsData.SetStatus(pluginCtx, pluginLogger, "paused")
+							err = metricsData.SetStatus(pluginCtx, pluginLogger, "paused")
+							if err != nil {
+								pluginLogger.ErrorContext(pluginCtx, "error setting plugin status", "error", err)
+							}
 							time.Sleep(time.Second * 3)
 							continue
 						}
@@ -573,7 +590,10 @@ func worker(
 							pluginCancel()
 							return
 						}
-						metricsData.SetStatus(updatedPluginCtx, pluginLogger, "idle")
+						err = metricsData.SetStatus(updatedPluginCtx, pluginLogger, "idle")
+						if err != nil {
+							pluginLogger.ErrorContext(updatedPluginCtx, "error setting plugin status", "error", err)
+						}
 						select {
 						case <-time.After(time.Duration(plugin.SleepInterval) * time.Second):
 						case <-pluginCtx.Done():

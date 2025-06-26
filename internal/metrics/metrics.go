@@ -77,7 +77,7 @@ func (m *MetricsDataLock) AddPlugin(plugin any) error {
 	case PluginBase:
 		pluginName = pluginTyped.Name
 	case Plugin:
-		pluginName = pluginTyped.PluginBase.Name
+		pluginName = pluginTyped.Name
 	default:
 		return fmt.Errorf("unable to get plugin name")
 	}
@@ -87,7 +87,7 @@ func (m *MetricsDataLock) AddPlugin(plugin any) error {
 		case PluginBase:
 			name = pluginTyped.Name
 		case Plugin:
-			name = pluginTyped.PluginBase.Name
+			name = pluginTyped.Name
 		default:
 			return fmt.Errorf("unable to get plugin name")
 		}
@@ -163,13 +163,16 @@ func (m *MetricsDataLock) IncrementPluginTotalRanVMs(
 	for _, plugin := range m.Plugins {
 		switch typedPlugin := plugin.(type) {
 		case Plugin:
-			if typedPlugin.PluginBase.Name == pluginConfig.Name {
-				UpdatePlugin(workerCtx, pluginCtx, logger, Plugin{
+			if typedPlugin.Name == pluginConfig.Name {
+				err = UpdatePlugin(workerCtx, pluginCtx, logger, Plugin{
 					PluginBase: &PluginBase{
 						Name: pluginConfig.Name,
 					},
 					TotalRanVMs: typedPlugin.TotalRanVMs + 1,
 				})
+				if err != nil {
+					logger.ErrorContext(pluginCtx, "error updating plugin metrics", "error", err)
+				}
 			}
 		}
 	}
@@ -187,13 +190,16 @@ func (m *MetricsDataLock) IncrementPluginTotalSuccessfulRunsSinceStart(
 	for _, plugin := range m.Plugins {
 		switch typedPlugin := plugin.(type) {
 		case Plugin:
-			if typedPlugin.PluginBase.Name == pluginConfig.Name {
-				UpdatePlugin(workerCtx, pluginCtx, logger, Plugin{
+			if typedPlugin.Name == pluginConfig.Name {
+				err = UpdatePlugin(workerCtx, pluginCtx, logger, Plugin{
 					PluginBase: &PluginBase{
 						Name: pluginConfig.Name,
 					},
 					TotalSuccessfulRunsSinceStart: typedPlugin.TotalSuccessfulRunsSinceStart + 1,
 				})
+				if err != nil {
+					logger.ErrorContext(pluginCtx, "error updating plugin metrics", "error", err)
+				}
 			}
 		}
 	}
@@ -211,13 +217,16 @@ func (m *MetricsDataLock) IncrementPluginTotalFailedRunsSinceStart(
 	for _, plugin := range m.Plugins {
 		switch typedPlugin := plugin.(type) {
 		case Plugin:
-			if typedPlugin.PluginBase.Name == pluginConfig.Name {
-				UpdatePlugin(workerCtx, pluginCtx, logger, Plugin{
+			if typedPlugin.Name == pluginConfig.Name {
+				err = UpdatePlugin(workerCtx, pluginCtx, logger, Plugin{
 					PluginBase: &PluginBase{
 						Name: pluginConfig.Name,
 					},
 					TotalFailedRunsSinceStart: typedPlugin.TotalFailedRunsSinceStart + 1,
 				})
+				if err != nil {
+					logger.ErrorContext(pluginCtx, "error updating plugin metrics", "error", err)
+				}
 			}
 		}
 	}
@@ -235,13 +244,16 @@ func (m *MetricsDataLock) IncrementPluginTotalCanceledRunsSinceStart(
 	for _, plugin := range m.Plugins {
 		switch typedPlugin := plugin.(type) {
 		case Plugin:
-			if typedPlugin.PluginBase.Name == pluginConfig.Name {
-				UpdatePlugin(workerCtx, pluginCtx, logger, Plugin{
+			if typedPlugin.Name == pluginConfig.Name {
+				err = UpdatePlugin(workerCtx, pluginCtx, logger, Plugin{
 					PluginBase: &PluginBase{
 						Name: pluginConfig.Name,
 					},
 					TotalCanceledRunsSinceStart: typedPlugin.TotalCanceledRunsSinceStart + 1,
 				})
+				if err != nil {
+					logger.ErrorContext(pluginCtx, "error updating plugin metrics", "error", err)
+				}
 			}
 		}
 	}
@@ -369,7 +381,7 @@ func UpdatePlugin(
 		for i, currentPluginMetrics := range metricsData.Plugins {
 			switch fullCurrentPluginMetrics := currentPluginMetrics.(type) {
 			case Plugin:
-				if fullCurrentPluginMetrics.PluginBase.Name == ctxPlugin.Name {
+				if fullCurrentPluginMetrics.Name == ctxPlugin.Name {
 					newPlugin, err := CompareAndUpdateMetrics(currentPluginMetrics, updatedPlugin)
 					if err != nil {
 						return err
@@ -449,7 +461,7 @@ func (m *MetricsDataLock) SetStatus(pluginCtx context.Context, logger *slog.Logg
 	for i, plugin := range m.Plugins {
 		switch typedPlugin := plugin.(type) {
 		case Plugin:
-			if typedPlugin.PluginBase.Name == ctxPlugin.Name {
+			if typedPlugin.Name == ctxPlugin.Name {
 				if typedPlugin.Status != status { // only update status if it's changing
 					typedPlugin.Status = status
 					m.Plugins[i] = typedPlugin
@@ -498,9 +510,15 @@ func (s *Server) Start(parentCtx context.Context, logger *slog.Logger, soloRecei
 	})
 	http.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotImplemented)
-		w.Write([]byte("please use /metrics/v1"))
+		_, err := w.Write([]byte("please use /metrics/v1"))
+		if err != nil {
+			logger.ErrorContext(parentCtx, "error writing response", "error", err)
+		}
 	})
-	http.ListenAndServe(":"+s.Port, nil)
+	err := http.ListenAndServe(":"+s.Port, nil)
+	if err != nil {
+		logger.ErrorContext(parentCtx, "error starting metrics server", "error", err)
+	}
 }
 
 // handleMetrics processes the /metrics endpoint
@@ -658,10 +676,22 @@ func (s *Server) handlePrometheusMetrics(ctx context.Context, soloReceiver bool)
 		metricsData := ctx.Value(config.ContextKey("metrics")).(*MetricsDataLock)
 		w.Header().Set("Content-Type", "text/plain")
 		if !soloReceiver {
-			w.Write([]byte(fmt.Sprintf("total_running_vms %d\n", metricsData.TotalRunningVMs)))
-			w.Write([]byte(fmt.Sprintf("total_successful_runs_since_start %d\n", metricsData.TotalSuccessfulRunsSinceStart)))
-			w.Write([]byte(fmt.Sprintf("total_failed_runs_since_start %d\n", metricsData.TotalFailedRunsSinceStart)))
-			w.Write([]byte(fmt.Sprintf("total_canceled_runs_since_start %d\n", metricsData.TotalCanceledRunsSinceStart)))
+			_, err := fmt.Fprintf(w, "total_running_vms %d\n", metricsData.TotalRunningVMs)
+			if err != nil {
+				panic(err)
+			}
+			_, err = fmt.Fprintf(w, "total_successful_runs_since_start %d\n", metricsData.TotalSuccessfulRunsSinceStart)
+			if err != nil {
+				panic(err)
+			}
+			_, err = fmt.Fprintf(w, "total_failed_runs_since_start %d\n", metricsData.TotalFailedRunsSinceStart)
+			if err != nil {
+				panic(err)
+			}
+			_, err = fmt.Fprintf(w, "total_canceled_runs_since_start %d\n", metricsData.TotalCanceledRunsSinceStart)
+			if err != nil {
+				panic(err)
+			}
 		}
 		for _, service := range metricsData.Plugins {
 			var name string
@@ -713,44 +743,119 @@ func (s *Server) handlePrometheusMetrics(ctx context.Context, soloReceiver bool)
 				panic("unable to convert plugin to Plugin or PluginBase")
 			}
 			if repoName == "" {
-				w.Write([]byte(fmt.Sprintf("plugin_status{name=%s,plugin=%s,owner=%s} %s\n", name, pluginName, ownerName, status)))
+				_, err := fmt.Fprintf(w, "plugin_status{name=%s,plugin=%s,owner=%s} %s\n", name, pluginName, ownerName, status)
+				if err != nil {
+					panic(err)
+				}
 			} else {
-				w.Write([]byte(fmt.Sprintf("plugin_status{name=%s,plugin=%s,owner=%s,repo=%s} %s\n", name, pluginName, ownerName, repoName, status)))
+				_, err := fmt.Fprintf(w, "plugin_status{name=%s,plugin=%s,owner=%s,repo=%s} %s\n", name, pluginName, ownerName, repoName, status)
+				if err != nil {
+					panic(err)
+				}
 			}
 			if !strings.Contains(pluginName, "_receiver") {
 				if repoName == "" {
-					w.Write([]byte(fmt.Sprintf("plugin_last_successful_run{name=%s,plugin=%s,owner=%s,job_url=%s} %s\n", name, pluginName, ownerName, lastSuccessfulRunJobUrl, lastSuccessfulRun.Format(time.RFC3339))))
-					w.Write([]byte(fmt.Sprintf("plugin_last_failed_run{name=%s,plugin=%s,owner=%s,job_url=%s} %s\n", name, pluginName, ownerName, lastFailedRunJobUrl, lastFailedRun.Format(time.RFC3339))))
-					w.Write([]byte(fmt.Sprintf("plugin_last_canceled_run{name=%s,plugin=%s,owner=%s,job_url=%s} %s\n", name, pluginName, ownerName, lastCanceledRunJobUrl, lastCanceledRun.Format(time.RFC3339))))
+					_, err := fmt.Fprintf(w, "plugin_last_successful_run{name=%s,plugin=%s,owner=%s,job_url=%s} %s\n", name, pluginName, ownerName, lastSuccessfulRunJobUrl, lastSuccessfulRun.Format(time.RFC3339))
+					if err != nil {
+						panic(err)
+					}
+					_, err = fmt.Fprintf(w, "plugin_last_failed_run{name=%s,plugin=%s,owner=%s,job_url=%s} %s\n", name, pluginName, ownerName, lastFailedRunJobUrl, lastFailedRun.Format(time.RFC3339))
+					if err != nil {
+						panic(err)
+					}
+					_, err = fmt.Fprintf(w, "plugin_last_canceled_run{name=%s,plugin=%s,owner=%s,job_url=%s} %s\n", name, pluginName, ownerName, lastCanceledRunJobUrl, lastCanceledRun.Format(time.RFC3339))
+					if err != nil {
+						panic(err)
+					}
 				} else {
-					w.Write([]byte(fmt.Sprintf("plugin_last_successful_run{name=%s,plugin=%s,owner=%s,repo=%s,job_url=%s} %s\n", name, pluginName, ownerName, repoName, lastSuccessfulRunJobUrl, lastSuccessfulRun.Format(time.RFC3339))))
-					w.Write([]byte(fmt.Sprintf("plugin_last_failed_run{name=%s,plugin=%s,owner=%s,repo=%s,job_url=%s} %s\n", name, pluginName, ownerName, repoName, lastFailedRunJobUrl, lastFailedRun.Format(time.RFC3339))))
-					w.Write([]byte(fmt.Sprintf("plugin_last_canceled_run{name=%s,plugin=%s,owner=%s,repo=%s,job_url=%s} %s\n", name, pluginName, ownerName, repoName, lastCanceledRunJobUrl, lastCanceledRun.Format(time.RFC3339))))
+					_, err := fmt.Fprintf(w, "plugin_last_successful_run{name=%s,plugin=%s,owner=%s,repo=%s,job_url=%s} %s\n", name, pluginName, ownerName, repoName, lastSuccessfulRunJobUrl, lastSuccessfulRun.Format(time.RFC3339))
+					if err != nil {
+						panic(err)
+					}
+					_, err = fmt.Fprintf(w, "plugin_last_failed_run{name=%s,plugin=%s,owner=%s,repo=%s,job_url=%s} %s\n", name, pluginName, ownerName, repoName, lastFailedRunJobUrl, lastFailedRun.Format(time.RFC3339))
+					if err != nil {
+						panic(err)
+					}
+					_, err = fmt.Fprintf(w, "plugin_last_canceled_run{name=%s,plugin=%s,owner=%s,repo=%s,job_url=%s} %s\n", name, pluginName, ownerName, repoName, lastCanceledRunJobUrl, lastCanceledRun.Format(time.RFC3339))
+					if err != nil {
+						panic(err)
+					}
 				}
 			}
 			if repoName == "" {
-				w.Write([]byte(fmt.Sprintf("plugin_status_since{name=%s,plugin=%s,owner=%s} %s\n", name, pluginName, ownerName, StatusSince.Format(time.RFC3339))))
+				_, err := fmt.Fprintf(w, "plugin_status_since{name=%s,plugin=%s,owner=%s} %s\n", name, pluginName, ownerName, StatusSince.Format(time.RFC3339))
+				if err != nil {
+					panic(err)
+				}
 			} else {
-				w.Write([]byte(fmt.Sprintf("plugin_status_since{name=%s,plugin=%s,owner=%s,repo=%s} %s\n", name, pluginName, ownerName, repoName, StatusSince.Format(time.RFC3339))))
+				_, err := fmt.Fprintf(w, "plugin_status_since{name=%s,plugin=%s,owner=%s,repo=%s} %s\n", name, pluginName, ownerName, repoName, StatusSince.Format(time.RFC3339))
+				if err != nil {
+					panic(err)
+				}
 			}
 			if !soloReceiver {
-				w.Write([]byte(fmt.Sprintf("plugin_total_ran_vms{name=%s,plugin=%s,owner=%s} %d\n", name, pluginName, ownerName, totalRanVMs)))
-				w.Write([]byte(fmt.Sprintf("plugin_total_successful_runs_since_start{name=%s,plugin=%s,owner=%s} %d\n", name, pluginName, ownerName, totalSuccessfulRunsSinceStart)))
-				w.Write([]byte(fmt.Sprintf("plugin_total_failed_runs_since_start{name=%s,plugin=%s,owner=%s} %d\n", name, pluginName, ownerName, totalFailedRunsSinceStart)))
-				w.Write([]byte(fmt.Sprintf("plugin_total_canceled_runs_since_start{name=%s,plugin=%s,owner=%s} %d\n", name, pluginName, ownerName, totalCanceledRunsSinceStart)))
+				_, err := fmt.Fprintf(w, "plugin_total_ran_vms{name=%s,plugin=%s,owner=%s} %d\n", name, pluginName, ownerName, totalRanVMs)
+				if err != nil {
+					panic(err)
+				}
+				_, err = fmt.Fprintf(w, "plugin_total_successful_runs_since_start{name=%s,plugin=%s,owner=%s} %d\n", name, pluginName, ownerName, totalSuccessfulRunsSinceStart)
+				if err != nil {
+					panic(err)
+				}
+				_, err = fmt.Fprintf(w, "plugin_total_failed_runs_since_start{name=%s,plugin=%s,owner=%s} %d\n", name, pluginName, ownerName, totalFailedRunsSinceStart)
+				if err != nil {
+					panic(err)
+				}
+				_, err = fmt.Fprintf(w, "plugin_total_canceled_runs_since_start{name=%s,plugin=%s,owner=%s} %d\n", name, pluginName, ownerName, totalCanceledRunsSinceStart)
+				if err != nil {
+					panic(err)
+				}
 			}
 		}
-		w.Write([]byte(fmt.Sprintf("host_cpu_count %d\n", metricsData.HostCPUCount)))
-		w.Write([]byte(fmt.Sprintf("host_cpu_used_count %d\n", metricsData.HostCPUUsedCount)))
-		w.Write([]byte(fmt.Sprintf("host_cpu_usage_percentage %f\n", metricsData.HostCPUUsagePercentage)))
-		w.Write([]byte(fmt.Sprintf("host_memory_total_bytes %d\n", metricsData.HostMemoryTotalBytes)))
-		w.Write([]byte(fmt.Sprintf("host_memory_used_bytes %d\n", metricsData.HostMemoryUsedBytes)))
-		w.Write([]byte(fmt.Sprintf("host_memory_available_bytes %d\n", metricsData.HostMemoryAvailableBytes)))
-		w.Write([]byte(fmt.Sprintf("host_memory_usage_percentage %f\n", metricsData.HostMemoryUsagePercentage)))
-		w.Write([]byte(fmt.Sprintf("host_disk_total_bytes %d\n", metricsData.HostDiskTotalBytes)))
-		w.Write([]byte(fmt.Sprintf("host_disk_used_bytes %d\n", metricsData.HostDiskUsedBytes)))
-		w.Write([]byte(fmt.Sprintf("host_disk_available_bytes %d\n", metricsData.HostDiskAvailableBytes)))
-		w.Write([]byte(fmt.Sprintf("host_disk_usage_percentage %f\n", metricsData.HostDiskUsagePercentage)))
+		_, err := fmt.Fprintf(w, "host_cpu_count %d\n", metricsData.HostCPUCount)
+		if err != nil {
+			panic(err)
+		}
+		_, err = fmt.Fprintf(w, "host_cpu_used_count %d\n", metricsData.HostCPUUsedCount)
+		if err != nil {
+			panic(err)
+		}
+		_, err = fmt.Fprintf(w, "host_cpu_usage_percentage %f\n", metricsData.HostCPUUsagePercentage)
+		if err != nil {
+			panic(err)
+		}
+		_, err = fmt.Fprintf(w, "host_memory_total_bytes %d\n", metricsData.HostMemoryTotalBytes)
+		if err != nil {
+			panic(err)
+		}
+		_, err = fmt.Fprintf(w, "host_memory_used_bytes %d\n", metricsData.HostMemoryUsedBytes)
+		if err != nil {
+			panic(err)
+		}
+		_, err = fmt.Fprintf(w, "host_memory_available_bytes %d\n", metricsData.HostMemoryAvailableBytes)
+		if err != nil {
+			panic(err)
+		}
+		_, err = fmt.Fprintf(w, "host_memory_usage_percentage %f\n", metricsData.HostMemoryUsagePercentage)
+		if err != nil {
+			panic(err)
+		}
+		_, err = fmt.Fprintf(w, "host_disk_total_bytes %d\n", metricsData.HostDiskTotalBytes)
+		if err != nil {
+			panic(err)
+		}
+		_, err = fmt.Fprintf(w, "host_disk_used_bytes %d\n", metricsData.HostDiskUsedBytes)
+		if err != nil {
+			panic(err)
+		}
+		_, err = fmt.Fprintf(w, "host_disk_available_bytes %d\n", metricsData.HostDiskAvailableBytes)
+		if err != nil {
+			panic(err)
+		}
+		_, err = fmt.Fprintf(w, "host_disk_usage_percentage %f\n", metricsData.HostDiskUsagePercentage)
+		if err != nil {
+			panic(err)
+		}
 	}
 }
 

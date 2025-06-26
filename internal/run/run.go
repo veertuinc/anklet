@@ -27,14 +27,14 @@ func Plugin(
 	// fmt.Printf("%+v\n", service)
 	pluginCtx = logging.AppendCtx(pluginCtx, slog.String("plugin", ctxPlugin.Plugin))
 	if ctxPlugin.Plugin == "" {
-		return pluginCtx, fmt.Errorf("plugin is not set in yaml:plugins:" + ctxPlugin.Name + ":plugin")
+		return pluginCtx, fmt.Errorf("plugin is not set in yaml:plugins:%s:plugin", ctxPlugin.Name)
 	}
 	workerGlobals, err := config.GetWorkerGlobalsFromContext(workerCtx)
 	if err != nil {
 		return pluginCtx, err
 	}
-	if ctxPlugin.Plugin == "github" {
-		// for {
+	switch ctxPlugin.Plugin {
+	case "github":
 		select {
 		case <-pluginCtx.Done():
 			pluginCancel()
@@ -59,8 +59,7 @@ func Plugin(
 			// metricsData.SetStatus(pluginCtx, logger, "idle")
 			return updatedPluginCtx, nil // pass back to the main thread/loop
 		}
-		// }
-	} else if ctxPlugin.Plugin == "github_receiver" {
+	case "github_receiver":
 		updatedPluginCtx, err = github_receiver.Run(
 			workerCtx,
 			pluginCtx,
@@ -71,7 +70,7 @@ func Plugin(
 		if err != nil {
 			return updatedPluginCtx, err
 		}
-	} else {
+	default:
 		return pluginCtx, fmt.Errorf("plugin not found")
 	}
 	return pluginCtx, nil

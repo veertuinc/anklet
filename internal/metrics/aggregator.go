@@ -22,7 +22,10 @@ func (s *Server) StartAggregatorServer(
 ) {
 	http.HandleFunc("/healthcheck", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("ok"))
+		_, err := w.Write([]byte("ok"))
+		if err != nil {
+			logger.ErrorContext(workerCtx, "error writing response", "error", err)
+		}
 	})
 	http.HandleFunc("/metrics/v1", func(w http.ResponseWriter, r *http.Request) {
 		databaseContainer, err := database.GetDatabaseFromContext(workerCtx)
@@ -54,9 +57,16 @@ func (s *Server) StartAggregatorServer(
 	})
 	http.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotImplemented)
-		w.Write([]byte("please use /metrics/v1"))
+		_, err := w.Write([]byte("please use /metrics/v1"))
+		if err != nil {
+			logger.ErrorContext(workerCtx, "error writing response", "error", err)
+		}
 	})
-	http.ListenAndServe(":"+s.Port, nil)
+	err := http.ListenAndServe(":"+s.Port, nil)
+	if err != nil {
+		logger.ErrorContext(workerCtx, "error starting aggregator server", "error", err)
+		os.Exit(1)
+	}
 }
 
 type jsonMetricsResponse struct {
@@ -232,7 +242,11 @@ func (s *Server) handleAggregatorJsonMetricsV1(
 			}
 			cursor = nextCursor
 		}
-		json.NewEncoder(w).Encode(combinedMetrics)
+		err := json.NewEncoder(w).Encode(combinedMetrics)
+		if err != nil {
+			logger.ErrorContext(workerCtx, "error encoding combined metrics", "error", err)
+			return
+		}
 	}
 }
 
@@ -377,7 +391,11 @@ func (s *Server) handleAggregatorJsonMetricsV2(
 			}
 			cursor = nextCursor
 		}
-		json.NewEncoder(w).Encode(combinedMetrics)
+		err := json.NewEncoder(w).Encode(combinedMetrics)
+		if err != nil {
+			logger.ErrorContext(workerCtx, "error encoding combined metrics", "error", err)
+			return
+		}
 	}
 }
 
@@ -473,25 +491,65 @@ func (s *Server) handleAggregatorPrometheusMetrics(
 						totalCanceledRunsSinceStart = int(pluginMap["TotalCanceledRunsSinceStart"].(float64))
 					}
 					if repoName == "" {
-						w.Write([]byte(fmt.Sprintf("plugin_status{name=%s,owner=%s} %s\n", Name, ownerName, status)))
+						_, err = fmt.Fprintf(w, "plugin_status{name=%s,owner=%s} %s\n", Name, ownerName, status)
+						if err != nil {
+							logger.ErrorContext(workerCtx, "error writing to writer 1", "error", err)
+							return
+						}
 					} else {
-						w.Write([]byte(fmt.Sprintf("plugin_status{name=%s,owner=%s,repo=%s} %s\n", Name, ownerName, repoName, status)))
+						_, err = fmt.Fprintf(w, "plugin_status{name=%s,owner=%s,repo=%s} %s\n", Name, ownerName, repoName, status)
+						if err != nil {
+							logger.ErrorContext(workerCtx, "error writing to writer 2", "error", err)
+							return
+						}
 					}
 					if !strings.Contains(pluginName, "_receiver") {
 						if repoName == "" {
-							w.Write([]byte(fmt.Sprintf("plugin_last_successful_run{name=%s,owner=%s,job_url=%s} %s\n", Name, ownerName, lastSuccessfulRunJobUrl, lastSuccessfulRun.Format(time.RFC3339))))
-							w.Write([]byte(fmt.Sprintf("plugin_last_failed_run{name=%s,owner=%s,job_url=%s} %s\n", Name, ownerName, lastFailedRunJobUrl, lastFailedRun.Format(time.RFC3339))))
-							w.Write([]byte(fmt.Sprintf("plugin_last_canceled_run{name=%s,owner=%s,job_url=%s} %s\n", Name, ownerName, lastCanceledRunJobUrl, lastCanceledRun.Format(time.RFC3339))))
+							_, err = fmt.Fprintf(w, "plugin_last_successful_run{name=%s,owner=%s,job_url=%s} %s\n", Name, ownerName, lastSuccessfulRunJobUrl, lastSuccessfulRun.Format(time.RFC3339))
+							if err != nil {
+								logger.ErrorContext(workerCtx, "error writing to writer 3", "error", err)
+								return
+							}
+							_, err = fmt.Fprintf(w, "plugin_last_failed_run{name=%s,owner=%s,job_url=%s} %s\n", Name, ownerName, lastFailedRunJobUrl, lastFailedRun.Format(time.RFC3339))
+							if err != nil {
+								logger.ErrorContext(workerCtx, "error writing to writer 4", "error", err)
+								return
+							}
+							_, err = fmt.Fprintf(w, "plugin_last_canceled_run{name=%s,owner=%s,job_url=%s} %s\n", Name, ownerName, lastCanceledRunJobUrl, lastCanceledRun.Format(time.RFC3339))
+							if err != nil {
+								logger.ErrorContext(workerCtx, "error writing to writer 5", "error", err)
+								return
+							}
 						} else {
-							w.Write([]byte(fmt.Sprintf("plugin_last_successful_run{name=%s,owner=%s,repo=%s,job_url=%s} %s\n", Name, ownerName, repoName, lastSuccessfulRunJobUrl, lastSuccessfulRun.Format(time.RFC3339))))
-							w.Write([]byte(fmt.Sprintf("plugin_last_failed_run{name=%s,owner=%s,repo=%s,job_url=%s} %s\n", Name, ownerName, repoName, lastFailedRunJobUrl, lastFailedRun.Format(time.RFC3339))))
-							w.Write([]byte(fmt.Sprintf("plugin_last_canceled_run{name=%s,owner=%s,repo=%s,job_url=%s} %s\n", Name, ownerName, repoName, lastCanceledRunJobUrl, lastCanceledRun.Format(time.RFC3339))))
+							_, err = fmt.Fprintf(w, "plugin_last_successful_run{name=%s,owner=%s,repo=%s,job_url=%s} %s\n", Name, ownerName, repoName, lastSuccessfulRunJobUrl, lastSuccessfulRun.Format(time.RFC3339))
+							if err != nil {
+								logger.ErrorContext(workerCtx, "error writing to writer 6", "error", err)
+								return
+							}
+							_, err = fmt.Fprintf(w, "plugin_last_failed_run{name=%s,owner=%s,repo=%s,job_url=%s} %s\n", Name, ownerName, repoName, lastFailedRunJobUrl, lastFailedRun.Format(time.RFC3339))
+							if err != nil {
+								logger.ErrorContext(workerCtx, "error writing to writer 7", "error", err)
+								return
+							}
+							_, err = fmt.Fprintf(w, "plugin_last_canceled_run{name=%s,owner=%s,repo=%s,job_url=%s} %s\n", Name, ownerName, repoName, lastCanceledRunJobUrl, lastCanceledRun.Format(time.RFC3339))
+							if err != nil {
+								logger.ErrorContext(workerCtx, "error writing to writer 8", "error", err)
+								return
+							}
 						}
 					}
 					if repoName == "" {
-						w.Write([]byte(fmt.Sprintf("plugin_status_since{name=%s,owner=%s,status=%s} %s\n", Name, ownerName, status, statusSince.Format(time.RFC3339))))
+						_, err = fmt.Fprintf(w, "plugin_status_since{name=%s,owner=%s,status=%s} %s\n", Name, ownerName, status, statusSince.Format(time.RFC3339))
+						if err != nil {
+							logger.ErrorContext(workerCtx, "error writing to writer 9", "error", err)
+							return
+						}
 					} else {
-						w.Write([]byte(fmt.Sprintf("plugin_status_since{name=%s,owner=%s,repo=%s,status=%s} %s\n", Name, ownerName, repoName, status, statusSince.Format(time.RFC3339))))
+						_, err = fmt.Fprintf(w, "plugin_status_since{name=%s,owner=%s,repo=%s,status=%s} %s\n", Name, ownerName, repoName, status, statusSince.Format(time.RFC3339))
+						if err != nil {
+							logger.ErrorContext(workerCtx, "error writing to writer 10", "error", err)
+							return
+						}
 					}
 
 					if strings.Contains(pluginName, "_receiver") {
@@ -501,24 +559,88 @@ func (s *Server) handleAggregatorPrometheusMetrics(
 					}
 
 					if !soloReceiver {
-						w.Write([]byte(fmt.Sprintf("plugin_total_ran_vms{name=%s,plugin=%s,owner=%s} %d\n", Name, pluginName, ownerName, totalRanVMs)))
-						w.Write([]byte(fmt.Sprintf("plugin_total_successful_runs_since_start{name=%s,plugin=%s,owner=%s} %d\n", Name, pluginName, ownerName, totalSuccessfulRunsSinceStart)))
-						w.Write([]byte(fmt.Sprintf("plugin_total_failed_runs_since_start{name=%s,plugin=%s,owner=%s} %d\n", Name, pluginName, ownerName, totalFailedRunsSinceStart)))
-						w.Write([]byte(fmt.Sprintf("plugin_total_canceled_runs_since_start{name=%s,plugin=%s,owner=%s} %d\n", Name, pluginName, ownerName, totalCanceledRunsSinceStart)))
+						_, err = fmt.Fprintf(w, "plugin_total_ran_vms{name=%s,plugin=%s,owner=%s} %d\n", Name, pluginName, ownerName, totalRanVMs)
+						if err != nil {
+							logger.ErrorContext(workerCtx, "error writing to writer 11", "error", err)
+							return
+						}
+						_, err = fmt.Fprintf(w, "plugin_total_successful_runs_since_start{name=%s,plugin=%s,owner=%s} %d\n", Name, pluginName, ownerName, totalSuccessfulRunsSinceStart)
+						if err != nil {
+							logger.ErrorContext(workerCtx, "error writing to writer 12", "error", err)
+							return
+						}
+						_, err = fmt.Fprintf(w, "plugin_total_failed_runs_since_start{name=%s,plugin=%s,owner=%s} %d\n", Name, pluginName, ownerName, totalFailedRunsSinceStart)
+						if err != nil {
+							logger.ErrorContext(workerCtx, "error writing to writer 13", "error", err)
+							return
+						}
+						_, err = fmt.Fprintf(w, "plugin_total_canceled_runs_since_start{name=%s,plugin=%s,owner=%s} %d\n", Name, pluginName, ownerName, totalCanceledRunsSinceStart)
+						if err != nil {
+							logger.ErrorContext(workerCtx, "error writing to writer 14", "error", err)
+							return
+						}
 					}
 
-					w.Write([]byte(fmt.Sprintf("host_cpu_count{name=%s,owner=%s} %d\n", Name, ownerName, metricsData.HostCPUCount)))
-					w.Write([]byte(fmt.Sprintf("host_cpu_used_count{name=%s,owner=%s} %d\n", Name, ownerName, metricsData.HostCPUUsedCount)))
-					w.Write([]byte(fmt.Sprintf("host_cpu_usage_percentage{name=%s,owner=%s} %f\n", Name, ownerName, metricsData.HostCPUUsagePercentage)))
-					w.Write([]byte(fmt.Sprintf("host_memory_total_bytes{name=%s,owner=%s} %d\n", Name, ownerName, metricsData.HostMemoryTotalBytes)))
-					w.Write([]byte(fmt.Sprintf("host_memory_used_bytes{name=%s,owner=%s} %d\n", Name, ownerName, metricsData.HostMemoryUsedBytes)))
-					w.Write([]byte(fmt.Sprintf("host_memory_available_bytes{name=%s,owner=%s} %d\n", Name, ownerName, metricsData.HostMemoryAvailableBytes)))
-					w.Write([]byte(fmt.Sprintf("host_memory_usage_percentage{name=%s,owner=%s} %f\n", Name, ownerName, metricsData.HostMemoryUsagePercentage)))
-					w.Write([]byte(fmt.Sprintf("host_disk_total_bytes{name=%s,owner=%s} %d\n", Name, ownerName, metricsData.HostDiskTotalBytes)))
-					w.Write([]byte(fmt.Sprintf("host_disk_used_bytes{name=%s,owner=%s} %d\n", Name, ownerName, metricsData.HostDiskUsedBytes)))
-					w.Write([]byte(fmt.Sprintf("host_disk_available_bytes{name=%s,owner=%s} %d\n", Name, ownerName, metricsData.HostDiskAvailableBytes)))
-					w.Write([]byte(fmt.Sprintf("host_disk_usage_percentage{name=%s,owner=%s} %f\n", Name, ownerName, metricsData.HostDiskUsagePercentage)))
-					w.Write([]byte(fmt.Sprintf("last_update{name=%s,owner=%s} %s\n", Name, ownerName, metricsData.LastUpdate.Format(time.RFC3339))))
+					_, err = fmt.Fprintf(w, "host_cpu_count{name=%s,owner=%s} %d\n", Name, ownerName, metricsData.HostCPUCount)
+					if err != nil {
+						logger.ErrorContext(workerCtx, "error writing to writer 15", "error", err)
+						return
+					}
+					_, err = fmt.Fprintf(w, "host_cpu_used_count{name=%s,owner=%s} %d\n", Name, ownerName, metricsData.HostCPUUsedCount)
+					if err != nil {
+						logger.ErrorContext(workerCtx, "error writing to writer 16", "error", err)
+						return
+					}
+					_, err = fmt.Fprintf(w, "host_cpu_usage_percentage{name=%s,owner=%s} %f\n", Name, ownerName, metricsData.HostCPUUsagePercentage)
+					if err != nil {
+						logger.ErrorContext(workerCtx, "error writing to writer 17", "error", err)
+						return
+					}
+					_, err = fmt.Fprintf(w, "host_memory_total_bytes{name=%s,owner=%s} %d\n", Name, ownerName, metricsData.HostMemoryTotalBytes)
+					if err != nil {
+						logger.ErrorContext(workerCtx, "error writing to writer 18", "error", err)
+						return
+					}
+					_, err = fmt.Fprintf(w, "host_memory_used_bytes{name=%s,owner=%s} %d\n", Name, ownerName, metricsData.HostMemoryUsedBytes)
+					if err != nil {
+						logger.ErrorContext(workerCtx, "error writing to writer 19", "error", err)
+						return
+					}
+					_, err = fmt.Fprintf(w, "host_memory_available_bytes{name=%s,owner=%s} %d\n", Name, ownerName, metricsData.HostMemoryAvailableBytes)
+					if err != nil {
+						logger.ErrorContext(workerCtx, "error writing to writer 20", "error", err)
+						return
+					}
+					_, err = fmt.Fprintf(w, "host_memory_usage_percentage{name=%s,owner=%s} %f\n", Name, ownerName, metricsData.HostMemoryUsagePercentage)
+					if err != nil {
+						logger.ErrorContext(workerCtx, "error writing to writer 21", "error", err)
+						return
+					}
+					_, err = fmt.Fprintf(w, "host_disk_total_bytes{name=%s,owner=%s} %d\n", Name, ownerName, metricsData.HostDiskTotalBytes)
+					if err != nil {
+						logger.ErrorContext(workerCtx, "error writing to writer 22", "error", err)
+						return
+					}
+					_, err = fmt.Fprintf(w, "host_disk_used_bytes{name=%s,owner=%s} %d\n", Name, ownerName, metricsData.HostDiskUsedBytes)
+					if err != nil {
+						logger.ErrorContext(workerCtx, "error writing to writer 23", "error", err)
+						return
+					}
+					_, err = fmt.Fprintf(w, "host_disk_available_bytes{name=%s,owner=%s} %d\n", Name, ownerName, metricsData.HostDiskAvailableBytes)
+					if err != nil {
+						logger.ErrorContext(workerCtx, "error writing to writer 24", "error", err)
+						return
+					}
+					_, err = fmt.Fprintf(w, "host_disk_usage_percentage{name=%s,owner=%s} %f\n", Name, ownerName, metricsData.HostDiskUsagePercentage)
+					if err != nil {
+						logger.ErrorContext(workerCtx, "error writing to writer 25", "error", err)
+						return
+					}
+					_, err = fmt.Fprintf(w, "last_update{name=%s,owner=%s} %s\n", Name, ownerName, metricsData.LastUpdate.Format(time.RFC3339))
+					if err != nil {
+						logger.ErrorContext(workerCtx, "error writing to writer 26", "error", err)
+						return
+					}
 				}
 			}
 			if nextCursor == 0 {

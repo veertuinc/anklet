@@ -271,9 +271,19 @@ func (cli *Cli) AnkaRegistryPull(
 		return nil, err
 	}
 
-	defer metricsData.SetStatus(pluginCtx, logger, "running")
+	defer func() {
+		err := metricsData.SetStatus(pluginCtx, logger, "running")
+		if err != nil {
+			logger.ErrorContext(pluginCtx, "error setting metrics status", "error", err)
+			panic(err)
+		}
+	}()
 
-	metricsData.SetStatus(pluginCtx, logger, "pulling")
+	err = metricsData.SetStatus(pluginCtx, logger, "pulling")
+	if err != nil {
+		logger.ErrorContext(pluginCtx, "error setting metrics status", "error", err)
+		return nil, err
+	}
 
 	var args []string
 	if tag != "(using latest)" {
@@ -300,7 +310,10 @@ func (cli *Cli) AnkaDelete(workerCtx context.Context, pluginCtx context.Context,
 	deleteOutput, err := cli.ExecuteParseJson(pluginCtx, "anka", "-j", "delete", "--yes", vmName)
 	if err != nil {
 		logger.ErrorContext(pluginCtx, "error executing anka delete", "err", err)
-		cli.Execute(pluginCtx, "anka", "delete", "--yes", vmName)
+		_, _, err = cli.Execute(pluginCtx, "anka", "delete", "--yes", vmName)
+		if err != nil {
+			logger.ErrorContext(pluginCtx, "error executing anka delete", "err", err)
+		}
 		return err
 	}
 	logger.DebugContext(pluginCtx, "successfully deleted vm", "std", deleteOutput.Message)

@@ -32,8 +32,8 @@ go.releaser:
 
 #go.lint:		@ Run `golangci-lint run` against the current code
 go.lint:
-	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $$(go env GOPATH)/bin v1.57.2
-	golangci-lint run --fast
+	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/HEAD/install.sh | sh -s -- -b $(shell go env GOPATH)/bin v2.1.6
+	golangci-lint run
 
 go.test:
 	go mod tidy

@@ -86,7 +86,12 @@ func LoadConfig(configPath string) (Config, error) {
 	if err != nil {
 		return config, err
 	}
-	defer file.Close()
+	defer func() {
+		err := file.Close()
+		if err != nil {
+			panic(err)
+		}
+	}()
 
 	decoder := yaml.NewDecoder(file)
 	err = decoder.Decode(&config)
