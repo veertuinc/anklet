@@ -422,7 +422,6 @@ func checkForCompletedJobs(
 				return
 			}
 			if job.Action == "cancel" {
-				fmt.Println("sending cancel workflow run")
 				err := sendCancelWorkflowRun(workerCtx, pluginCtx, logger, job, metricsData)
 				if err != nil {
 					logger.ErrorContext(pluginCtx, "error sending cancel workflow run", "err", err)
