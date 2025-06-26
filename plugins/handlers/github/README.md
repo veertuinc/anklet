@@ -148,7 +148,7 @@ Outside of the mainCompletedQueue getting an item, you can interrupt it several 
 
 1. `workerGlobals.ReturnAllToMainQueue` - This is used by the main worker process in main.go to tell the plugin to return all of its jobs to the main queue so other hosts can handle them.
 2. `<-pluginCtx.Done()` - context cancellation case.
-3. `<-pluginGlobals.JobChannel` - Other parts of the plugin logic can inject the `internalGithub.QueueJob` object into this and then handle specific logic for the job. For example, we can handle if `.Action` being `finish` (immediate cleanup) or `cancel` (send a cancel request to github, then cleanup): `pluginGlobals.JobChannel <- internalGithub.QueueJob{Action: "finish"}`
+3. `<-pluginGlobals.JobChannel` - Other parts of the plugin logic can inject the `internalGithub.QueueJob` object into this and then handle specific logic for the job. For example, we can handle if `.Action` being `finish` (immediate cleanup) or `cancel` (send a cancel request to github, then cleanup): `pluginGlobals.JobChannel <- internalGithub.QueueJob{Action: "finish"}`. Important:For `cancel`, you need to pass the entire queued job object.
 4. `<-pluginGlobals.RetryChannel` - This will send the job back to the mainQueue so other hosts can get a chance to run it.
 5. `<-pluginGlobals.PausedCancellationJobChannel` - This cleans up the job immediately on this host, since another host has picked it up. We could technically just use `finish` here as the Action, but it will allow us more control over logic that only happens when the paused job is removed from this host.
 
