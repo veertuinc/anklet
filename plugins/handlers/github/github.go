@@ -567,7 +567,7 @@ func checkForCompletedJobs(
 				default:
 				}
 				// reset the queue target index every other run so we don't leave any jobs behind at the lower indexes but still keep moving ahead
-				if workerGlobals.Plugins[pluginConfig.Name].PluginRunCount.Load()%2 == 0 {
+				if workerGlobals.Plugins[pluginConfig.Plugin][pluginConfig.Name].PluginRunCount.Load()%2 == 0 {
 					workerGlobals.ResetQueueTargetIndex() // make sure we reset the index so we don't leave any jobs behind at the lower indexes
 				}
 
@@ -639,12 +639,13 @@ func cleanup(
 	pausedQueueName string,
 	onStartRun bool,
 ) {
-	// fmt.Println(pluginQueueName, "cleanup | plugin cleanup started")
 	logger, err := logging.GetLoggerFromContext(pluginCtx)
 	if err != nil {
 		logger.ErrorContext(pluginCtx, "error getting logger from context", "err", err)
 		os.Exit(1)
 	}
+	logger.InfoContext(pluginCtx, "cleanup | plugin cleanup started", "onStartRun", onStartRun)
+
 	pluginGlobals, err := internalGithub.GetPluginGlobalsFromContext(pluginCtx)
 	if err != nil {
 		logger.ErrorContext(pluginCtx, "error getting plugin global from context", "err", err)
@@ -670,8 +671,14 @@ func cleanup(
 		}
 		if !onStartRun {
 			// fmt.Println(pluginConfig.Name, "cleanup | unlocking plugin preparing state")
-			if workerGlobals.IsAPluginPreparingState() == pluginConfig.Name {
-				workerGlobals.UnsetAPluginIsPreparing()
+			workerGlobals.Plugins[pluginConfig.Plugin][pluginConfig.Name].Preparing = false
+		}
+		if !workerGlobals.Plugins[pluginConfig.Plugin][pluginConfig.Name].FinishedInitialRun {
+			workerGlobals.Plugins[pluginConfig.Plugin][pluginConfig.Name].FinishedInitialRun = true
+		} else {
+			// don't unpause if it's the initial start and first plugin
+			if workerGlobals.Plugins[pluginConfig.Plugin][pluginConfig.Name].Paused {
+				workerGlobals.Plugins[pluginConfig.Plugin][pluginConfig.Name].Paused = false
 			}
 		}
 	}()
@@ -880,13 +887,9 @@ func Run(
 	logger *slog.Logger,
 	metricsData *metrics.MetricsDataLock,
 ) (context.Context, error) {
+	logger.InfoContext(pluginCtx, "running github plugin")
 
 	pluginConfig, err := config.GetPluginFromContext(pluginCtx)
-	if err != nil {
-		return pluginCtx, err
-	}
-
-	isRepoSet, err := config.GetIsRepoSetFromContext(pluginCtx)
 	if err != nil {
 		return pluginCtx, err
 	}
@@ -912,10 +915,6 @@ func Run(
 	if err != nil {
 		return pluginCtx, err
 	}
-	// Block other plugins from running until we're done preparing the VM so that
-	// VmHasEnoughResources has a running VM to compare resources against
-	workerGlobals.SetAPluginIsPreparing(pluginConfig.Name)
-	pluginCtx = logging.AppendCtx(pluginCtx, slog.String("pluginRunCount", strconv.Itoa(int(workerGlobals.Plugins[pluginConfig.Name].PluginRunCount.Load()))))
 
 	// must come after first cleanup
 	pluginGlobals := internalGithub.PluginGlobals{
@@ -972,13 +971,12 @@ func Run(
 	githubWrapperClient := internalGithub.NewGitHubClientWrapper(githubClient)
 	pluginCtx = context.WithValue(pluginCtx, config.ContextKey("githubwrapperclient"), githubWrapperClient)
 	var repositoryURL string
-	if isRepoSet {
-		pluginCtx = logging.AppendCtx(pluginCtx, slog.String("repo", pluginConfig.Repo))
+	if workerGlobals.Plugins[pluginConfig.Plugin][pluginConfig.Name].RepoSet {
 		repositoryURL = fmt.Sprintf("https://github.com/%s/%s", pluginConfig.Owner, pluginConfig.Repo)
 	} else {
 		repositoryURL = fmt.Sprintf("https://github.com/%s", pluginConfig.Owner)
 	}
-	pluginCtx = logging.AppendCtx(pluginCtx, slog.String("owner", pluginConfig.Owner))
+	// pluginCtx = logging.AppendCtx(pluginCtx, slog.String("owner", pluginConfig.Owner))
 
 	// wait group so we can wait for the goroutine to finish before exiting the service
 	var wg sync.WaitGroup
@@ -1041,9 +1039,7 @@ func Run(
 			return pluginCtx, nil
 		}
 		if *jobFromJobChannel.WorkflowJob.Status == "in_progress" { // TODO: make this the same as the loop later on
-			if workerGlobals.IsAPluginPreparingState() == pluginConfig.Name {
-				workerGlobals.UnsetAPluginIsPreparing()
-			}
+			workerGlobals.Plugins[pluginConfig.Plugin][pluginConfig.Name].Preparing = false
 			logger.InfoContext(pluginCtx, "watching for job completion", "jobFromJobChannel", jobFromJobChannel)
 			pluginCtx, err = watchForJobCompletion(
 				workerCtx,
@@ -1059,6 +1055,10 @@ func Run(
 		}
 	default:
 		logger.InfoContext(pluginCtx, "no existing jobs found on initial startup")
+		if !workerGlobals.Plugins[pluginConfig.Plugin][pluginConfig.Name].FinishedInitialRun { // exit early if it's the first time running
+			pluginGlobals.JobChannel <- internalGithub.QueueJob{Action: "finish"}
+			return pluginCtx, nil
+		}
 	}
 
 	// finalize cleanup if the service crashed mid-cleanup
@@ -1084,28 +1084,6 @@ func Run(
 		// logger.WarnContext(pluginCtx, "context canceled before completed job found")
 		return pluginCtx, nil
 	default:
-	}
-
-	// We want each plugin to run at least once so that any VMs/jobs that were orphaned
-	// on this host get a chance to be cleaned or continue where they left off
-	if !workerGlobals.Plugins[pluginConfig.Name].FinishedInitialRun {
-		workerGlobals.Plugins[pluginConfig.Name].FinishedInitialRun = true
-		pluginGlobals.JobChannel <- internalGithub.QueueJob{Action: "finish"}
-		return pluginCtx, nil
-	}
-
-	// Check if all plugins have completed their initial run
-	allPluginsFinishedInitialRun := true
-	for _, plugin := range workerGlobals.Plugins {
-		if !plugin.FinishedInitialRun {
-			allPluginsFinishedInitialRun = false
-			break
-		}
-	}
-	if !allPluginsFinishedInitialRun {
-		logger.WarnContext(pluginCtx, "not all plugins have completed their initial run")
-		pluginGlobals.JobChannel <- internalGithub.QueueJob{Action: "finish"}
-		return pluginCtx, nil
 	}
 
 	hostHasVmCapacity := internalAnka.HostHasVmCapacity(pluginCtx)
@@ -1278,9 +1256,7 @@ func Run(
 			if queuedJobString == "" { // no queued jobs
 				logger.DebugContext(pluginCtx, "no queued jobs found")
 				// free up other plugins to run
-				if workerGlobals.IsAPluginPreparingState() == pluginConfig.Name {
-					workerGlobals.UnsetAPluginIsPreparing()
-				}
+				workerGlobals.Plugins[pluginConfig.Plugin][pluginConfig.Name].Preparing = false
 				pluginGlobals.JobChannel <- internalGithub.QueueJob{Action: "finish"}
 				workerGlobals.ResetQueueTargetIndex()
 				return pluginCtx, nil
@@ -1320,10 +1296,6 @@ func Run(
 		// 	return pluginCtx, fmt.Errorf("error getting queued jobs: %s", err.Error())
 		// }
 		// databaseContainer.Client.RPush(pluginCtx, "anklet/jobs/github/queued/"+pluginConfig.Owner+"/"+pluginConfig.Name, queuedJobString)
-	}
-
-	if !isRepoSet && queuedJob.Repository.Name != nil {
-		pluginCtx = logging.AppendCtx(pluginCtx, slog.String("repo", *queuedJob.Repository.Name))
 	}
 
 	logger.InfoContext(
@@ -1389,9 +1361,7 @@ func Run(
 		}
 		if queuedJob.WorkflowJob.Status != nil && *queuedJob.WorkflowJob.Status == "in_progress" {
 			logger.InfoContext(pluginCtx, "job is in progress, so we'll wait for it to finish")
-			if workerGlobals.IsAPluginPreparingState() == pluginConfig.Name {
-				workerGlobals.UnsetAPluginIsPreparing()
-			}
+			workerGlobals.Plugins[pluginConfig.Plugin][pluginConfig.Name].Preparing = false
 			pluginCtx, err = watchForJobCompletion(
 				workerCtx,
 				pluginCtx,
@@ -1469,9 +1439,7 @@ func Run(
 						logger.ErrorContext(pluginCtx, "error updating job in db", "err", err)
 					}
 					pluginGlobals.JobChannel <- queuedJob
-					if workerGlobals.IsAPluginPreparingState() == pluginConfig.Name {
-						workerGlobals.UnsetAPluginIsPreparing()
-					}
+					workerGlobals.Plugins[pluginConfig.Plugin][pluginConfig.Name].Preparing = false
 					return pluginCtx, nil
 				}
 				logger.ErrorContext(pluginCtx, "error getting anka registry vm info", "err", err)
@@ -1525,6 +1493,10 @@ func Run(
 		// check if, compared to other VMs potentially running, we have enough resources to run this VM
 		err = internalAnka.VmHasEnoughResources(pluginCtx, queuedJob.AnkaVM)
 		if err != nil {
+
+			// pause all other plugins trying to run
+			workerGlobals.Plugins[pluginConfig.Plugin][pluginConfig.Name].Paused = true
+
 			// push to proper queue so other hosts with the same specs can pick it up if available
 			queuedJob.PausedOn = pluginConfig.Name
 			queuedJob.Action = "paused"
@@ -1645,7 +1617,7 @@ func Run(
 		var runnerRegistration *github.RegistrationToken
 		var response *github.Response
 		var err error
-		if isRepoSet {
+		if workerGlobals.Plugins[pluginConfig.Plugin][pluginConfig.Name].RepoSet {
 			pluginCtx, runnerRegistration, response, err = internalGithub.ExecuteGitHubClientFunction(workerCtx, pluginCtx, logger, func() (*github.RegistrationToken, *github.Response, error) {
 				runnerRegistration, resp, err := githubClient.Actions.CreateRegistrationToken(context.Background(), pluginConfig.Owner, pluginConfig.Repo)
 				return runnerRegistration, resp, err
@@ -1707,9 +1679,8 @@ func Run(
 		}
 
 		// free up other plugins to run
-		if workerGlobals.IsAPluginPreparingState() == pluginConfig.Name {
-			workerGlobals.UnsetAPluginIsPreparing()
-		}
+		workerGlobals.Plugins[pluginConfig.Plugin][pluginConfig.Name].Preparing = false
+		workerGlobals.Plugins[pluginConfig.Plugin][pluginConfig.Name].Paused = false
 
 		pluginCtx = logging.AppendCtx(pluginCtx, slog.Any("vm", queuedJob.AnkaVM))
 
@@ -1894,14 +1865,14 @@ func removeSelfHostedRunner(
 	if err != nil {
 		logger.ErrorContext(pluginCtx, "error getting github client from context", "err", err)
 	}
-	isRepoSet, err := config.GetIsRepoSetFromContext(pluginCtx)
+	workerGlobals, err := config.GetWorkerGlobalsFromContext(workerCtx)
 	if err != nil {
-		logger.ErrorContext(pluginCtx, "error getting isRepoSet from context", "err", err)
+		logger.ErrorContext(pluginCtx, "error getting worker globals from context", "err", err)
 	}
 	// we don't use cancelled here since the registration will auto unregister after the job finishes
 	if queuedJob.WorkflowJob.Conclusion != nil && (*queuedJob.WorkflowJob.Conclusion == "failure") {
 		logger.InfoContext(pluginCtx, "attempting to remove self-hosted runner", "job_id", *queuedJob.WorkflowJob.ID)
-		if isRepoSet {
+		if workerGlobals.Plugins[pluginConfig.Plugin][pluginConfig.Name].RepoSet {
 			pluginCtx, runnersList, response, err = internalGithub.ExecuteGitHubClientFunction(workerCtx, pluginCtx, logger, func() (*github.Runners, *github.Response, error) {
 				runnersList, resp, err := githubClient.Actions.ListRunners(context.Background(), pluginConfig.Owner, pluginConfig.Repo, &github.ListRunnersOptions{})
 				return runnersList, resp, err
@@ -1935,7 +1906,7 @@ func removeSelfHostedRunner(
 						logger.ErrorContext(pluginCtx, "error sending cancel workflow run", "err", err)
 						return
 					}
-					if isRepoSet {
+					if workerGlobals.Plugins[pluginConfig.Plugin][pluginConfig.Name].RepoSet {
 						pluginCtx, _, _, err = internalGithub.ExecuteGitHubClientFunction(workerCtx, pluginCtx, logger, func() (*github.Response, *github.Response, error) {
 							response, err := githubClient.Actions.RemoveRunner(context.Background(), pluginConfig.Owner, pluginConfig.Repo, *runner.ID)
 							return response, nil, err

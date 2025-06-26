@@ -659,6 +659,10 @@ The `dev` LOG_LEVEL has colored output with text + pretty printed JSON for easie
 
 Plugins are, currently, stored in the `plugins/` directory. They will be moved into external binaries at some point in the future.
 
+Plugins are loaded in the order they are listed in the config.yml file. We use the `workerGlobals.Plugins[plugin.Plugin][plugin.Name].Paused` to handle this. Your plugin logic MUST set this to `false` when it handles cleanup.
+
+Each plugin will also wait others of its type to finish "preparing" before they start. Once it's safe to allow other plugins to start, the plugin logic must perform `workerGlobals.Plugins[plugin.Plugin][plugin.Name].Preparing = false`.
+
 #### Guidelines
 
 **Important:** Avoid handling context cancellations in places of the code that will need to be done before the runner exits. This means any VM deletion or database cleanup must be done using functions that do not have context cancellation, allowing them to complete.

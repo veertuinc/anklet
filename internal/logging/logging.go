@@ -85,19 +85,19 @@ func (h *ContextHandler) With(attrs ...slog.Attr) *ContextHandler {
 
 // AppendCtx adds an slog attribute to the provided context so that it will be
 // included in any Record created with such context
-func AppendCtx(parent context.Context, attr slog.Attr) context.Context {
-	if parent == nil {
+func AppendCtx(ctx context.Context, attr slog.Attr) context.Context {
+	if ctx == nil {
 		panic("parent context required")
 	}
 
-	if v, ok := parent.Value(slogFields).([]slog.Attr); ok {
+	if v, ok := ctx.Value(slogFields).([]slog.Attr); ok {
 		v = append(v, attr)
-		return context.WithValue(parent, slogFields, v)
+		return context.WithValue(ctx, slogFields, v)
 	}
 
 	v := []slog.Attr{}
 	v = append(v, attr)
-	return context.WithValue(parent, slogFields, v)
+	return context.WithValue(ctx, slogFields, v)
 }
 
 func Panic(workerCtx context.Context, pluginCtx context.Context, errorMessage string) {

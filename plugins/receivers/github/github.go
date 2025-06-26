@@ -66,10 +66,6 @@ func Run(
 	if err != nil {
 		return pluginCtx, err
 	}
-	isRepoSet, err := config.GetIsRepoSetFromContext(pluginCtx)
-	if err != nil {
-		return pluginCtx, err
-	}
 	err = metricsData.AddPlugin(
 		metrics.PluginBase{
 			Name:        pluginConfig.Name,
@@ -506,7 +502,7 @@ func Run(
 		logger.InfoContext(pluginCtx, fmt.Sprintf("listing hook deliveries for the last %d hours to see if any need redelivery (may take a while)...", pluginConfig.RedeliverHours))
 		// var response *github.Response
 		var err error
-		if isRepoSet {
+		if workerGlobals.Plugins[pluginConfig.Plugin][pluginConfig.Name].RepoSet {
 			pluginCtx, hookDeliveries, _, err = internalGithub.ExecuteGitHubClientFunction(workerCtx, pluginCtx, logger, func() (*[]*github.HookDelivery, *github.Response, error) {
 				hookDeliveries, response, err := githubClient.Repositories.ListHookDeliveries(pluginCtx, pluginConfig.Owner, pluginConfig.Repo, pluginConfig.HookID, opts)
 				if err != nil {
@@ -597,7 +593,7 @@ MainLoop:
 
 		var gottenHookDelivery *github.HookDelivery
 		var err error
-		if isRepoSet {
+		if workerGlobals.Plugins[pluginConfig.Plugin][pluginConfig.Name].RepoSet {
 			pluginCtx, gottenHookDelivery, _, err = internalGithub.ExecuteGitHubClientFunction(workerCtx, pluginCtx, logger, func() (*github.HookDelivery, *github.Response, error) {
 				gottenHookDelivery, response, err := githubClient.Repositories.GetHookDelivery(pluginCtx, pluginConfig.Owner, pluginConfig.Repo, pluginConfig.HookID, *hookDelivery.ID)
 				if err != nil {
@@ -718,7 +714,7 @@ MainLoop:
 					otherHookDelivery.RepositoryID != nil && *otherHookDelivery.RepositoryID == *hookDelivery.RepositoryID {
 					var otherGottenHookDelivery *github.HookDelivery
 					var err error
-					if isRepoSet {
+					if workerGlobals.Plugins[pluginConfig.Plugin][pluginConfig.Name].RepoSet {
 						pluginCtx, otherGottenHookDelivery, _, err = internalGithub.ExecuteGitHubClientFunction(workerCtx, pluginCtx, logger, func() (*github.HookDelivery, *github.Response, error) {
 							otherGottenHookDelivery, response, err := githubClient.Repositories.GetHookDelivery(pluginCtx, pluginConfig.Owner, pluginConfig.Repo, pluginConfig.HookID, *hookDelivery.ID)
 							if err != nil {
@@ -764,7 +760,7 @@ MainLoop:
 
 		// Redeliver the hook
 		var redelivery *github.HookDelivery
-		if isRepoSet {
+		if workerGlobals.Plugins[pluginConfig.Plugin][pluginConfig.Name].RepoSet {
 			pluginCtx, redelivery, _, _ = internalGithub.ExecuteGitHubClientFunction(workerCtx, pluginCtx, logger, func() (*github.HookDelivery, *github.Response, error) {
 				redelivery, response, err := githubClient.Repositories.RedeliverHookDelivery(pluginCtx, pluginConfig.Owner, pluginConfig.Repo, pluginConfig.HookID, *hookDelivery.ID)
 				if err != nil {
@@ -793,13 +789,6 @@ MainLoop:
 		)
 	}
 
-	// notify the main thread that the service has started
-	select {
-	case <-workerGlobals.FirstPluginStarted:
-	default:
-		close(workerGlobals.FirstPluginStarted)
-	}
-	logger.InfoContext(pluginCtx, "started plugin")
 	err = metrics.UpdatePlugin(workerCtx, pluginCtx, logger, metrics.PluginBase{
 		Status:      "running",
 		StatusSince: time.Now(),
@@ -807,6 +796,12 @@ MainLoop:
 	if err != nil {
 		return pluginCtx, fmt.Errorf("error updating plugin metrics: %s", err.Error())
 	}
+
+	logger.InfoContext(pluginCtx, "receiver finished starting")
+	// notify the main thread that the service has started
+	workerGlobals.Plugins[pluginConfig.Plugin][pluginConfig.Name].Preparing = false
+	workerGlobals.Plugins[pluginConfig.Plugin][pluginConfig.Name].Paused = false
+	workerGlobals.Plugins[pluginConfig.Plugin][pluginConfig.Name].FinishedInitialRun = true
 	// wait for the context to be canceled
 	<-pluginCtx.Done()
 	logger.InfoContext(pluginCtx, "shutting down receiver")
