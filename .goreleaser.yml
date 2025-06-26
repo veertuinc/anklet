@@ -28,7 +28,7 @@ builds:
     no_unique_dist_dir: true
 archives:
   - id: archive
-    format: zip
+    formats: [ 'zip' ]
     files:
       - none*
     name_template: '{{ .ProjectName }}_v{{ .Version }}_{{ .Os }}_{{ .Arch }}'

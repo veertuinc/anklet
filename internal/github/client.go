@@ -112,19 +112,19 @@ func ExecuteGitHubClientFunction[T any](
 	logger *slog.Logger,
 	executeFunc func() (*T, *github.Response, error),
 ) (context.Context, *T, *github.Response, error) {
-	innerPluginCtx, cancel := context.WithCancel(pluginCtx) // Inherit from parent context
+	executeGitHubClientFunctionCtx, cancel := context.WithCancel(pluginCtx) // Inherit from parent context
 	defer cancel()
 	result, response, err := executeFunc()
 	if response != nil {
 		logger.DebugContext(pluginCtx,
 			"GitHub API rate limit",
 			"remaining", response.Rate.Remaining,
-			"reset", response.Rate.Reset.Time.Format(time.RFC3339),
+			"reset", response.Rate.Reset.Format(time.RFC3339),
 			"limit", response.Rate.Limit,
 		)
 		if response.Rate.Remaining <= 10 { // handle primary rate limiting
 			sleepDuration := time.Until(response.Rate.Reset.Time) + time.Second // Adding a second to ensure we're past the reset time
-			logger.WarnContext(innerPluginCtx, "GitHub API rate limit exceeded, sleeping until reset")
+			logger.WarnContext(executeGitHubClientFunctionCtx, "GitHub API rate limit exceeded, sleeping until reset")
 			metricsData, err := metrics.GetMetricsDataFromContext(pluginCtx)
 			if err != nil {
 				return pluginCtx, nil, nil, err
@@ -133,19 +133,27 @@ func ExecuteGitHubClientFunction[T any](
 			if err != nil {
 				return pluginCtx, nil, nil, err
 			}
-			metricsData.UpdatePlugin(workerCtx, pluginCtx, logger, metrics.PluginBase{
+			err = metricsData.UpdatePlugin(workerCtx, pluginCtx, logger, metrics.PluginBase{
 				Name:        ctxPlugin.Name,
 				Status:      "limit_paused",
 				StatusSince: time.Now(),
 			})
+			if err != nil {
+				logger.ErrorContext(workerCtx, "error updating plugin metrics", "error", err)
+				return pluginCtx, nil, nil, err
+			}
 			select {
 			case <-time.After(sleepDuration):
-				metricsData.UpdatePlugin(workerCtx, pluginCtx, logger, metrics.PluginBase{
+				err := metricsData.UpdatePlugin(workerCtx, pluginCtx, logger, metrics.PluginBase{
 					Name:        ctxPlugin.Name,
 					Status:      "running",
 					StatusSince: time.Now(),
 				})
-				return ExecuteGitHubClientFunction(workerCtx, pluginCtx, logger, executeFunc) // Retry the function after waiting
+				if err != nil {
+					logger.ErrorContext(workerCtx, "error updating plugin metrics", "error", err)
+					return pluginCtx, nil, nil, err
+				}
+				return ExecuteGitHubClientFunction(workerCtx, executeGitHubClientFunctionCtx, logger, executeFunc) // Retry the function after waiting
 			case <-pluginCtx.Done():
 				return pluginCtx, nil, nil, pluginCtx.Err()
 			}

@@ -13,10 +13,10 @@ import (
 	"time"
 
 	"github.com/google/go-github/v66/github"
+	"github.com/veertuinc/anklet/internal/anka"
 	"github.com/veertuinc/anklet/internal/config"
 	"github.com/veertuinc/anklet/internal/database"
 	internalGithub "github.com/veertuinc/anklet/internal/github"
-	"github.com/veertuinc/anklet/internal/logging"
 	"github.com/veertuinc/anklet/internal/metrics"
 )
 
@@ -50,45 +50,19 @@ func exists_in_array_partial(array_to_search_in []string, desired []string) bool
 	return true
 }
 
-// passing the the queue and ID to check for
-func InQueue(pluginCtx context.Context, logger *slog.Logger, jobID int64, queue string) (bool, error) {
-	databaseContainer, err := database.GetDatabaseFromContext(pluginCtx)
-	if err != nil {
-		logging.Panic(pluginCtx, pluginCtx, "error getting database client from context: "+err.Error())
-	}
-	queued, err := databaseContainer.Client.LRange(pluginCtx, queue, 0, -1).Result()
-	if err != nil {
-		logger.ErrorContext(pluginCtx, "error getting list of queued jobs", "err", err)
-		return false, err
-	}
-	for _, queueItem := range queued {
-		workflowJobEvent, err, typeErr := database.UnwrapPayload[github.WorkflowJobEvent](queueItem)
-		if err != nil {
-			logger.ErrorContext(pluginCtx, "error unmarshalling job", "err", err)
-			return false, err
-		}
-		if typeErr != nil { // not the type we want
-			continue
-		}
-		if *workflowJobEvent.WorkflowJob.ID == jobID {
-			// logger.WarnContext(pluginCtx, "WorkflowJob.ID already in queue", "WorkflowJob.ID", jobID)
-			return true, nil
-
-		}
-	}
-	return false, nil
-}
-
 // Start runs the HTTP server
 func Run(
 	workerCtx context.Context,
 	pluginCtx context.Context,
 	pluginCancel context.CancelFunc,
 	logger *slog.Logger,
-	firstPluginStarted chan bool,
 	metricsData *metrics.MetricsDataLock,
 ) (context.Context, error) {
 	pluginConfig, err := config.GetPluginFromContext(pluginCtx)
+	if err != nil {
+		return pluginCtx, err
+	}
+	workerGlobals, err := config.GetWorkerGlobalsFromContext(workerCtx)
 	if err != nil {
 		return pluginCtx, err
 	}
@@ -96,7 +70,7 @@ func Run(
 	if err != nil {
 		return pluginCtx, err
 	}
-	metricsData.AddPlugin(
+	err = metricsData.AddPlugin(
 		metrics.PluginBase{
 			Name:        pluginConfig.Name,
 			PluginName:  pluginConfig.Plugin,
@@ -106,7 +80,9 @@ func Run(
 			StatusSince: time.Now(),
 		},
 	)
-
+	if err != nil {
+		return pluginCtx, fmt.Errorf("error adding plugin to metrics: %s", err.Error())
+	}
 	once.Do(func() {
 		metrics.ExportMetricsToDB(pluginCtx, logger)
 	})
@@ -115,25 +91,25 @@ func Run(
 		return pluginCtx, err
 	}
 	if pluginConfig.Token == "" && pluginConfig.PrivateKey == "" {
-		return pluginCtx, fmt.Errorf("token or private_key are not set at global level or in " + configFileName + ":plugins:" + pluginConfig.Name)
+		return pluginCtx, fmt.Errorf("token or private_key are not set at global level or in %s:plugins:%s<token/private_key>", configFileName, pluginConfig.Name)
 	}
 	if strings.HasPrefix(pluginConfig.PrivateKey, "~/") {
 		homeDir, err := os.UserHomeDir()
 		if err != nil {
-			return pluginCtx, fmt.Errorf("unable to get user home directory: " + err.Error())
+			return pluginCtx, fmt.Errorf("unable to get user home directory: %s", err.Error())
 		}
 		pluginConfig.PrivateKey = filepath.Join(homeDir, pluginConfig.PrivateKey[2:])
 	}
 	if pluginConfig.Owner == "" {
-		return pluginCtx, fmt.Errorf("owner is not set in " + configFileName + ":plugins:" + pluginConfig.Name)
+		return pluginCtx, fmt.Errorf("owner is not set in %s:plugins:%s<owner>", configFileName, pluginConfig.Name)
 	}
 	if pluginConfig.Secret == "" {
-		return pluginCtx, fmt.Errorf("secret is not set in " + configFileName + ":plugins:" + pluginConfig.Name)
+		return pluginCtx, fmt.Errorf("secret is not set in %s:plugins:%s<secret>", configFileName, pluginConfig.Name)
 	}
 
 	databaseContainer, err := database.GetDatabaseFromContext(pluginCtx)
 	if err != nil {
-		return pluginCtx, fmt.Errorf("error getting database client from context: " + err.Error())
+		return pluginCtx, fmt.Errorf("error getting database client from context: %s", err.Error())
 	}
 
 	var githubClient *github.Client
@@ -147,19 +123,22 @@ func Run(
 	)
 	if err != nil {
 		// logger.ErrorContext(pluginCtx, "error authenticating github client", "err", err)
-		return pluginCtx, fmt.Errorf("error authenticating github client: " + err.Error())
+		return pluginCtx, fmt.Errorf("error authenticating github client: %s", err.Error())
 	}
 
 	// clean up in_progress queue if it exists
 	err = databaseContainer.Client.Del(pluginCtx, "anklet/jobs/github/in_progress/"+pluginConfig.Owner).Err()
 	if err != nil {
-		return pluginCtx, fmt.Errorf("error deleting in_progress queue: " + err.Error())
+		return pluginCtx, fmt.Errorf("error deleting in_progress queue: %s", err.Error())
 	}
 
 	server := &http.Server{Addr: ":" + pluginConfig.Port}
 	http.HandleFunc("/healthcheck", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("ok"))
+		_, err := w.Write([]byte("ok"))
+		if err != nil {
+			logger.ErrorContext(pluginCtx, "error writing response", "error", err)
+		}
 	})
 	http.HandleFunc("/jobs/v1/receiver", func(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
@@ -178,30 +157,53 @@ func Run(
 		}
 		switch workflowJob := event.(type) {
 		case *github.WorkflowJobEvent:
-			logger.DebugContext(pluginCtx, "received workflow job to consider",
-				"workflowJob.Action", *workflowJob.Action,
-			)
+			simplifiedWorkflowJobEvent := internalGithub.QueueJob{
+				Type: "WorkflowJobPayload",
+				WorkflowJob: internalGithub.SimplifiedWorkflowJob{
+					ID:           workflowJob.WorkflowJob.ID,
+					Name:         workflowJob.WorkflowJob.Name,
+					RunID:        workflowJob.WorkflowJob.RunID,
+					Status:       workflowJob.WorkflowJob.Status,
+					Conclusion:   workflowJob.WorkflowJob.Conclusion,
+					StartedAt:    workflowJob.WorkflowJob.StartedAt,
+					CompletedAt:  workflowJob.WorkflowJob.CompletedAt,
+					Labels:       workflowJob.WorkflowJob.Labels,
+					HTMLURL:      workflowJob.WorkflowJob.HTMLURL,
+					WorkflowName: workflowJob.WorkflowJob.WorkflowName,
+				},
+				Action: *workflowJob.Action,
+				Repository: internalGithub.Repository{
+					Name: workflowJob.Repo.Name,
+				},
+				AnkaVM:   anka.VM{},
+				Attempts: 0,
+			}
 			logger.InfoContext(pluginCtx, "received workflow job to consider",
-				"workflowJob.WorkflowJob.Labels", workflowJob.WorkflowJob.Labels,
-				"workflowJob.WorkflowJob.ID", *workflowJob.WorkflowJob.ID,
-				"workflowJob.WorkflowJob.Name", *workflowJob.WorkflowJob.Name,
-				"workflowJob.WorkflowJob.RunID", *workflowJob.WorkflowJob.RunID,
+				"workflowJob.WorkflowJob.Labels", simplifiedWorkflowJobEvent.WorkflowJob.Labels,
+				"workflowJob.WorkflowJob.ID", simplifiedWorkflowJobEvent.WorkflowJob.ID,
+				"workflowJob.WorkflowJob.Name", simplifiedWorkflowJobEvent.WorkflowJob.Name,
+				"workflowJob.WorkflowJob.RunID", simplifiedWorkflowJobEvent.WorkflowJob.RunID,
+				"workflowJob.WorkflowJob.HTMLURL", simplifiedWorkflowJobEvent.WorkflowJob.HTMLURL,
+				"workflowJob.WorkflowJob.Status", simplifiedWorkflowJobEvent.WorkflowJob.Status,
+				"workflowJob.WorkflowJob.Conclusion", simplifiedWorkflowJobEvent.WorkflowJob.Conclusion,
+				"workflowJob.WorkflowJob.StartedAt", simplifiedWorkflowJobEvent.WorkflowJob.StartedAt,
+				"workflowJob.WorkflowJob.CompletedAt", simplifiedWorkflowJobEvent.WorkflowJob.CompletedAt,
+				"workflowJob.Action", simplifiedWorkflowJobEvent.Action,
+				"workflowJob.WorkflowJob.WorkflowName", simplifiedWorkflowJobEvent.WorkflowJob.WorkflowName,
+				"workflowJob.Repository.Name", simplifiedWorkflowJobEvent.Repository.Name,
+				"workflowJob.AnkaVM", simplifiedWorkflowJobEvent.AnkaVM,
 			)
 			if *workflowJob.Action == "queued" {
-				if exists_in_array_partial(workflowJob.WorkflowJob.Labels, []string{"anka-template"}) {
+				if exists_in_array_partial(simplifiedWorkflowJobEvent.WorkflowJob.Labels, []string{"anka-template"}) {
 					// make sure it doesn't already exist
-					inQueue, err := InQueue(pluginCtx, logger, *workflowJob.WorkflowJob.ID, "anklet/jobs/github/queued/"+pluginConfig.Owner)
+					inQueueJobJSON, err := internalGithub.GetJobFromQueue(pluginCtx, *simplifiedWorkflowJobEvent.WorkflowJob.ID, "anklet/jobs/github/queued/"+pluginConfig.Owner)
 					if err != nil {
 						logger.ErrorContext(pluginCtx, "error searching in queue", "error", err)
 						return
 					}
-					if !inQueue { // if it doesn't exist already
+					if inQueueJobJSON == "" { // if it doesn't exist already
 						// push it to the queue
-						wrappedJobPayload := map[string]interface{}{
-							"type":    "WorkflowJobPayload",
-							"payload": workflowJob,
-						}
-						wrappedPayloadJSON, err := json.Marshal(wrappedJobPayload)
+						wrappedPayloadJSON, err := json.Marshal(simplifiedWorkflowJobEvent)
 						if err != nil {
 							logger.ErrorContext(pluginCtx, "error converting job payload to JSON", "error", err)
 							return
@@ -212,33 +214,35 @@ func Run(
 							return
 						}
 						logger.InfoContext(pluginCtx, "job pushed to queued queue",
-							"workflowJob.ID", *workflowJob.WorkflowJob.ID,
-							"workflowJob.Name", *workflowJob.WorkflowJob.Name,
-							"workflowJob.RunID", *workflowJob.WorkflowJob.RunID,
-							"html_url", *workflowJob.WorkflowJob.HTMLURL,
-							"status", *workflowJob.WorkflowJob.Status,
-							"conclusion", workflowJob.WorkflowJob.Conclusion,
-							"started_at", workflowJob.WorkflowJob.StartedAt,
-							"completed_at", workflowJob.WorkflowJob.CompletedAt,
+							"workflowJob.ID", simplifiedWorkflowJobEvent.WorkflowJob.ID,
+							"workflowJob.Name", simplifiedWorkflowJobEvent.WorkflowJob.Name,
+							"workflowJob.RunID", simplifiedWorkflowJobEvent.WorkflowJob.RunID,
+							"html_url", simplifiedWorkflowJobEvent.WorkflowJob.HTMLURL,
+							"status", simplifiedWorkflowJobEvent.WorkflowJob.Status,
+							"conclusion", simplifiedWorkflowJobEvent.WorkflowJob.Conclusion,
+							"started_at", simplifiedWorkflowJobEvent.WorkflowJob.StartedAt,
+							"completed_at", simplifiedWorkflowJobEvent.WorkflowJob.CompletedAt,
+							"repository", simplifiedWorkflowJobEvent.Repository,
+							"action", simplifiedWorkflowJobEvent.Action,
+							"anka_vm", simplifiedWorkflowJobEvent.AnkaVM,
 						)
 					}
 				}
 			} else if *workflowJob.Action == "in_progress" {
+				if workflowJob.WorkflowJob.Conclusion != nil && *workflowJob.WorkflowJob.Conclusion == "cancelled" {
+					return
+				}
 				// store in_progress so we can know if the registration failed
-				if exists_in_array_partial(workflowJob.WorkflowJob.Labels, []string{"anka-template"}) {
+				if exists_in_array_partial(simplifiedWorkflowJobEvent.WorkflowJob.Labels, []string{"anka-template"}) {
 					// make sure it doesn't already exist
-					inQueue, err := InQueue(pluginCtx, logger, *workflowJob.WorkflowJob.ID, "anklet/jobs/github/in_progress/"+pluginConfig.Owner)
+					inQueueJobJSON, err := internalGithub.GetJobFromQueue(pluginCtx, *simplifiedWorkflowJobEvent.WorkflowJob.ID, "anklet/jobs/github/in_progress/"+pluginConfig.Owner)
 					if err != nil {
 						logger.ErrorContext(pluginCtx, "error searching in queue", "error", err)
 						return
 					}
-					if !inQueue { // if it doesn't exist already
+					if inQueueJobJSON == "" { // if it doesn't exist already
 						// push it to the queue
-						wrappedJobPayload := map[string]interface{}{
-							"type":    "WorkflowJobPayload",
-							"payload": workflowJob,
-						}
-						wrappedPayloadJSON, err := json.Marshal(wrappedJobPayload)
+						wrappedPayloadJSON, err := json.Marshal(simplifiedWorkflowJobEvent)
 						if err != nil {
 							logger.ErrorContext(pluginCtx, "error converting job payload to JSON", "error", err)
 							return
@@ -249,20 +253,19 @@ func Run(
 							return
 						}
 						logger.InfoContext(pluginCtx, "job pushed to in_progress queue",
-							"workflowJob.ID", *workflowJob.WorkflowJob.ID,
-							"workflowJob.Name", *workflowJob.WorkflowJob.Name,
-							"workflowJob.RunID", *workflowJob.WorkflowJob.RunID,
-							"html_url", *workflowJob.WorkflowJob.HTMLURL,
-							"status", *workflowJob.WorkflowJob.Status,
-							"conclusion", workflowJob.WorkflowJob.Conclusion,
-							"started_at", workflowJob.WorkflowJob.StartedAt,
-							"completed_at", workflowJob.WorkflowJob.CompletedAt,
+							"workflowJob.ID", simplifiedWorkflowJobEvent.WorkflowJob.ID,
+							"workflowJob.Name", simplifiedWorkflowJobEvent.WorkflowJob.Name,
+							"workflowJob.RunID", simplifiedWorkflowJobEvent.WorkflowJob.RunID,
+							"html_url", simplifiedWorkflowJobEvent.WorkflowJob.HTMLURL,
+							"status", simplifiedWorkflowJobEvent.WorkflowJob.Status,
+							"conclusion", simplifiedWorkflowJobEvent.WorkflowJob.Conclusion,
+							"started_at", simplifiedWorkflowJobEvent.WorkflowJob.StartedAt,
+							"completed_at", simplifiedWorkflowJobEvent.WorkflowJob.CompletedAt,
 						)
 					}
 				}
 			} else if *workflowJob.Action == "completed" {
-				if exists_in_array_partial(workflowJob.WorkflowJob.Labels, []string{"anka-template"}) {
-
+				if exists_in_array_partial(simplifiedWorkflowJobEvent.WorkflowJob.Labels, []string{"anka-template"}) {
 					queues := []string{}
 					// get all keys from database for the main queue and service queues as well as completed
 					queuedKeys, err := databaseContainer.Client.Keys(pluginCtx, "anklet/jobs/github/queued/"+pluginConfig.Owner+"*").Result()
@@ -277,11 +280,11 @@ func Run(
 						wg.Add(1)
 						go func(queue string) {
 							defer wg.Done()
-							inQueue, err := InQueue(pluginCtx, logger, *workflowJob.WorkflowJob.ID, queue)
+							inQueueJobJSON, err := internalGithub.GetJobFromQueue(pluginCtx, *simplifiedWorkflowJobEvent.WorkflowJob.ID, queue)
 							if err != nil {
 								logger.WarnContext(pluginCtx, err.Error(), "queue", queue)
 							}
-							results <- inQueue
+							results <- inQueueJobJSON != ""
 						}(queue)
 					}
 					go func() {
@@ -296,18 +299,14 @@ func Run(
 						}
 					}
 					if inAQueue { // only add completed if it's in a queue
-						inCompletedQueue, err := InQueue(pluginCtx, logger, *workflowJob.WorkflowJob.ID, "anklet/jobs/github/completed/"+pluginConfig.Owner)
+						inCompletedQueueJobJSON, err := internalGithub.GetJobFromQueue(pluginCtx, *simplifiedWorkflowJobEvent.WorkflowJob.ID, "anklet/jobs/github/completed/"+pluginConfig.Owner)
 						if err != nil {
 							logger.ErrorContext(pluginCtx, "error searching in queue", "error", err)
 							return
 						}
-						if !inCompletedQueue {
+						if inCompletedQueueJobJSON == "" {
 							// push it to the queue
-							wrappedJobPayload := map[string]interface{}{
-								"type":    "WorkflowJobPayload",
-								"payload": workflowJob,
-							}
-							wrappedPayloadJSON, err := json.Marshal(wrappedJobPayload)
+							wrappedPayloadJSON, err := json.Marshal(simplifiedWorkflowJobEvent)
 							if err != nil {
 								logger.ErrorContext(pluginCtx, "error converting job payload to JSON", "error", err)
 								return
@@ -318,14 +317,14 @@ func Run(
 								return
 							}
 							logger.InfoContext(pluginCtx, "job pushed to completed queue",
-								"workflowJob.ID", *workflowJob.WorkflowJob.ID,
-								"workflowJob.Name", *workflowJob.WorkflowJob.Name,
-								"workflowJob.RunID", *workflowJob.WorkflowJob.RunID,
-								"html_url", *workflowJob.WorkflowJob.HTMLURL,
-								"status", *workflowJob.WorkflowJob.Status,
-								"conclusion", workflowJob.WorkflowJob.Conclusion,
-								"started_at", workflowJob.WorkflowJob.StartedAt,
-								"completed_at", workflowJob.WorkflowJob.CompletedAt,
+								"workflowJob.ID", *simplifiedWorkflowJobEvent.WorkflowJob.ID,
+								"workflowJob.Name", *simplifiedWorkflowJobEvent.WorkflowJob.Name,
+								"workflowJob.RunID", *simplifiedWorkflowJobEvent.WorkflowJob.RunID,
+								"html_url", *simplifiedWorkflowJobEvent.WorkflowJob.HTMLURL,
+								"status", *simplifiedWorkflowJobEvent.WorkflowJob.Status,
+								"conclusion", *simplifiedWorkflowJobEvent.WorkflowJob.Conclusion,
+								"started_at", *simplifiedWorkflowJobEvent.WorkflowJob.StartedAt,
+								"completed_at", *simplifiedWorkflowJobEvent.WorkflowJob.CompletedAt,
 							)
 						}
 					}
@@ -345,7 +344,7 @@ func Run(
 					// 	}
 					// 	if !inCompletedQueue {
 					// 		// push it to the queue
-					// 		wrappedJobPayload := map[string]interface{}{
+					// 		wrappedJobPayload := map[string]any{
 					// 			"type":    "WorkflowJobPayload",
 					// 			"payload": workflowJob,
 					// 		}
@@ -370,7 +369,10 @@ func Run(
 	})
 	http.HandleFunc("/jobs", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotImplemented)
-		w.Write([]byte("please use /jobs/v1"))
+		_, err := w.Write([]byte("please use /jobs/v1"))
+		if err != nil {
+			logger.ErrorContext(pluginCtx, "error writing response", "error", err)
+		}
 	})
 	go func() {
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -479,7 +481,7 @@ func Run(
 	// 				if !exists_in_array_partial(workflowJobEvent.WorkflowJob.Labels, []string{"anka-template"}) {
 	// 					continue
 	// 				}
-	// 				allHooks = append(allHooks, map[string]interface{}{
+	// 				allHooks = append(allHooks, map[string]any{
 	// 					"hookDelivery":     gottenHookDelivery,
 	// 					"workflowJobEvent": workflowJobEvent,
 	// 				})
@@ -542,7 +544,7 @@ func Run(
 						otherHookDelivery.GUID != nil && hookDelivery.GUID != nil && *otherHookDelivery.GUID == *hookDelivery.GUID &&
 						otherHookDelivery.Redelivery != nil && *otherHookDelivery.Redelivery &&
 						otherHookDelivery.StatusCode != nil && *otherHookDelivery.StatusCode == 200 &&
-						otherHookDelivery.DeliveredAt.Time.After(hookDelivery.DeliveredAt.Time) {
+						otherHookDelivery.DeliveredAt.After(hookDelivery.DeliveredAt.Time) {
 						found = otherHookDelivery
 						break
 					}
@@ -616,12 +618,13 @@ MainLoop:
 			// logger.ErrorContext(pluginCtx, "error listing hooks", "err", err)
 			return pluginCtx, fmt.Errorf("error listing hooks: %s", err.Error())
 		}
-		var workflowJobEvent github.WorkflowJobEvent
-		err = json.Unmarshal(*gottenHookDelivery.Request.RawPayload, &workflowJobEvent)
+		var workflowJobEventPayload internalGithub.QueueJob
+		err = json.Unmarshal(*gottenHookDelivery.Request.RawPayload, &workflowJobEventPayload)
 		if err != nil {
 			// logger.ErrorContext(pluginCtx, "error unmarshalling hook request raw payload to HookResponse", "err", err)
 			return pluginCtx, fmt.Errorf("error unmarshalling hook request raw payload to HookResponse: %s", err.Error())
 		}
+		workflowJob := workflowJobEventPayload.WorkflowJob
 
 		inQueued := false
 		// inQueuedListKey := ""
@@ -634,7 +637,7 @@ MainLoop:
 		// logger.DebugContext(pluginCtx, "workflowJobEvent", "workflowJobEvent", workflowJobEvent)
 
 		// Check if the job is already in the queue
-		if workflowJobEvent.WorkflowJob == nil || workflowJobEvent.WorkflowJob.ID == nil {
+		if workflowJob.ID == nil {
 			logger.WarnContext(pluginCtx, "WorkflowJob or WorkflowJob.ID is nil")
 			continue
 		}
@@ -646,7 +649,7 @@ MainLoop:
 				if queuedJob == "" {
 					continue
 				}
-				wrappedPayload, err, typeErr := database.UnwrapPayload[github.WorkflowJobEvent](queuedJob)
+				wrappedPayload, err, typeErr := database.Unwrap[internalGithub.QueueJob](queuedJob)
 				if err != nil {
 					// logger.ErrorContext(pluginCtx, "error unmarshalling job", "err", err)
 					return pluginCtx, fmt.Errorf("error unmarshalling job: %s", err.Error())
@@ -657,10 +660,10 @@ MainLoop:
 				if wrappedPayload.WorkflowJob.ID == nil {
 					continue
 				}
-				if workflowJobEvent.WorkflowJob.ID == nil {
+				if workflowJob.ID == nil {
 					continue
 				}
-				if *wrappedPayload.WorkflowJob.ID == *workflowJobEvent.WorkflowJob.ID {
+				if *wrappedPayload.WorkflowJob.ID == *workflowJob.ID {
 					inQueued = true
 					// inQueuedListKey = key
 					// inQueuedListIndex = index
@@ -673,7 +676,7 @@ MainLoop:
 		if *hookDelivery.Action == "completed" {
 			for key, completedJobs := range allCompletedJobs {
 				for index, completedJob := range completedJobs {
-					wrappedPayload, err, typeErr := database.UnwrapPayload[github.WorkflowJobEvent](completedJob)
+					wrappedPayload, err, typeErr := database.Unwrap[internalGithub.QueueJob](completedJob)
 					if err != nil {
 						// logger.ErrorContext(pluginCtx, "error unmarshalling job", "err", err)
 						return pluginCtx, fmt.Errorf("error unmarshalling job: %s", err.Error())
@@ -681,7 +684,7 @@ MainLoop:
 					if typeErr != nil { // not the type we want
 						continue
 					}
-					if *wrappedPayload.WorkflowJob.ID == *workflowJobEvent.WorkflowJob.ID {
+					if *wrappedPayload.WorkflowJob.ID == *workflowJob.ID {
 						inCompleted = true
 						inCompletedListKey = key
 						inCompletedIndex = index
@@ -711,7 +714,7 @@ MainLoop:
 			// check if a completed hook exists, so we don't re-queue something already finished
 			for _, otherHookDelivery := range *hookDeliveries {
 				if *otherHookDelivery.Action == "completed" &&
-					otherHookDelivery.DeliveredAt != nil && otherHookDelivery.DeliveredAt.Time.After(hookDelivery.DeliveredAt.Time) &&
+					otherHookDelivery.DeliveredAt != nil && otherHookDelivery.DeliveredAt.After(hookDelivery.DeliveredAt.Time) &&
 					otherHookDelivery.RepositoryID != nil && *otherHookDelivery.RepositoryID == *hookDelivery.RepositoryID {
 					var otherGottenHookDelivery *github.HookDelivery
 					var err error
@@ -736,13 +739,14 @@ MainLoop:
 						// logger.ErrorContext(pluginCtx, "error listing hooks", "err", err)
 						return pluginCtx, fmt.Errorf("error listing hooks: %s", err.Error())
 					}
-					var otherWorkflowJobEvent github.WorkflowJobEvent
-					err = json.Unmarshal(*otherGottenHookDelivery.Request.RawPayload, &otherWorkflowJobEvent)
+					var otherWorkflowJobEventPayload internalGithub.QueueJob
+					err = json.Unmarshal(*otherGottenHookDelivery.Request.RawPayload, &otherWorkflowJobEventPayload)
 					if err != nil {
 						// logger.ErrorContext(pluginCtx, "error unmarshalling hook request raw payload to HookResponse", "err", err)
 						return pluginCtx, fmt.Errorf("error unmarshalling hook request raw payload to HookResponse: %s", err.Error())
 					}
-					if *workflowJobEvent.WorkflowJob.ID == *otherWorkflowJobEvent.WorkflowJob.ID {
+					otherWorkflowJob := otherWorkflowJobEventPayload.WorkflowJob
+					if *workflowJob.ID == *otherWorkflowJob.ID {
 						continue MainLoop
 					}
 				}
@@ -781,7 +785,7 @@ MainLoop:
 		logger.InfoContext(pluginCtx, "hook redelivered",
 			"redelivery", redelivery,
 			"hookDelivery.GUID", *hookDelivery.GUID,
-			"workflowJobEvent.WorkflowJob.ID", *workflowJobEvent.WorkflowJob.ID,
+			"workflowJob.ID", *workflowJob.ID,
 			"hookDelivery.Action", *hookDelivery.Action,
 			"hookDelivery.StatusCode", *hookDelivery.StatusCode,
 			"hookDelivery.Redelivery", *hookDelivery.Redelivery,
@@ -791,15 +795,18 @@ MainLoop:
 
 	// notify the main thread that the service has started
 	select {
-	case <-firstPluginStarted:
+	case <-workerGlobals.FirstPluginStarted:
 	default:
-		close(firstPluginStarted)
+		close(workerGlobals.FirstPluginStarted)
 	}
 	logger.InfoContext(pluginCtx, "started plugin")
-	metrics.UpdatePlugin(workerCtx, pluginCtx, logger, metrics.PluginBase{
+	err = metrics.UpdatePlugin(workerCtx, pluginCtx, logger, metrics.PluginBase{
 		Status:      "running",
 		StatusSince: time.Now(),
 	})
+	if err != nil {
+		return pluginCtx, fmt.Errorf("error updating plugin metrics: %s", err.Error())
+	}
 	// wait for the context to be canceled
 	<-pluginCtx.Done()
 	logger.InfoContext(pluginCtx, "shutting down receiver")

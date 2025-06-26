@@ -5,6 +5,7 @@ import (
 	"os"
 	"strconv"
 	"sync"
+	"sync/atomic"
 
 	"context"
 
@@ -85,7 +86,12 @@ func LoadConfig(configPath string) (Config, error) {
 	if err != nil {
 		return config, err
 	}
-	defer file.Close()
+	defer func() {
+		err := file.Close()
+		if err != nil {
+			panic(err)
+		}
+	}()
 
 	decoder := yaml.NewDecoder(file)
 	err = decoder.Decode(&config)
@@ -202,19 +208,89 @@ func GetPluginFromContext(ctx context.Context) (Plugin, error) {
 	return plugin, nil
 }
 
-type Globals struct {
-	RunOnce      string
-	PullLock     *sync.Mutex
-	PluginsPath  string
-	DebugEnabled bool
+type PluginGlobal struct {
+	PluginRunCount     atomic.Uint64
+	FinishedInitialRun bool
 }
 
-func GetGlobalsFromContext(ctx context.Context) (Globals, error) {
-	globals, ok := ctx.Value(ContextKey("globals")).(Globals)
+type Globals struct {
+	RunPluginsOnce bool
+	// block the second plugin until the first plugin is done
+	FirstPluginStarted   chan bool
+	ReturnAllToMainQueue atomic.Bool
+	PullLock             *sync.Mutex
+	PluginsPath          string
+	DebugEnabled         bool
+	PluginsPaused        atomic.Bool
+	// block other plugins from running until the currently running
+	// plugin is at a place that's safe to let other run
+	APluginIsPreparing atomic.Value
+	HostCPUCount       int
+	HostMemoryBytes    uint64
+	QueueTargetIndex   *int64
+	// We want each plugin to run at least once so that any VMs/jobs that were orphaned
+	// on this host get a chance to be cleaned or continue where they left off
+	Plugins map[string]*PluginGlobal
+}
+
+// GetPluginRunCount returns the current value of the shared plugin run counter
+func (g *Globals) GetPluginRunCount(pluginName string) uint64 {
+	return g.Plugins[pluginName].PluginRunCount.Load()
+}
+
+// IncrementPluginRunCount increments the shared plugin run counter and returns the new value
+func (g *Globals) IncrementPluginRunCount(pluginName string) {
+	g.Plugins[pluginName].PluginRunCount.Add(1)
+}
+
+func GetWorkerGlobalsFromContext(ctx context.Context) (*Globals, error) {
+	globals, ok := ctx.Value(ContextKey("globals")).(*Globals)
 	if !ok {
-		return Globals{}, fmt.Errorf("GetGlobalsFromContext failed")
+		return nil, fmt.Errorf("GetGlobalsFromContext failed")
 	}
 	return globals, nil
+}
+
+func (g *Globals) PausePlugins() {
+	g.PluginsPaused.Store(true)
+}
+
+func (g *Globals) UnPausePlugins() {
+	g.PluginsPaused.Store(false)
+}
+
+func (g *Globals) ArePluginsPaused() bool {
+	return g.PluginsPaused.Load()
+}
+
+func (g *Globals) SetAPluginIsPreparing(pluginName string) {
+	g.APluginIsPreparing.Store(pluginName)
+}
+
+func (g *Globals) UnsetAPluginIsPreparing() {
+	g.APluginIsPreparing.Store("")
+}
+
+func (g *Globals) IsAPluginPreparingState() string {
+	pluginName := g.APluginIsPreparing.Load()
+	if pluginName == nil {
+		return ""
+	}
+	return pluginName.(string)
+}
+
+func (g *Globals) IncrementQueueTargetIndex() {
+	*g.QueueTargetIndex++
+}
+
+func (g *Globals) DecrementQueueTargetIndex() {
+	if *g.QueueTargetIndex > 0 {
+		*g.QueueTargetIndex--
+	}
+}
+
+func (g *Globals) ResetQueueTargetIndex() {
+	*g.QueueTargetIndex = 0
 }
 
 func GetLoadedConfigFromContext(ctx context.Context) (*Config, error) {
@@ -239,4 +315,13 @@ func GetConfigFileNameFromContext(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("GetConfigFileNameFromContext failed")
 	}
 	return configFileName, nil
+}
+
+func FindIndex(slice []string, value string) int {
+	for i, v := range slice {
+		if v == value {
+			return i
+		}
+	}
+	return -1
 }
