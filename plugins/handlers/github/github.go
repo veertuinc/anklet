@@ -1411,11 +1411,13 @@ func Run(
 	ankaTemplate := extractLabelValue(queuedJob.WorkflowJob.Labels, "anka-template:")
 	if ankaTemplate == "" {
 		logger.WarnContext(pluginCtx, "warning: unable to find Anka Template specified in labels, cancelling job")
+		// TODO: turn this block into a function, then use it throughout the plugin
 		queuedJob.Action = "cancel"
 		err = internalGithub.UpdateJobInDB(pluginCtx, pluginQueueName, &queuedJob)
 		if err != nil {
 			logger.ErrorContext(pluginCtx, "error updating job in db", "err", err)
 		}
+		// TODO
 		pluginGlobals.JobChannel <- queuedJob
 		return pluginCtx, nil
 	}
