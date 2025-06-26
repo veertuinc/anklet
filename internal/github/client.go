@@ -3,7 +3,6 @@ package github
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"os"
 	"strings"
@@ -13,6 +12,7 @@ import (
 	"github.com/gofri/go-github-ratelimit/github_ratelimit"
 	"github.com/google/go-github/v66/github"
 	"github.com/veertuinc/anklet/internal/config"
+	"github.com/veertuinc/anklet/internal/logging"
 	"github.com/veertuinc/anklet/internal/metrics"
 )
 
@@ -52,7 +52,6 @@ func GetHttpTransportFromContext(ctx context.Context) (*http.Transport, error) {
 
 func AuthenticateAndReturnGitHubClient(
 	ctx context.Context,
-	logger *slog.Logger,
 	privateKey string,
 	appID int64,
 	installationID int64,
@@ -77,7 +76,7 @@ func AuthenticateAndReturnGitHubClient(
 	if rateLimiter == nil {
 		rateLimiter, err = github_ratelimit.NewRateLimitWaiterClient(httpTransport)
 		if err != nil {
-			logger.ErrorContext(ctx, "error creating github_ratelimit.NewRateLimitWaiterClient", "err", err)
+			logging.Error(ctx, "error creating github_ratelimit.NewRateLimitWaiterClient", "err", err)
 			return nil, err
 		}
 	}
@@ -109,14 +108,13 @@ func AuthenticateAndReturnGitHubClient(
 func ExecuteGitHubClientFunction[T any](
 	workerCtx context.Context,
 	pluginCtx context.Context,
-	logger *slog.Logger,
 	executeFunc func() (*T, *github.Response, error),
 ) (context.Context, *T, *github.Response, error) {
 	executeGitHubClientFunctionCtx, cancel := context.WithCancel(pluginCtx) // Inherit from parent context
 	defer cancel()
 	result, response, err := executeFunc()
 	if response != nil {
-		logger.DebugContext(pluginCtx,
+		logging.Debug(pluginCtx,
 			"GitHub API rate limit",
 			"remaining", response.Rate.Remaining,
 			"reset", response.Rate.Reset.Format(time.RFC3339),
@@ -124,7 +122,7 @@ func ExecuteGitHubClientFunction[T any](
 		)
 		if response.Rate.Remaining <= 10 { // handle primary rate limiting
 			sleepDuration := time.Until(response.Rate.Reset.Time) + time.Second // Adding a second to ensure we're past the reset time
-			logger.WarnContext(executeGitHubClientFunctionCtx, "GitHub API rate limit exceeded, sleeping until reset")
+			logging.Warn(executeGitHubClientFunctionCtx, "GitHub API rate limit exceeded, sleeping until reset")
 			metricsData, err := metrics.GetMetricsDataFromContext(pluginCtx)
 			if err != nil {
 				return pluginCtx, nil, nil, err
@@ -133,27 +131,27 @@ func ExecuteGitHubClientFunction[T any](
 			if err != nil {
 				return pluginCtx, nil, nil, err
 			}
-			err = metricsData.UpdatePlugin(workerCtx, pluginCtx, logger, metrics.PluginBase{
+			err = metricsData.UpdatePlugin(workerCtx, pluginCtx, metrics.PluginBase{
 				Name:        ctxPlugin.Name,
 				Status:      "limit_paused",
 				StatusSince: time.Now(),
 			})
 			if err != nil {
-				logger.ErrorContext(workerCtx, "error updating plugin metrics", "error", err)
+				logging.Error(workerCtx, "error updating plugin metrics", "error", err)
 				return pluginCtx, nil, nil, err
 			}
 			select {
 			case <-time.After(sleepDuration):
-				err := metricsData.UpdatePlugin(workerCtx, pluginCtx, logger, metrics.PluginBase{
+				err := metricsData.UpdatePlugin(workerCtx, pluginCtx, metrics.PluginBase{
 					Name:        ctxPlugin.Name,
 					Status:      "running",
 					StatusSince: time.Now(),
 				})
 				if err != nil {
-					logger.ErrorContext(workerCtx, "error updating plugin metrics", "error", err)
+					logging.Error(workerCtx, "error updating plugin metrics", "error", err)
 					return pluginCtx, nil, nil, err
 				}
-				return ExecuteGitHubClientFunction(workerCtx, executeGitHubClientFunctionCtx, logger, executeFunc) // Retry the function after waiting
+				return ExecuteGitHubClientFunction(workerCtx, executeGitHubClientFunctionCtx, executeFunc) // Retry the function after waiting
 			case <-pluginCtx.Done():
 				return pluginCtx, nil, nil, pluginCtx.Err()
 			}
@@ -162,7 +160,7 @@ func ExecuteGitHubClientFunction[T any](
 	if err != nil {
 		if err.Error() != "context canceled" {
 			if !strings.Contains(err.Error(), "try again later") {
-				logger.Error("error executing GitHub client function: " + err.Error())
+				logging.Error(pluginCtx, "error executing GitHub client function: "+err.Error())
 			}
 		}
 		return pluginCtx, nil, nil, err

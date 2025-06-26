@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -17,6 +16,7 @@ import (
 	"github.com/veertuinc/anklet/internal/config"
 	"github.com/veertuinc/anklet/internal/database"
 	internalGithub "github.com/veertuinc/anklet/internal/github"
+	"github.com/veertuinc/anklet/internal/logging"
 	"github.com/veertuinc/anklet/internal/metrics"
 )
 
@@ -24,8 +24,6 @@ import (
 type Server struct {
 	Port string
 }
-
-var once sync.Once
 
 // NewServer creates a new instance of Server
 func NewServer(port string) *Server {
@@ -54,9 +52,6 @@ func exists_in_array_partial(array_to_search_in []string, desired []string) bool
 func Run(
 	workerCtx context.Context,
 	pluginCtx context.Context,
-	pluginCancel context.CancelFunc,
-	logger *slog.Logger,
-	metricsData *metrics.MetricsDataLock,
 ) (context.Context, error) {
 	pluginConfig, err := config.GetPluginFromContext(pluginCtx)
 	if err != nil {
@@ -66,30 +61,11 @@ func Run(
 	if err != nil {
 		return pluginCtx, err
 	}
-	isRepoSet, err := config.GetIsRepoSetFromContext(pluginCtx)
-	if err != nil {
-		return pluginCtx, err
-	}
-	err = metricsData.AddPlugin(
-		metrics.PluginBase{
-			Name:        pluginConfig.Name,
-			PluginName:  pluginConfig.Plugin,
-			RepoName:    pluginConfig.Repo,
-			OwnerName:   pluginConfig.Owner,
-			Status:      "initializing",
-			StatusSince: time.Now(),
-		},
-	)
-	if err != nil {
-		return pluginCtx, fmt.Errorf("error adding plugin to metrics: %s", err.Error())
-	}
-	once.Do(func() {
-		metrics.ExportMetricsToDB(pluginCtx, logger)
-	})
 	configFileName, err := config.GetConfigFileNameFromContext(pluginCtx)
 	if err != nil {
 		return pluginCtx, err
 	}
+
 	if pluginConfig.Token == "" && pluginConfig.PrivateKey == "" {
 		return pluginCtx, fmt.Errorf("token or private_key are not set at global level or in %s:plugins:%s<token/private_key>", configFileName, pluginConfig.Name)
 	}
@@ -115,14 +91,12 @@ func Run(
 	var githubClient *github.Client
 	githubClient, err = internalGithub.AuthenticateAndReturnGitHubClient(
 		pluginCtx,
-		logger,
 		pluginConfig.PrivateKey,
 		pluginConfig.AppID,
 		pluginConfig.InstallationID,
 		pluginConfig.Token,
 	)
 	if err != nil {
-		// logger.ErrorContext(pluginCtx, "error authenticating github client", "err", err)
 		return pluginCtx, fmt.Errorf("error authenticating github client: %s", err.Error())
 	}
 
@@ -137,22 +111,22 @@ func Run(
 		w.WriteHeader(http.StatusOK)
 		_, err := w.Write([]byte("ok"))
 		if err != nil {
-			logger.ErrorContext(pluginCtx, "error writing response", "error", err)
+			logging.Error(pluginCtx, "error writing response", "error", err)
 		}
 	})
 	http.HandleFunc("/jobs/v1/receiver", func(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
-			logger.ErrorContext(pluginCtx, "error getting database client from context", "error", err)
+			logging.Error(pluginCtx, "error getting database client from context", "error", err)
 			return
 		}
 		payload, err := github.ValidatePayload(r, []byte(pluginConfig.Secret))
 		if err != nil {
-			logger.ErrorContext(pluginCtx, "error validating payload", "error", err)
+			logging.Error(pluginCtx, "error validating payload", "error", err)
 			return
 		}
 		event, err := github.ParseWebHook(github.WebHookType(r), payload)
 		if err != nil {
-			logger.ErrorContext(pluginCtx, "error parsing event", "error", err)
+			logging.Error(pluginCtx, "error parsing event", "error", err)
 			return
 		}
 		switch workflowJob := event.(type) {
@@ -178,7 +152,7 @@ func Run(
 				AnkaVM:   anka.VM{},
 				Attempts: 0,
 			}
-			logger.InfoContext(pluginCtx, "received workflow job to consider",
+			logging.Info(pluginCtx, "received workflow job to consider",
 				"workflowJob.WorkflowJob.Labels", simplifiedWorkflowJobEvent.WorkflowJob.Labels,
 				"workflowJob.WorkflowJob.ID", simplifiedWorkflowJobEvent.WorkflowJob.ID,
 				"workflowJob.WorkflowJob.Name", simplifiedWorkflowJobEvent.WorkflowJob.Name,
@@ -198,22 +172,22 @@ func Run(
 					// make sure it doesn't already exist
 					inQueueJobJSON, err := internalGithub.GetJobFromQueue(pluginCtx, *simplifiedWorkflowJobEvent.WorkflowJob.ID, "anklet/jobs/github/queued/"+pluginConfig.Owner)
 					if err != nil {
-						logger.ErrorContext(pluginCtx, "error searching in queue", "error", err)
+						logging.Error(pluginCtx, "error searching in queue", "error", err)
 						return
 					}
 					if inQueueJobJSON == "" { // if it doesn't exist already
 						// push it to the queue
 						wrappedPayloadJSON, err := json.Marshal(simplifiedWorkflowJobEvent)
 						if err != nil {
-							logger.ErrorContext(pluginCtx, "error converting job payload to JSON", "error", err)
+							logging.Error(pluginCtx, "error converting job payload to JSON", "error", err)
 							return
 						}
 						push := databaseContainer.Client.RPush(pluginCtx, "anklet/jobs/github/queued/"+pluginConfig.Owner, wrappedPayloadJSON)
 						if push.Err() != nil {
-							logger.ErrorContext(pluginCtx, "error pushing job to queue", "error", push.Err())
+							logging.Error(pluginCtx, "error pushing job to queue", "error", push.Err())
 							return
 						}
-						logger.InfoContext(pluginCtx, "job pushed to queued queue",
+						logging.Info(pluginCtx, "job pushed to queued queue",
 							"workflowJob.ID", simplifiedWorkflowJobEvent.WorkflowJob.ID,
 							"workflowJob.Name", simplifiedWorkflowJobEvent.WorkflowJob.Name,
 							"workflowJob.RunID", simplifiedWorkflowJobEvent.WorkflowJob.RunID,
@@ -237,22 +211,22 @@ func Run(
 					// make sure it doesn't already exist
 					inQueueJobJSON, err := internalGithub.GetJobFromQueue(pluginCtx, *simplifiedWorkflowJobEvent.WorkflowJob.ID, "anklet/jobs/github/in_progress/"+pluginConfig.Owner)
 					if err != nil {
-						logger.ErrorContext(pluginCtx, "error searching in queue", "error", err)
+						logging.Error(pluginCtx, "error searching in queue", "error", err)
 						return
 					}
 					if inQueueJobJSON == "" { // if it doesn't exist already
 						// push it to the queue
 						wrappedPayloadJSON, err := json.Marshal(simplifiedWorkflowJobEvent)
 						if err != nil {
-							logger.ErrorContext(pluginCtx, "error converting job payload to JSON", "error", err)
+							logging.Error(pluginCtx, "error converting job payload to JSON", "error", err)
 							return
 						}
 						push := databaseContainer.Client.RPush(pluginCtx, "anklet/jobs/github/in_progress/"+pluginConfig.Owner, wrappedPayloadJSON)
 						if push.Err() != nil {
-							logger.ErrorContext(pluginCtx, "error pushing job to queue", "error", push.Err())
+							logging.Error(pluginCtx, "error pushing job to queue", "error", push.Err())
 							return
 						}
-						logger.InfoContext(pluginCtx, "job pushed to in_progress queue",
+						logging.Info(pluginCtx, "job pushed to in_progress queue",
 							"workflowJob.ID", simplifiedWorkflowJobEvent.WorkflowJob.ID,
 							"workflowJob.Name", simplifiedWorkflowJobEvent.WorkflowJob.Name,
 							"workflowJob.RunID", simplifiedWorkflowJobEvent.WorkflowJob.RunID,
@@ -270,7 +244,7 @@ func Run(
 					// get all keys from database for the main queue and service queues as well as completed
 					queuedKeys, err := databaseContainer.Client.Keys(pluginCtx, "anklet/jobs/github/queued/"+pluginConfig.Owner+"*").Result()
 					if err != nil {
-						logger.ErrorContext(pluginCtx, "error getting list of queued keys (completed)", "err", err)
+						logging.Error(pluginCtx, "error getting list of queued keys (completed)", "err", err)
 						return
 					}
 					queues = append(queues, queuedKeys...)
@@ -282,7 +256,7 @@ func Run(
 							defer wg.Done()
 							inQueueJobJSON, err := internalGithub.GetJobFromQueue(pluginCtx, *simplifiedWorkflowJobEvent.WorkflowJob.ID, queue)
 							if err != nil {
-								logger.WarnContext(pluginCtx, err.Error(), "queue", queue)
+								logging.Warn(pluginCtx, err.Error(), "queue", queue)
 							}
 							results <- inQueueJobJSON != ""
 						}(queue)
@@ -301,22 +275,22 @@ func Run(
 					if inAQueue { // only add completed if it's in a queue
 						inCompletedQueueJobJSON, err := internalGithub.GetJobFromQueue(pluginCtx, *simplifiedWorkflowJobEvent.WorkflowJob.ID, "anklet/jobs/github/completed/"+pluginConfig.Owner)
 						if err != nil {
-							logger.ErrorContext(pluginCtx, "error searching in queue", "error", err)
+							logging.Error(pluginCtx, "error searching in queue", "error", err)
 							return
 						}
 						if inCompletedQueueJobJSON == "" {
 							// push it to the queue
 							wrappedPayloadJSON, err := json.Marshal(simplifiedWorkflowJobEvent)
 							if err != nil {
-								logger.ErrorContext(pluginCtx, "error converting job payload to JSON", "error", err)
+								logging.Error(pluginCtx, "error converting job payload to JSON", "error", err)
 								return
 							}
 							push := databaseContainer.Client.RPush(pluginCtx, "anklet/jobs/github/completed/"+pluginConfig.Owner, wrappedPayloadJSON)
 							if push.Err() != nil {
-								logger.ErrorContext(pluginCtx, "error pushing job to queue", "error", push.Err())
+								logging.Error(pluginCtx, "error pushing job to queue", "error", push.Err())
 								return
 							}
-							logger.InfoContext(pluginCtx, "job pushed to completed queue",
+							logging.Info(pluginCtx, "job pushed to completed queue",
 								"workflowJob.ID", *simplifiedWorkflowJobEvent.WorkflowJob.ID,
 								"workflowJob.Name", *simplifiedWorkflowJobEvent.WorkflowJob.Name,
 								"workflowJob.RunID", *simplifiedWorkflowJobEvent.WorkflowJob.RunID,
@@ -371,12 +345,12 @@ func Run(
 		w.WriteHeader(http.StatusNotImplemented)
 		_, err := w.Write([]byte("please use /jobs/v1"))
 		if err != nil {
-			logger.ErrorContext(pluginCtx, "error writing response", "error", err)
+			logging.Error(pluginCtx, "error writing response", "error", err)
 		}
 	})
 	go func() {
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			logger.ErrorContext(pluginCtx, "receiver listener error", "error", err)
+			logging.Error(pluginCtx, "receiver listener error", "error", err)
 		}
 	}()
 
@@ -503,11 +477,11 @@ func Run(
 		pluginCtx = context.WithValue(pluginCtx, config.ContextKey("githubwrapperclient"), githubWrapperClient)
 		limitForHooks := time.Now().Add(-time.Hour * time.Duration(pluginConfig.RedeliverHours)) // the time we want the stop search for redeliveries
 		opts := &github.ListCursorOptions{PerPage: 10}
-		logger.InfoContext(pluginCtx, fmt.Sprintf("listing hook deliveries for the last %d hours to see if any need redelivery (may take a while)...", pluginConfig.RedeliverHours))
+		logging.Info(pluginCtx, fmt.Sprintf("listing hook deliveries for the last %d hours to see if any need redelivery (may take a while)...", pluginConfig.RedeliverHours))
 		// var response *github.Response
 		var err error
-		if isRepoSet {
-			pluginCtx, hookDeliveries, _, err = internalGithub.ExecuteGitHubClientFunction(workerCtx, pluginCtx, logger, func() (*[]*github.HookDelivery, *github.Response, error) {
+		if pluginConfig.Repo != "" {
+			pluginCtx, hookDeliveries, _, err = internalGithub.ExecuteGitHubClientFunction(workerCtx, pluginCtx, func() (*[]*github.HookDelivery, *github.Response, error) {
 				hookDeliveries, response, err := githubClient.Repositories.ListHookDeliveries(pluginCtx, pluginConfig.Owner, pluginConfig.Repo, pluginConfig.HookID, opts)
 				if err != nil {
 					return nil, nil, err
@@ -515,7 +489,7 @@ func Run(
 				return &hookDeliveries, response, nil
 			})
 		} else {
-			pluginCtx, hookDeliveries, _, err = internalGithub.ExecuteGitHubClientFunction(workerCtx, pluginCtx, logger, func() (*[]*github.HookDelivery, *github.Response, error) {
+			pluginCtx, hookDeliveries, _, err = internalGithub.ExecuteGitHubClientFunction(workerCtx, pluginCtx, func() (*[]*github.HookDelivery, *github.Response, error) {
 				hookDeliveries, response, err := githubClient.Organizations.ListHookDeliveries(pluginCtx, pluginConfig.Owner, pluginConfig.HookID, opts)
 				if err != nil {
 					return nil, nil, err
@@ -597,8 +571,8 @@ MainLoop:
 
 		var gottenHookDelivery *github.HookDelivery
 		var err error
-		if isRepoSet {
-			pluginCtx, gottenHookDelivery, _, err = internalGithub.ExecuteGitHubClientFunction(workerCtx, pluginCtx, logger, func() (*github.HookDelivery, *github.Response, error) {
+		if pluginConfig.Repo != "" {
+			pluginCtx, gottenHookDelivery, _, err = internalGithub.ExecuteGitHubClientFunction(workerCtx, pluginCtx, func() (*github.HookDelivery, *github.Response, error) {
 				gottenHookDelivery, response, err := githubClient.Repositories.GetHookDelivery(pluginCtx, pluginConfig.Owner, pluginConfig.Repo, pluginConfig.HookID, *hookDelivery.ID)
 				if err != nil {
 					return nil, nil, err
@@ -606,7 +580,7 @@ MainLoop:
 				return gottenHookDelivery, response, nil
 			})
 		} else {
-			pluginCtx, gottenHookDelivery, _, err = internalGithub.ExecuteGitHubClientFunction(workerCtx, pluginCtx, logger, func() (*github.HookDelivery, *github.Response, error) {
+			pluginCtx, gottenHookDelivery, _, err = internalGithub.ExecuteGitHubClientFunction(workerCtx, pluginCtx, func() (*github.HookDelivery, *github.Response, error) {
 				gottenHookDelivery, response, err := githubClient.Organizations.GetHookDelivery(pluginCtx, pluginConfig.Owner, pluginConfig.HookID, *hookDelivery.ID)
 				if err != nil {
 					return nil, nil, err
@@ -638,7 +612,7 @@ MainLoop:
 
 		// Check if the job is already in the queue
 		if workflowJob.ID == nil {
-			logger.WarnContext(pluginCtx, "WorkflowJob or WorkflowJob.ID is nil")
+			logging.Warn(pluginCtx, "WorkflowJob or WorkflowJob.ID is nil")
 			continue
 		}
 
@@ -718,8 +692,8 @@ MainLoop:
 					otherHookDelivery.RepositoryID != nil && *otherHookDelivery.RepositoryID == *hookDelivery.RepositoryID {
 					var otherGottenHookDelivery *github.HookDelivery
 					var err error
-					if isRepoSet {
-						pluginCtx, otherGottenHookDelivery, _, err = internalGithub.ExecuteGitHubClientFunction(workerCtx, pluginCtx, logger, func() (*github.HookDelivery, *github.Response, error) {
+					if pluginConfig.Repo != "" {
+						pluginCtx, otherGottenHookDelivery, _, err = internalGithub.ExecuteGitHubClientFunction(workerCtx, pluginCtx, func() (*github.HookDelivery, *github.Response, error) {
 							otherGottenHookDelivery, response, err := githubClient.Repositories.GetHookDelivery(pluginCtx, pluginConfig.Owner, pluginConfig.Repo, pluginConfig.HookID, *hookDelivery.ID)
 							if err != nil {
 								return nil, nil, err
@@ -727,7 +701,7 @@ MainLoop:
 							return otherGottenHookDelivery, response, nil
 						})
 					} else {
-						pluginCtx, otherGottenHookDelivery, _, err = internalGithub.ExecuteGitHubClientFunction(workerCtx, pluginCtx, logger, func() (*github.HookDelivery, *github.Response, error) {
+						pluginCtx, otherGottenHookDelivery, _, err = internalGithub.ExecuteGitHubClientFunction(workerCtx, pluginCtx, func() (*github.HookDelivery, *github.Response, error) {
 							otherGottenHookDelivery, response, err := githubClient.Organizations.GetHookDelivery(pluginCtx, pluginConfig.Owner, pluginConfig.HookID, *hookDelivery.ID)
 							if err != nil {
 								return nil, nil, err
@@ -755,7 +729,7 @@ MainLoop:
 
 		// if in queued, and also has a successful completed, something is wrong and we need to re-deliver it.
 		if *hookDelivery.Action == "completed" && inQueued && *hookDelivery.StatusCode == 200 && !inCompleted {
-			logger.InfoContext(pluginCtx, "hook delivery has completed but is still in queued; redelivering")
+			logging.Info(pluginCtx, "hook delivery has completed but is still in queued; redelivering")
 		} else if *hookDelivery.StatusCode == 200 || inCompleted { // all other cases (like when it's queued); continue
 			continue
 		}
@@ -764,8 +738,8 @@ MainLoop:
 
 		// Redeliver the hook
 		var redelivery *github.HookDelivery
-		if isRepoSet {
-			pluginCtx, redelivery, _, _ = internalGithub.ExecuteGitHubClientFunction(workerCtx, pluginCtx, logger, func() (*github.HookDelivery, *github.Response, error) {
+		if pluginConfig.Repo != "" {
+			pluginCtx, redelivery, _, _ = internalGithub.ExecuteGitHubClientFunction(workerCtx, pluginCtx, func() (*github.HookDelivery, *github.Response, error) {
 				redelivery, response, err := githubClient.Repositories.RedeliverHookDelivery(pluginCtx, pluginConfig.Owner, pluginConfig.Repo, pluginConfig.HookID, *hookDelivery.ID)
 				if err != nil {
 					return nil, nil, err
@@ -773,7 +747,7 @@ MainLoop:
 				return redelivery, response, nil
 			})
 		} else {
-			pluginCtx, redelivery, _, _ = internalGithub.ExecuteGitHubClientFunction(workerCtx, pluginCtx, logger, func() (*github.HookDelivery, *github.Response, error) {
+			pluginCtx, redelivery, _, _ = internalGithub.ExecuteGitHubClientFunction(workerCtx, pluginCtx, func() (*github.HookDelivery, *github.Response, error) {
 				redelivery, response, err := githubClient.Organizations.RedeliverHookDelivery(pluginCtx, pluginConfig.Owner, pluginConfig.HookID, *hookDelivery.ID)
 				if err != nil {
 					return nil, nil, err
@@ -782,7 +756,7 @@ MainLoop:
 			})
 		}
 		// err doesn't matter here and it will always throw "job scheduled on GitHub side; try again later"
-		logger.InfoContext(pluginCtx, "hook redelivered",
+		logging.Info(pluginCtx, "hook redelivered",
 			"redelivery", redelivery,
 			"hookDelivery.GUID", *hookDelivery.GUID,
 			"workflowJob.ID", *workflowJob.ID,
@@ -793,26 +767,31 @@ MainLoop:
 		)
 	}
 
-	// notify the main thread that the service has started
-	select {
-	case <-workerGlobals.FirstPluginStarted:
-	default:
-		close(workerGlobals.FirstPluginStarted)
-	}
-	logger.InfoContext(pluginCtx, "started plugin")
-	err = metrics.UpdatePlugin(workerCtx, pluginCtx, logger, metrics.PluginBase{
+	err = metrics.UpdatePlugin(workerCtx, pluginCtx, metrics.PluginBase{
 		Status:      "running",
 		StatusSince: time.Now(),
 	})
 	if err != nil {
 		return pluginCtx, fmt.Errorf("error updating plugin metrics: %s", err.Error())
 	}
+
+	// notify the main thread that the service has started
+	workerGlobals.Plugins[pluginConfig.Plugin][pluginConfig.Name].Preparing.Store(false)
+	workerGlobals.Plugins[pluginConfig.Plugin][pluginConfig.Name].Paused.Store(false)
+	workerGlobals.Plugins[pluginConfig.Plugin][pluginConfig.Name].FinishedInitialRun.Store(true)
+	logging.Info(pluginCtx, "receiver finished starting")
+
 	// wait for the context to be canceled
-	<-pluginCtx.Done()
-	logger.InfoContext(pluginCtx, "shutting down receiver")
-	if err := server.Shutdown(pluginCtx); err != nil {
-		// logger.ErrorContext(pluginCtx, "receiver shutdown error", "error", err)
-		return pluginCtx, fmt.Errorf("receiver shutdown error: %s", err.Error())
+	for {
+		select {
+		case <-workerCtx.Done(): // worker here instead of plugin for a good reason
+			logging.Warn(pluginCtx, "shutting down receiver")
+			if err := server.Shutdown(pluginCtx); err != nil {
+				return pluginCtx, fmt.Errorf("receiver shutdown error: %s", err.Error())
+			}
+			return pluginCtx, nil
+		case <-time.After(time.Second * 1):
+			continue
+		}
 	}
-	return pluginCtx, nil
 }

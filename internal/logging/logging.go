@@ -83,21 +83,50 @@ func (h *ContextHandler) With(attrs ...slog.Attr) *ContextHandler {
 	return h
 }
 
+func AppendCurrentPluginAttributes(pluginCtx context.Context) context.Context {
+	attributes := GetPluginAttributes(pluginCtx)
+	return AppendCtx(pluginCtx, slog.Any("attributes", attributes))
+}
+
+func GetPluginAttributes(ctx context.Context) map[string]any {
+	workerGlobals, err := config.GetWorkerGlobalsFromContext(ctx)
+	if err != nil {
+		return map[string]any{}
+	}
+	pluginConfig, _ := config.GetPluginFromContext(ctx)
+	var attributes map[string]any
+	if pluginGlobal, exists := workerGlobals.Plugins[pluginConfig.Plugin][pluginConfig.Name]; exists {
+		attributes = map[string]any{
+			"runs":               pluginGlobal.PluginRunCount.Load(),
+			"paused":             pluginGlobal.Paused.Load(),
+			"finishedInitialRun": pluginGlobal.FinishedInitialRun.Load(),
+			"preparing":          pluginGlobal.Preparing.Load(),
+		}
+	}
+	if pluginConfig.Name != "" {
+		attributes["repo"] = pluginConfig.Repo
+		attributes["owner"] = pluginConfig.Owner
+		attributes["plugin"] = pluginConfig.Plugin
+		attributes["name"] = pluginConfig.Name
+	}
+	return attributes
+}
+
 // AppendCtx adds an slog attribute to the provided context so that it will be
 // included in any Record created with such context
-func AppendCtx(parent context.Context, attr slog.Attr) context.Context {
-	if parent == nil {
+func AppendCtx(ctx context.Context, attr slog.Attr) context.Context {
+	if ctx == nil {
 		panic("parent context required")
 	}
 
-	if v, ok := parent.Value(slogFields).([]slog.Attr); ok {
+	if v, ok := ctx.Value(slogFields).([]slog.Attr); ok {
 		v = append(v, attr)
-		return context.WithValue(parent, slogFields, v)
+		return context.WithValue(ctx, slogFields, v)
 	}
 
 	v := []slog.Attr{}
 	v = append(v, attr)
-	return context.WithValue(parent, slogFields, v)
+	return context.WithValue(ctx, slogFields, v)
 }
 
 func Panic(workerCtx context.Context, pluginCtx context.Context, errorMessage string) {
@@ -109,20 +138,57 @@ func Panic(workerCtx context.Context, pluginCtx context.Context, errorMessage st
 	panic(errorMessage)
 }
 
-func DevContext(ctx context.Context, message string) {
-	if strings.ToUpper(os.Getenv("LOG_LEVEL")) == "DEV" {
-		logger, err := GetLoggerFromContext(ctx)
-		if err != nil {
-			panic(err)
-		}
-		logger.DebugContext(ctx, message)
-	}
-}
-
 func GetLoggerFromContext(ctx context.Context) (*slog.Logger, error) {
 	logger, ok := ctx.Value(config.ContextKey("logger")).(*slog.Logger)
 	if !ok {
 		return nil, fmt.Errorf("GetLoggerFromContext failed")
 	}
 	return logger, nil
+}
+
+func Info(ctx context.Context, message string, args ...any) {
+	logger, err := GetLoggerFromContext(ctx)
+	if err != nil {
+		panic(err)
+	}
+	pluginCtx := AppendCurrentPluginAttributes(ctx)
+	logger.InfoContext(pluginCtx, message, args...)
+}
+
+func Dev(ctx context.Context, message string, args ...any) {
+	if strings.ToUpper(os.Getenv("LOG_LEVEL")) == "DEV" {
+		logger, err := GetLoggerFromContext(ctx)
+		if err != nil {
+			panic(err)
+		}
+		pluginCtx := AppendCurrentPluginAttributes(ctx)
+		logger.DebugContext(pluginCtx, message, args...)
+	}
+}
+
+func Debug(ctx context.Context, message string, args ...any) {
+	logger, err := GetLoggerFromContext(ctx)
+	if err != nil {
+		panic(err)
+	}
+	pluginCtx := AppendCurrentPluginAttributes(ctx)
+	logger.DebugContext(pluginCtx, message, args...)
+}
+
+func Warn(ctx context.Context, message string, args ...any) {
+	logger, err := GetLoggerFromContext(ctx)
+	if err != nil {
+		panic(err)
+	}
+	pluginCtx := AppendCurrentPluginAttributes(ctx)
+	logger.WarnContext(pluginCtx, message, args...)
+}
+
+func Error(ctx context.Context, message string, args ...any) {
+	logger, err := GetLoggerFromContext(ctx)
+	if err != nil {
+		panic(err)
+	}
+	pluginCtx := AppendCurrentPluginAttributes(ctx)
+	logger.ErrorContext(pluginCtx, message, args...)
 }

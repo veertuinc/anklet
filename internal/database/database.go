@@ -26,9 +26,9 @@ func NewClient(ctx context.Context, config config.Database) (*Database, error) {
 		Password: config.Password, // no password set
 		DB:       config.Database, // use default DB,
 	})
-	logging.DevContext(ctx, fmt.Sprintf("created redis client: %v", rdb))
+	logging.Dev(ctx, fmt.Sprintf("created redis client: %v", rdb))
 
-	logging.DevContext(ctx, "pinging redis client")
+	logging.Dev(ctx, "pinging redis client")
 	ping := rdb.Ping(ctx)
 	if ping.Err() != nil && ping.Err().Error() != "" {
 		return nil, errors.New("error pinging redis client: " + ping.Err().Error())
@@ -38,7 +38,7 @@ func NewClient(ctx context.Context, config config.Database) (*Database, error) {
 		return nil, err
 	}
 
-	logging.DevContext(ctx, fmt.Sprintf("pinged redis client: %s", pong))
+	logging.Dev(ctx, fmt.Sprintf("pinged redis client: %s", pong))
 
 	if pong != "PONG" {
 		return nil, fmt.Errorf("unable to connect to Redis, received: %s", pong)
@@ -72,16 +72,12 @@ func RemoveUniqueKeyFromDB(ctx context.Context) (context.Context, error) {
 	if !ok {
 		return ctx, fmt.Errorf("database not found in context")
 	}
-	logging, err := logging.GetLoggerFromContext(ctx)
-	if err != nil {
-		return ctx, err
-	}
 	// we don't use ctx for the database deletion so we avoid getting the cancelled context state, which fails when Del runs
 	deletion, err := database.Client.Del(context.Background(), database.UniqueRunKey).Result()
 	if err != nil {
 		return nil, err
 	}
-	logging.DebugContext(ctx, fmt.Sprintf("removal of unique key %s from database returned %d (1 is success, 0 failed)", database.UniqueRunKey, deletion))
+	logging.Debug(ctx, fmt.Sprintf("removal of unique key %s from database returned %d (1 is success, 0 failed)", database.UniqueRunKey, deletion))
 	return ctx, nil
 }
 

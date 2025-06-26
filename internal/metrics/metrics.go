@@ -2,9 +2,10 @@ package metrics
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
-	"log/slog"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -14,6 +15,7 @@ import (
 	"github.com/shirou/gopsutil/v4/mem"
 	"github.com/veertuinc/anklet/internal/config"
 	"github.com/veertuinc/anklet/internal/database"
+	"github.com/veertuinc/anklet/internal/logging"
 )
 
 // Server defines the structure for the API server
@@ -45,23 +47,23 @@ type Plugin struct {
 }
 
 type MetricsData struct {
-	LastUpdate                    time.Time     `json:"last_update"`
-	TotalRunningVMs               int           `json:"total_running_vms"`
-	TotalSuccessfulRunsSinceStart int           `json:"total_successful_runs_since_start"`
-	TotalFailedRunsSinceStart     int           `json:"total_failed_runs_since_start"`
-	TotalCanceledRunsSinceStart   int           `json:"total_canceled_runs_since_start"`
-	HostCPUCount                  int           `json:"host_cpu_count"`
-	HostCPUUsedCount              int           `json:"host_cpu_used_count"`
-	HostCPUUsagePercentage        float64       `json:"host_cpu_usage_percentage"`
-	HostMemoryTotalBytes          uint64        `json:"host_memory_total_bytes"`
-	HostMemoryUsedBytes           uint64        `json:"host_memory_used_bytes"`
-	HostMemoryAvailableBytes      uint64        `json:"host_memory_available_bytes"`
-	HostMemoryUsagePercentage     float64       `json:"host_memory_usage_percentage"`
-	HostDiskTotalBytes            uint64        `json:"host_disk_total_bytes"`
-	HostDiskUsedBytes             uint64        `json:"host_disk_used_bytes"`
-	HostDiskAvailableBytes        uint64        `json:"host_disk_available_bytes"`
-	HostDiskUsagePercentage       float64       `json:"host_disk_usage_percentage"`
-	Plugins                       []interface{} `json:"plugins"`
+	LastUpdate                    time.Time `json:"last_update"`
+	TotalRunningVMs               int       `json:"total_running_vms"`
+	TotalSuccessfulRunsSinceStart int       `json:"total_successful_runs_since_start"`
+	TotalFailedRunsSinceStart     int       `json:"total_failed_runs_since_start"`
+	TotalCanceledRunsSinceStart   int       `json:"total_canceled_runs_since_start"`
+	HostCPUCount                  int       `json:"host_cpu_count"`
+	HostCPUUsedCount              int       `json:"host_cpu_used_count"`
+	HostCPUUsagePercentage        float64   `json:"host_cpu_usage_percentage"`
+	HostMemoryTotalBytes          uint64    `json:"host_memory_total_bytes"`
+	HostMemoryUsedBytes           uint64    `json:"host_memory_used_bytes"`
+	HostMemoryAvailableBytes      uint64    `json:"host_memory_available_bytes"`
+	HostMemoryUsagePercentage     float64   `json:"host_memory_usage_percentage"`
+	HostDiskTotalBytes            uint64    `json:"host_disk_total_bytes"`
+	HostDiskUsedBytes             uint64    `json:"host_disk_used_bytes"`
+	HostDiskAvailableBytes        uint64    `json:"host_disk_available_bytes"`
+	HostDiskUsagePercentage       float64   `json:"host_disk_usage_percentage"`
+	Plugins                       []any     `json:"plugins"`
 }
 
 type MetricsDataLock struct {
@@ -102,12 +104,11 @@ func (m *MetricsDataLock) AddPlugin(plugin any) error {
 func (m *MetricsDataLock) IncrementTotalRunningVMs(
 	workerCtx context.Context,
 	pluginCtx context.Context,
-	logger *slog.Logger,
 ) {
 	m.Lock()
 	defer m.Unlock()
 	m.TotalRunningVMs++
-	m.IncrementPluginTotalRanVMs(workerCtx, pluginCtx, logger)
+	m.IncrementPluginTotalRanVMs(workerCtx, pluginCtx)
 }
 
 func (m *MetricsDataLock) DecrementTotalRunningVMs() {
@@ -121,40 +122,36 @@ func (m *MetricsDataLock) DecrementTotalRunningVMs() {
 func (m *MetricsDataLock) IncrementTotalSuccessfulRunsSinceStart(
 	workerCtx context.Context,
 	pluginCtx context.Context,
-	logger *slog.Logger,
 ) {
 	m.Lock()
 	defer m.Unlock()
 	m.TotalSuccessfulRunsSinceStart++
-	m.IncrementPluginTotalSuccessfulRunsSinceStart(workerCtx, pluginCtx, logger)
+	m.IncrementPluginTotalSuccessfulRunsSinceStart(workerCtx, pluginCtx)
 }
 
 func (m *MetricsDataLock) IncrementTotalFailedRunsSinceStart(
 	workerCtx context.Context,
 	pluginCtx context.Context,
-	logger *slog.Logger,
 ) {
 	m.Lock()
 	defer m.Unlock()
 	m.TotalFailedRunsSinceStart++
-	m.IncrementPluginTotalFailedRunsSinceStart(workerCtx, pluginCtx, logger)
+	m.IncrementPluginTotalFailedRunsSinceStart(workerCtx, pluginCtx)
 }
 
 func (m *MetricsDataLock) IncrementTotalCanceledRunsSinceStart(
 	workerCtx context.Context,
 	pluginCtx context.Context,
-	logger *slog.Logger,
 ) {
 	m.Lock()
 	defer m.Unlock()
 	m.TotalCanceledRunsSinceStart++
-	m.IncrementPluginTotalCanceledRunsSinceStart(workerCtx, pluginCtx, logger)
+	m.IncrementPluginTotalCanceledRunsSinceStart(workerCtx, pluginCtx)
 }
 
 func (m *MetricsDataLock) IncrementPluginTotalRanVMs(
 	workerCtx context.Context,
 	pluginCtx context.Context,
-	logger *slog.Logger,
 ) {
 	pluginConfig, err := config.GetPluginFromContext(pluginCtx)
 	if err != nil {
@@ -164,14 +161,14 @@ func (m *MetricsDataLock) IncrementPluginTotalRanVMs(
 		switch typedPlugin := plugin.(type) {
 		case Plugin:
 			if typedPlugin.Name == pluginConfig.Name {
-				err = UpdatePlugin(workerCtx, pluginCtx, logger, Plugin{
+				err = UpdatePlugin(workerCtx, pluginCtx, Plugin{
 					PluginBase: &PluginBase{
 						Name: pluginConfig.Name,
 					},
 					TotalRanVMs: typedPlugin.TotalRanVMs + 1,
 				})
 				if err != nil {
-					logger.ErrorContext(pluginCtx, "error updating plugin metrics", "error", err)
+					logging.Error(pluginCtx, "error updating plugin metrics", "error", err)
 				}
 			}
 		}
@@ -181,7 +178,6 @@ func (m *MetricsDataLock) IncrementPluginTotalRanVMs(
 func (m *MetricsDataLock) IncrementPluginTotalSuccessfulRunsSinceStart(
 	workerCtx context.Context,
 	pluginCtx context.Context,
-	logger *slog.Logger,
 ) {
 	pluginConfig, err := config.GetPluginFromContext(pluginCtx)
 	if err != nil {
@@ -191,14 +187,14 @@ func (m *MetricsDataLock) IncrementPluginTotalSuccessfulRunsSinceStart(
 		switch typedPlugin := plugin.(type) {
 		case Plugin:
 			if typedPlugin.Name == pluginConfig.Name {
-				err = UpdatePlugin(workerCtx, pluginCtx, logger, Plugin{
+				err = UpdatePlugin(workerCtx, pluginCtx, Plugin{
 					PluginBase: &PluginBase{
 						Name: pluginConfig.Name,
 					},
 					TotalSuccessfulRunsSinceStart: typedPlugin.TotalSuccessfulRunsSinceStart + 1,
 				})
 				if err != nil {
-					logger.ErrorContext(pluginCtx, "error updating plugin metrics", "error", err)
+					logging.Error(pluginCtx, "error updating plugin metrics", "error", err)
 				}
 			}
 		}
@@ -208,7 +204,6 @@ func (m *MetricsDataLock) IncrementPluginTotalSuccessfulRunsSinceStart(
 func (m *MetricsDataLock) IncrementPluginTotalFailedRunsSinceStart(
 	workerCtx context.Context,
 	pluginCtx context.Context,
-	logger *slog.Logger,
 ) {
 	pluginConfig, err := config.GetPluginFromContext(pluginCtx)
 	if err != nil {
@@ -218,14 +213,14 @@ func (m *MetricsDataLock) IncrementPluginTotalFailedRunsSinceStart(
 		switch typedPlugin := plugin.(type) {
 		case Plugin:
 			if typedPlugin.Name == pluginConfig.Name {
-				err = UpdatePlugin(workerCtx, pluginCtx, logger, Plugin{
+				err = UpdatePlugin(workerCtx, pluginCtx, Plugin{
 					PluginBase: &PluginBase{
 						Name: pluginConfig.Name,
 					},
 					TotalFailedRunsSinceStart: typedPlugin.TotalFailedRunsSinceStart + 1,
 				})
 				if err != nil {
-					logger.ErrorContext(pluginCtx, "error updating plugin metrics", "error", err)
+					logging.Error(pluginCtx, "error updating plugin metrics", "error", err)
 				}
 			}
 		}
@@ -235,7 +230,6 @@ func (m *MetricsDataLock) IncrementPluginTotalFailedRunsSinceStart(
 func (m *MetricsDataLock) IncrementPluginTotalCanceledRunsSinceStart(
 	workerCtx context.Context,
 	pluginCtx context.Context,
-	logger *slog.Logger,
 ) {
 	pluginConfig, err := config.GetPluginFromContext(pluginCtx)
 	if err != nil {
@@ -245,21 +239,21 @@ func (m *MetricsDataLock) IncrementPluginTotalCanceledRunsSinceStart(
 		switch typedPlugin := plugin.(type) {
 		case Plugin:
 			if typedPlugin.Name == pluginConfig.Name {
-				err = UpdatePlugin(workerCtx, pluginCtx, logger, Plugin{
+				err = UpdatePlugin(workerCtx, pluginCtx, Plugin{
 					PluginBase: &PluginBase{
 						Name: pluginConfig.Name,
 					},
 					TotalCanceledRunsSinceStart: typedPlugin.TotalCanceledRunsSinceStart + 1,
 				})
 				if err != nil {
-					logger.ErrorContext(pluginCtx, "error updating plugin metrics", "error", err)
+					logging.Error(pluginCtx, "error updating plugin metrics", "error", err)
 				}
 			}
 		}
 	}
 }
 
-func CompareAndUpdateMetrics(currentService interface{}, updatedPlugin interface{}) (interface{}, error) {
+func CompareAndUpdateMetrics(currentService any, updatedPlugin any) (any, error) {
 	switch currentServiceTyped := currentService.(type) {
 	case Plugin:
 		updated, ok := updatedPlugin.(Plugin)
@@ -326,16 +320,16 @@ func CompareAndUpdateMetrics(currentService interface{}, updatedPlugin interface
 	}
 }
 
-func UpdateSystemMetrics(pluginCtx context.Context, logger *slog.Logger, metricsData *MetricsDataLock) {
+func UpdateSystemMetrics(pluginCtx context.Context, metricsData *MetricsDataLock) {
 	cpuCount, err := cpu.Counts(false)
 	if err != nil {
-		logger.ErrorContext(pluginCtx, "Error getting CPU count", "error", err)
+		logging.Error(pluginCtx, "Error getting CPU count", "error", err)
 		metricsData.HostCPUCount = 0
 	}
 	metricsData.HostCPUCount = cpuCount
 	cpuUsedPercent, err := cpu.Percent(0, false)
 	if err != nil {
-		logger.ErrorContext(pluginCtx, "Error getting CPU usage", "error", err)
+		logging.Error(pluginCtx, "Error getting CPU usage", "error", err)
 		metricsData.HostCPUUsagePercentage = 0
 	}
 	metricsData.HostCPUUsagePercentage = cpuUsedPercent[0]
@@ -343,7 +337,7 @@ func UpdateSystemMetrics(pluginCtx context.Context, logger *slog.Logger, metrics
 	// MEMORY
 	memStat, err := mem.VirtualMemory()
 	if err != nil {
-		logger.ErrorContext(pluginCtx, "Error getting memory usage", "error", err)
+		logging.Error(pluginCtx, "Error getting memory usage", "error", err)
 		metricsData.HostMemoryTotalBytes = 0
 	}
 	metricsData.HostMemoryTotalBytes = uint64(memStat.Total)
@@ -353,7 +347,7 @@ func UpdateSystemMetrics(pluginCtx context.Context, logger *slog.Logger, metrics
 	// DISK
 	diskStat, err := disk.Usage("/")
 	if err != nil {
-		logger.ErrorContext(pluginCtx, "Error getting disk usage", "error", err)
+		logging.Error(pluginCtx, "Error getting disk usage", "error", err)
 		metricsData.HostDiskUsagePercentage = 0
 	}
 	metricsData.HostDiskUsagePercentage = diskStat.UsedPercent
@@ -365,8 +359,7 @@ func UpdateSystemMetrics(pluginCtx context.Context, logger *slog.Logger, metrics
 func UpdatePlugin(
 	workerCtx context.Context,
 	pluginCtx context.Context,
-	logger *slog.Logger,
-	updatedPlugin interface{},
+	updatedPlugin any,
 ) error {
 	ctxPlugin, err := config.GetPluginFromContext(pluginCtx)
 	if err != nil {
@@ -410,8 +403,7 @@ func UpdatePlugin(
 func (m *MetricsDataLock) UpdatePlugin(
 	workerCtx context.Context,
 	pluginCtx context.Context,
-	logger *slog.Logger,
-	updatedPlugin interface{},
+	updatedPlugin any,
 ) error {
 	m.Lock()
 	defer m.Unlock()
@@ -451,7 +443,7 @@ func (m *MetricsDataLock) UpdatePlugin(
 	return nil
 }
 
-func (m *MetricsDataLock) SetStatus(pluginCtx context.Context, logger *slog.Logger, status string) error {
+func (m *MetricsDataLock) SetStatus(pluginCtx context.Context, status string) error {
 	m.Lock()
 	defer m.Unlock()
 	ctxPlugin, err := config.GetPluginFromContext(pluginCtx)
@@ -489,7 +481,7 @@ func NewServer(port string) *Server {
 }
 
 // Start runs the HTTP server
-func (s *Server) Start(parentCtx context.Context, logger *slog.Logger, soloReceiver bool) {
+func (s *Server) Start(parentCtx context.Context, soloReceiver bool) {
 	http.HandleFunc("/metrics/v1", func(w http.ResponseWriter, r *http.Request) {
 		// update system metrics each call
 		metricsData, err := GetMetricsDataFromContext(parentCtx)
@@ -497,7 +489,7 @@ func (s *Server) Start(parentCtx context.Context, logger *slog.Logger, soloRecei
 			http.Error(w, "failed to get metrics data", http.StatusInternalServerError)
 			return
 		}
-		UpdateSystemMetrics(parentCtx, logger, metricsData)
+		UpdateSystemMetrics(parentCtx, metricsData)
 		//
 		// if r.URL.Query().Get("format") == "json" {
 		// 	s.handleJsonMetrics(parentCtx, soloReceiver)(w, r)
@@ -512,12 +504,12 @@ func (s *Server) Start(parentCtx context.Context, logger *slog.Logger, soloRecei
 		w.WriteHeader(http.StatusNotImplemented)
 		_, err := w.Write([]byte("please use /metrics/v1"))
 		if err != nil {
-			logger.ErrorContext(parentCtx, "error writing response", "error", err)
+			logging.Error(parentCtx, "error writing response", "error", err)
 		}
 	})
 	err := http.ListenAndServe(":"+s.Port, nil)
 	if err != nil {
-		logger.ErrorContext(parentCtx, "error starting metrics server", "error", err)
+		logging.Error(parentCtx, "error starting metrics server", "error", err)
 	}
 }
 
@@ -542,7 +534,7 @@ func (s *Server) Start(parentCtx context.Context, logger *slog.Logger, soloRecei
 // 				HostDiskUsedBytes         uint64                   `json:"host_disk_used_bytes"`
 // 				HostDiskAvailableBytes    uint64                   `json:"host_disk_available_bytes"`
 // 				HostDiskUsagePercentage   float64                  `json:"host_disk_usage_percentage"`
-// 				Plugins                   []map[string]interface{} `json:"plugins"`
+// 				Plugins                   []map[string]any `json:"plugins"`
 // 			}{
 // 				HostCPUCount:              metricsData.HostCPUCount,
 // 				HostCPUUsedCount:          metricsData.HostCPUUsedCount,
@@ -555,10 +547,10 @@ func (s *Server) Start(parentCtx context.Context, logger *slog.Logger, soloRecei
 // 				HostDiskUsedBytes:         metricsData.HostDiskUsedBytes,
 // 				HostDiskAvailableBytes:    metricsData.HostDiskAvailableBytes,
 // 				HostDiskUsagePercentage:   metricsData.HostDiskUsagePercentage,
-// 				Plugins: func() []map[string]interface{} {
-// 					plugins := make([]map[string]interface{}, len(metricsData.Plugins))
+// 				Plugins: func() []map[string]any {
+// 					plugins := make([]map[string]any, len(metricsData.Plugins))
 // 					for i, plugin := range metricsData.Plugins {
-// 						pluginMap := make(map[string]interface{})
+// 						pluginMap := make(map[string]any)
 // 						switch s := plugin.(type) {
 // 						case Plugin:
 // 							pluginMap["name"] = s.Name
@@ -611,7 +603,7 @@ func (s *Server) Start(parentCtx context.Context, logger *slog.Logger, soloRecei
 // 				HostDiskUsedBytes             uint64                   `json:"host_disk_used_bytes"`
 // 				HostDiskAvailableBytes        uint64                   `json:"host_disk_available_bytes"`
 // 				HostDiskUsagePercentage       float64                  `json:"host_disk_usage_percentage"`
-// 				Plugins                       []map[string]interface{} `json:"plugins"`
+// 				Plugins                       []map[string]any `json:"plugins"`
 // 			}{
 // 				TotalRunningVMs:               metricsData.TotalRunningVMs,
 // 				TotalSuccessfulRunsSinceStart: metricsData.TotalSuccessfulRunsSinceStart,
@@ -628,10 +620,10 @@ func (s *Server) Start(parentCtx context.Context, logger *slog.Logger, soloRecei
 // 				HostDiskUsedBytes:             metricsData.HostDiskUsedBytes,
 // 				HostDiskAvailableBytes:        metricsData.HostDiskAvailableBytes,
 // 				HostDiskUsagePercentage:       metricsData.HostDiskUsagePercentage,
-// 				Plugins: func() []map[string]interface{} {
-// 					plugins := make([]map[string]interface{}, len(metricsData.Plugins))
+// 				Plugins: func() []map[string]any {
+// 					plugins := make([]map[string]any, len(metricsData.Plugins))
 // 					for i, plugin := range metricsData.Plugins {
-// 						pluginMap := make(map[string]interface{})
+// 						pluginMap := make(map[string]any)
 // 						switch s := plugin.(type) {
 // 						case Plugin:
 // 							pluginMap["name"] = s.Name
@@ -793,7 +785,7 @@ func (s *Server) handlePrometheusMetrics(ctx context.Context, soloReceiver bool)
 					panic(err)
 				}
 			}
-			if !soloReceiver {
+			if !strings.Contains(pluginName, "_receiver") {
 				_, err := fmt.Fprintf(w, "plugin_total_ran_vms{name=%s,plugin=%s,owner=%s} %d\n", name, pluginName, ownerName, totalRanVMs)
 				if err != nil {
 					panic(err)
@@ -867,14 +859,94 @@ func GetMetricsDataFromContext(ctx context.Context) (*MetricsDataLock, error) {
 	return metricsData, nil
 }
 
-func Cleanup(ctx context.Context, logger *slog.Logger, owner string, name string) {
+func Cleanup(ctx context.Context, owner string, name string) {
 	databaseContainer, err := database.GetDatabaseFromContext(ctx)
 	if err != nil {
-		logger.ErrorContext(ctx, "error getting database client from context", "error", err.Error())
+		logging.Error(ctx, "error getting database client from context", "error", err.Error())
 	}
 	result := databaseContainer.Client.Del(context.Background(), "anklet/metrics/"+owner+"/"+name)
 	if result.Err() != nil {
-		logger.ErrorContext(ctx, "error deleting metrics data from Redis", "error", result.Err().Error())
+		logging.Error(ctx, "error deleting metrics data from Redis", "error", result.Err().Error())
 	}
-	// logging.DevContext(ctx, "successfully deleted metrics data from Redis, key: anklet/metrics/"+owner+"/"+name)
+	// logging.Dev(ctx, "successfully deleted metrics data from Redis, key: anklet/metrics/"+owner+"/"+name)
+}
+
+func ExportMetricsToDB(workerCtx context.Context, pluginCtx context.Context, keyEnding string) {
+	databaseContainer, err := database.GetDatabaseFromContext(pluginCtx)
+	if err != nil {
+		logging.Error(pluginCtx, "error getting database client from context", "error", err)
+	}
+	ticker := time.NewTicker(10 * time.Second)
+	amountOfErrorsAllowed := 60
+	atLeastOneRun := false
+	metricsKey := "anklet/metrics/" + keyEnding
+	go func() {
+		for {
+			metricsData, err := GetMetricsDataFromContext(workerCtx)
+			if err != nil {
+				logging.Error(pluginCtx, "error getting metrics data from context", "error", err.Error())
+			}
+			metricsDataJson, err := json.Marshal(metricsData.MetricsData)
+			if err != nil {
+				logging.Error(pluginCtx, "error parsing metrics as json", "error", err.Error())
+			}
+			select {
+			case <-pluginCtx.Done():
+				return
+			default:
+				if pluginCtx.Err() == nil {
+					// add last_update
+					var metricsDataMap map[string]any
+					if err := json.Unmarshal(metricsDataJson, &metricsDataMap); err != nil {
+						logging.Error(pluginCtx, "error unmarshalling metrics data", "error", err)
+						amountOfErrorsAllowed--
+						if amountOfErrorsAllowed == 0 {
+							os.Exit(1)
+						}
+						continue
+					}
+					metricsDataMap["last_update"] = time.Now()
+					metricsDataJson, err = json.Marshal(metricsDataMap)
+					if err != nil {
+						logging.Error(pluginCtx, "error marshalling metrics data", "error", err)
+						amountOfErrorsAllowed--
+						if amountOfErrorsAllowed == 0 {
+							os.Exit(1)
+						}
+						continue
+					}
+					// This will create a single key using the first plugin's name. It will contain all plugin metrics though.
+					setting := databaseContainer.Client.Set(pluginCtx, metricsKey, metricsDataJson, time.Hour*24*7) // keep metrics for one week max
+					if setting.Err() != nil {
+						logging.Error(pluginCtx, "error storing metrics data in Redis", "error", setting.Err())
+						amountOfErrorsAllowed--
+						if amountOfErrorsAllowed == 0 {
+							os.Exit(1)
+						}
+						continue
+					}
+					_, err := databaseContainer.Client.Exists(pluginCtx, metricsKey).Result()
+					if err != nil {
+						logging.Error(pluginCtx, "error checking if key exists in Redis", "key", metricsKey, "error", err)
+						amountOfErrorsAllowed--
+						if amountOfErrorsAllowed == 0 {
+							os.Exit(1)
+						}
+						continue
+					}
+					if amountOfErrorsAllowed < 60 {
+						logging.Info(pluginCtx, "errors resolved with metrics export")
+						amountOfErrorsAllowed = 60
+					}
+					if !atLeastOneRun {
+						atLeastOneRun = true
+					}
+					<-ticker.C
+				}
+			}
+		}
+	}()
+	for !atLeastOneRun {
+		time.Sleep(time.Second * 1)
+	}
 }

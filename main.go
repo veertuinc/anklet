@@ -198,22 +198,24 @@ func main() {
 
 	parentCtx = context.WithValue(parentCtx, config.ContextKey("globals"), &config.Globals{
 		RunPluginsOnce:       runOnce == "true",
-		FirstPluginStarted:   make(chan bool, 1),
 		ReturnAllToMainQueue: atomic.Bool{},
 		PullLock:             &sync.Mutex{},
 		PluginsPath:          pluginsPath,
 		DebugEnabled:         logging.IsDebugEnabled(),
-		PluginsPaused:        atomic.Bool{},
-		APluginIsPreparing:   atomic.Value{},
 		HostCPUCount:         hostCPUCount,
 		HostMemoryBytes:      hostMemoryBytes,
 		QueueTargetIndex:     new(int64),
-		Plugins: func() map[string]*config.PluginGlobal {
-			plugins := make(map[string]*config.PluginGlobal)
+		Plugins: func() map[string]map[string]*config.PluginGlobal {
+			plugins := make(map[string]map[string]*config.PluginGlobal)
 			for _, p := range loadedConfig.Plugins {
-				plugins[p.Name] = &config.PluginGlobal{
+				if plugins[p.Plugin] == nil {
+					plugins[p.Plugin] = make(map[string]*config.PluginGlobal)
+				}
+				plugins[p.Plugin][p.Name] = &config.PluginGlobal{
 					PluginRunCount:     atomic.Uint64{},
-					FinishedInitialRun: false,
+					Preparing:          atomic.Bool{}, // false
+					FinishedInitialRun: atomic.Bool{}, // false
+					Paused:             atomic.Bool{}, // true
 				}
 			}
 			return plugins
@@ -273,6 +275,13 @@ func worker(
 		parentLogger.ErrorContext(parentCtx, "unable to get globals from context", "error", err)
 		os.Exit(1)
 	}
+	// Set each plugin's state
+	for _, pluginGroup := range workerGlobals.Plugins {
+		for _, pluginGlobal := range pluginGroup {
+			// paused by default
+			pluginGlobal.Paused.Store(true)
+		}
+	}
 	toRunOnce := workerGlobals.RunPluginsOnce
 	workerCtx, workerCancel := context.WithCancel(parentCtx)
 	suffix := parentCtx.Value(config.ContextKey("suffix")).(string)
@@ -300,20 +309,6 @@ func worker(
 			}
 		}
 	}()
-
-	// set global database variables
-	var databaseURL string
-	var databasePort int
-	var databaseUser string
-	var databasePassword string
-	var databaseDatabase int
-	if loadedConfig.GlobalDatabaseURL != "" {
-		databaseURL = loadedConfig.GlobalDatabaseURL
-		databasePort = loadedConfig.GlobalDatabasePort
-		databaseUser = loadedConfig.GlobalDatabaseUser
-		databasePassword = loadedConfig.GlobalDatabasePassword
-		databaseDatabase = loadedConfig.GlobalDatabaseDatabase
-	}
 
 	// TODO: move this into a function/different file
 	// Setup Metrics Server and context
@@ -348,19 +343,32 @@ func worker(
 	}
 	metricsService := metrics.NewServer(metricsPort)
 	if loadedConfig.Metrics.Aggregator {
-		if databaseURL == "" { // if no global database URL is set, use the metrics database URL
-			databaseURL = loadedConfig.Metrics.Database.URL
-			databasePort = loadedConfig.Metrics.Database.Port
-			databaseUser = loadedConfig.Metrics.Database.User
-			databasePassword = loadedConfig.Metrics.Database.Password
-			databaseDatabase = loadedConfig.Metrics.Database.Database
+		var metricsServiceDatabaseURL = loadedConfig.GlobalDatabaseURL
+		var metricsServiceDatabasePort = loadedConfig.GlobalDatabasePort
+		var metricsServiceDatabaseUser = loadedConfig.GlobalDatabaseUser
+		var metricsServiceDatabasePassword = loadedConfig.GlobalDatabasePassword
+		var metricsServiceDatabaseDatabase = loadedConfig.GlobalDatabaseDatabase
+		if metricsServiceDatabaseURL == "" {
+			metricsServiceDatabaseURL = loadedConfig.Metrics.Database.URL
+		}
+		if metricsServiceDatabasePort == 0 {
+			metricsServiceDatabasePort = loadedConfig.Metrics.Database.Port
+		}
+		if metricsServiceDatabaseUser == "" {
+			metricsServiceDatabaseUser = loadedConfig.Metrics.Database.User
+		}
+		if metricsServiceDatabasePassword == "" {
+			metricsServiceDatabasePassword = loadedConfig.Metrics.Database.Password
+		}
+		if metricsServiceDatabaseDatabase == 0 {
+			metricsServiceDatabaseDatabase = loadedConfig.Metrics.Database.Database
 		}
 		databaseContainer, err := database.NewClient(workerCtx, config.Database{
-			URL:      databaseURL,
-			Port:     databasePort,
-			User:     databaseUser,
-			Password: databasePassword,
-			Database: databaseDatabase,
+			URL:      metricsServiceDatabaseURL,
+			Port:     metricsServiceDatabasePort,
+			User:     metricsServiceDatabaseUser,
+			Password: metricsServiceDatabasePassword,
+			Database: metricsServiceDatabaseDatabase,
 		})
 		if err != nil {
 			parentLogger.ErrorContext(workerCtx, "unable to access database", "error", err)
@@ -371,12 +379,12 @@ func worker(
 		parentLogger.InfoContext(workerCtx, "metrics aggregator started on port "+metricsPort)
 		wg.Add(1)
 		defer wg.Done()
-		pluginCtx, pluginCancel := context.WithCancel(workerCtx) // Inherit from parent context
+		pluginCtx, pluginCancel := context.WithCancel(context.Background())
 		for {
 			select {
 			case <-workerCtx.Done():
 				pluginCancel()
-				parentLogger.WarnContext(pluginCtx, shutDownMessage)
+				// parentLogger.WarnContext(pluginCtx, shutDownMessage+" inside plugin loop (aggregator)")
 				return
 			default:
 				if workerCtx.Err() != nil || toRunOnce {
@@ -391,34 +399,35 @@ func worker(
 			}
 		}
 	} else {
-		// workerGlobals.FirstPluginStarted: always make sure the first plugin in the config starts first before any others.
-		// this allows users to mix a receiver with multiple other plugins,
-		// and let the receiver do its thing to prepare the db first.
 		metricsData := &metrics.MetricsDataLock{}
 		workerCtx = context.WithValue(workerCtx, config.ContextKey("metrics"), metricsData)
 		parentLogger.InfoContext(workerCtx, "metrics server started on port "+metricsPort)
-		metrics.UpdateSystemMetrics(workerCtx, parentLogger, metricsData)
+		metrics.UpdateSystemMetrics(workerCtx, metricsData)
 		/////////////
 		// Plugins //
 		soloReceiver := false
 		for index, plugin := range loadedConfig.Plugins {
 			wg.Add(1)
+			// support starting the plugins in the order they're listed in the config one by one
 			if index != 0 {
 			waitLoop:
 				for {
 					select {
-					case <-workerGlobals.FirstPluginStarted:
-						break waitLoop
 					case <-workerCtx.Done():
 						return
 					default:
-						time.Sleep(100 * time.Millisecond)
+						if workerGlobals.Plugins[loadedConfig.Plugins[index-1].Plugin][loadedConfig.Plugins[index-1].Name].FinishedInitialRun.Load() {
+							// parentLogger.DebugContext(workerCtx, "previous plugin finished initial run, continuing", "plugin.Name", plugin.Name, "plugin.Plugin", plugin.Plugin)
+							workerGlobals.Plugins[plugin.Plugin][plugin.Name].Paused.Store(false)
+							break waitLoop
+						}
+						time.Sleep(time.Second * 5)
 					}
 				}
 			}
 			go func(plugin config.Plugin) {
 				defer wg.Done()
-				pluginCtx, pluginCancel := context.WithCancel(workerCtx) // Inherit from parent context
+				pluginCtx, pluginCancel := context.WithCancel(context.Background()) // we don't use workerCtx here as it causes Attrs to race condition and be incorrect
 
 				workerGlobals, err := config.GetWorkerGlobalsFromContext(workerCtx)
 				if err != nil {
@@ -457,20 +466,22 @@ func worker(
 
 				// must come after the log config is handled
 				pluginCtx = context.WithValue(pluginCtx, config.ContextKey("logger"), pluginLogger)
+				pluginCtx = context.WithValue(pluginCtx, config.ContextKey("config"), workerCtx.Value(config.ContextKey("config")))
+				pluginCtx = context.WithValue(pluginCtx, config.ContextKey("globals"), workerCtx.Value(config.ContextKey("globals")))
+				pluginCtx = context.WithValue(pluginCtx, config.ContextKey("httpTransport"), workerCtx.Value(config.ContextKey("httpTransport")))
+				pluginCtx = context.WithValue(pluginCtx, config.ContextKey("configFileName"), workerCtx.Value(config.ContextKey("configFileName")))
 
-				pluginCtx = logging.AppendCtx(pluginCtx, slog.String("pluginName", plugin.Name))
+				// so logging with attributes works
+				pluginCtx = context.WithValue(pluginCtx, config.ContextKey("plugin"), plugin)
+
+				logging.Info(pluginCtx, "starting plugin")
 
 				if plugin.Repo == "" {
-					pluginLogger.InfoContext(pluginCtx, "no repo set for plugin; assuming it's an organization level plugin")
-					pluginCtx = context.WithValue(pluginCtx, config.ContextKey("isRepoSet"), false)
-					// logging.DevContext(pluginCtx, "set isRepoSet to false")
-				} else {
-					pluginCtx = context.WithValue(pluginCtx, config.ContextKey("isRepoSet"), true)
-					// logging.DevContext(pluginCtx, "set isRepoSet to true")
+					logging.Info(pluginCtx, "no repo set for plugin; assuming it's an organization level plugin")
 				}
 
 				if plugin.PrivateKey == "" && loadedConfig.GlobalPrivateKey != "" {
-					logging.DevContext(pluginCtx, "using global private key")
+					logging.Dev(pluginCtx, "using global private key")
 					plugin.PrivateKey = loadedConfig.GlobalPrivateKey
 				}
 
@@ -478,27 +489,41 @@ func worker(
 				pluginCtx = context.WithValue(pluginCtx, config.ContextKey("plugin"), plugin)
 
 				if !strings.Contains(plugin.Plugin, "_receiver") {
-					logging.DevContext(pluginCtx, "plugin is not a receiver; loading the anka CLI")
+					logging.Dev(pluginCtx, "plugin is not a receiver; loading the anka CLI")
 					ankaCLI, err := anka.NewCLI(pluginCtx)
 					if err != nil {
-						pluginLogger.ErrorContext(pluginCtx, "unable to create anka cli", "error", err)
+						logging.Error(pluginCtx, "unable to create anka cli", "error", err)
 						pluginCancel()
 						workerCancel()
 						return
 					}
 					pluginCtx = context.WithValue(pluginCtx, config.ContextKey("ankacli"), ankaCLI)
-					logging.DevContext(pluginCtx, "loaded the anka CLI")
+					logging.Dev(pluginCtx, "loaded the anka CLI")
 				}
+
+				var databaseURL = loadedConfig.GlobalDatabaseURL
+				var databasePort = loadedConfig.GlobalDatabasePort
+				var databaseUser = loadedConfig.GlobalDatabaseUser
+				var databasePassword = loadedConfig.GlobalDatabasePassword
+				var databaseDatabase = loadedConfig.GlobalDatabaseDatabase
 
 				if databaseURL != "" || plugin.Database.URL != "" {
 					if databaseURL == "" {
 						databaseURL = plugin.Database.URL
+					}
+					if databasePort == 0 {
 						databasePort = plugin.Database.Port
+					}
+					if databaseUser == "" {
 						databaseUser = plugin.Database.User
+					}
+					if databasePassword == "" {
 						databasePassword = plugin.Database.Password
+					}
+					if databaseDatabase == 0 {
 						databaseDatabase = plugin.Database.Database
 					}
-					logging.DevContext(pluginCtx, "connecting to database")
+					logging.Dev(pluginCtx, "connecting to database")
 					databaseClient, err := database.NewClient(pluginCtx, config.Database{
 						URL:      databaseURL,
 						Port:     databasePort,
@@ -507,53 +532,87 @@ func worker(
 						Database: databaseDatabase,
 					})
 					if err != nil {
-						pluginLogger.ErrorContext(pluginCtx, "unable to access database", "error", err)
+						logging.Error(pluginCtx, "unable to access database", "error", err)
 						pluginCancel()
 						workerCancel()
 						return
 					}
 					pluginCtx = context.WithValue(pluginCtx, config.ContextKey("database"), databaseClient)
+					logging.Dev(pluginCtx, "connected to database")
 					// cleanup metrics data when the plugin is stopped (otherwise it's orphaned in the aggregator)
-					if index == 0 { // only cleanup the first plugin's metrics data (they're aggregated by the first plugin's name)
-						defer metrics.Cleanup(pluginCtx, pluginLogger, plugin.Owner, plugin.Name)
+					if index == 0 {
+						defer metrics.Cleanup(pluginCtx, plugin.Owner, plugin.Name)
 					}
-					logging.DevContext(pluginCtx, "connected to database")
 				}
 
-				pluginLogger.InfoContext(pluginCtx, "starting plugin")
+				// Metrics for the plugin
+				err = metricsData.AddPlugin(metrics.Plugin{
+					PluginBase: &metrics.PluginBase{
+						Name:        plugin.Name,
+						PluginName:  plugin.Plugin,
+						RepoName:    plugin.Repo,
+						OwnerName:   plugin.Owner,
+						Status:      "idle",
+						StatusSince: time.Now(),
+					},
+				})
+				if err != nil {
+					parentLogger.ErrorContext(pluginCtx, "error adding plugin to metrics", "error", err)
+					workerCancel()
+					pluginCancel()
+					return
+				}
+				// the key is the first plugin in the list's name
+				// The goRoutine inside shouild continue to run so only run this once
+				if index == 0 {
+					metrics.ExportMetricsToDB(workerCtx, pluginCtx, loadedConfig.Plugins[0].Owner+"/"+loadedConfig.Plugins[0].Name)
+				}
 
 				for {
 					select {
 					case <-pluginCtx.Done():
-						// logging.DevContext(pluginCtx, "plugin for loop::pluginCtx.Done()")
-						err = metricsData.SetStatus(pluginCtx, pluginLogger, "stopped")
+						err = metricsData.SetStatus(pluginCtx, "stopped")
 						if err != nil {
-							pluginLogger.ErrorContext(pluginCtx, "error setting plugin status", "error", err)
+							logging.Error(pluginCtx, "error setting plugin status", "error", err)
 						}
-						pluginLogger.WarnContext(pluginCtx, shutDownMessage)
+						logging.Warn(pluginCtx, shutDownMessage)
 						pluginCancel()
+						workerCancel()
 						return
 					default:
-
-						// preparing here means the first start up of a plugin
-						if workerGlobals.IsAPluginPreparingState() != "" {
-							logging.DevContext(pluginCtx, "paused for another plugin to finish preparing")
-							// When paused, sleep briefly and continue checking
-							err = metricsData.SetStatus(pluginCtx, pluginLogger, "paused")
-							if err != nil {
-								pluginLogger.ErrorContext(pluginCtx, "error setting plugin status", "error", err)
+						// don't paused if it's the initial start and first plugin
+						if workerGlobals.Plugins[plugin.Plugin][plugin.Name].PluginRunCount.Load() != 0 &&
+							index != 0 {
+							// pause all other plugins when we find one that's paused
+							for workerGlobals.GetPausedPlugin() != "" {
+								logging.Dev(pluginCtx, "paused for another plugin to finish running")
+								// When paused, sleep briefly and continue checking
+								err = metricsData.SetStatus(pluginCtx, "paused")
+								if err != nil {
+									logging.Error(pluginCtx, "error setting plugin status", "error", err)
+								}
+								time.Sleep(time.Second * 3)
+								continue
 							}
-							time.Sleep(time.Second * 3)
-							continue
 						}
 
-						if workerGlobals.ArePluginsPaused() {
-							logging.DevContext(pluginCtx, "paused for another plugin to finish running")
-							// When paused, sleep briefly and continue checking
-							err = metricsData.SetStatus(pluginCtx, pluginLogger, "paused")
-							if err != nil {
-								pluginLogger.ErrorContext(pluginCtx, "error setting plugin status", "error", err)
+						// we need to wait for other plugins (of same type) on this host to finish preparing
+						preparing := false
+						for siblingPluginName, siblingPlugin := range workerGlobals.Plugins[plugin.Plugin] {
+							if siblingPluginName == plugin.Name {
+								continue
 							}
+							if siblingPlugin.Preparing.Load() {
+								logging.Dev(pluginCtx, "paused for the previous plugin to finish preparing")
+								err = metricsData.SetStatus(pluginCtx, "paused")
+								if err != nil {
+									logging.Error(pluginCtx, "error setting plugin status", "error", err)
+								}
+								preparing = true
+								break
+							}
+						}
+						if preparing {
 							time.Sleep(time.Second * 3)
 							continue
 						}
@@ -566,38 +625,36 @@ func worker(
 							workerCtx,
 							pluginCtx,
 							pluginCancel,
-							pluginLogger,
-							metricsData,
 						)
 						if err != nil {
-							pluginLogger.ErrorContext(updatedPluginCtx, "error running plugin", "error", err)
+							logging.Error(updatedPluginCtx, "error running plugin", "error", err)
 							pluginCancel()
 							workerCancel()
 							// Send SIGQUIT to the main pid
 							p, err := os.FindProcess(os.Getpid())
 							if err != nil {
-								pluginLogger.ErrorContext(updatedPluginCtx, "error finding process", "error", err)
+								logging.Error(updatedPluginCtx, "error finding process", "error", err)
 							} else {
 								err = p.Signal(syscall.SIGQUIT)
 								if err != nil {
-									pluginLogger.ErrorContext(updatedPluginCtx, "error sending SIGQUIT signal", "error", err)
+									logging.Error(updatedPluginCtx, "error sending SIGQUIT signal", "error", err)
 								}
 							}
 							return
 						}
 						if workerCtx.Err() != nil || toRunOnce {
-							pluginLogger.WarnContext(updatedPluginCtx, shutDownMessage)
+							// logging.Warn(updatedPluginCtx, shutDownMessage+" inside plugin loop 2")
 							pluginCancel()
-							return
+							break
 						}
-						err = metricsData.SetStatus(updatedPluginCtx, pluginLogger, "idle")
+						err = metricsData.SetStatus(updatedPluginCtx, "idle")
 						if err != nil {
-							pluginLogger.ErrorContext(updatedPluginCtx, "error setting plugin status", "error", err)
+							logging.Error(updatedPluginCtx, "error setting plugin status", "error", err)
 						}
 						select {
 						case <-time.After(time.Duration(plugin.SleepInterval) * time.Second):
 						case <-pluginCtx.Done():
-							//logging.DevContext(pluginCtx, "plugin for loop::default::pluginCtx.Done()")
+							//logging.Dev(pluginCtx, "plugin for loop::default::pluginCtx.Done()")
 							break
 						}
 					}
@@ -610,7 +667,7 @@ func worker(
 				soloReceiver = false
 			}
 		}
-		go metricsService.Start(workerCtx, parentLogger, soloReceiver)
+		go metricsService.Start(workerCtx, soloReceiver)
 	}
 	wg.Wait()
 	time.Sleep(time.Second) // prevents exiting before the logger has a chance to write the final log entry (from panics)
