@@ -1,14 +1,16 @@
 version: 2
 # This is an example goreleaser.yaml file with some defaults.
 # Make sure to check the documentation at http://goreleaser.com
-# env:
-#   - CGO_ENABLED=1
+env:
+  - CGO_ENABLED=1
 before:
   hooks:
     - make go.lint
     - make go.test
 builds:
-  - id: build
+  - id: linux-amd64
+    env:
+      - CC=x86_64-linux-musl-gcc
     mod_timestamp: '{{ .CommitTimestamp }}'
     hooks:
       post:
@@ -20,10 +22,58 @@ builds:
       - '-s -w -X main.version={{ .Version }} -X main.commit={{ .Commit }}'
     goos:
       - linux
+    goarch:
+      - amd64
+    binary: '{{ .ProjectName }}_v{{ .Version }}_{{ .Os }}_{{ .Arch }}'
+    no_unique_dist_dir: true
+  - id: linux-arm64
+    env:
+      - CC=aarch64-linux-musl-gcc
+    mod_timestamp: '{{ .CommitTimestamp }}'
+    hooks:
+      post:
+        - cmd: bash -c "chmod +x {{ .ProjectName }}_v{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+          dir: "{{ dir .Path }}"
+    flags:
+      - -trimpath #removes all file system paths from the compiled executable
+    ldflags:
+      - '-s -w -X main.version={{ .Version }} -X main.commit={{ .Commit }}'
+    goos:
+      - linux
+    goarch:
+      - arm64
+    binary: '{{ .ProjectName }}_v{{ .Version }}_{{ .Os }}_{{ .Arch }}'
+    no_unique_dist_dir: true
+  - id: darwin-amd64
+    mod_timestamp: '{{ .CommitTimestamp }}'
+    hooks:
+      post:
+        - cmd: bash -c "chmod +x {{ .ProjectName }}_v{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+          dir: "{{ dir .Path }}"
+    flags:
+      - -trimpath #removes all file system paths from the compiled executable
+    ldflags:
+      - '-s -w -X main.version={{ .Version }} -X main.commit={{ .Commit }}'
+    goos:
+      - darwin
+    goarch:
+      - amd64
+    binary: '{{ .ProjectName }}_v{{ .Version }}_{{ .Os }}_{{ .Arch }}'
+    no_unique_dist_dir: true
+  - id: darwin-arm64
+    mod_timestamp: '{{ .CommitTimestamp }}'
+    hooks:
+      post:
+        - cmd: bash -c "chmod +x {{ .ProjectName }}_v{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+          dir: "{{ dir .Path }}"
+    flags:
+      - -trimpath #removes all file system paths from the compiled executable
+    ldflags:
+      - '-s -w -X main.version={{ .Version }} -X main.commit={{ .Commit }}'
+    goos:
       - darwin
     goarch:
       - arm64
-      - amd64
     binary: '{{ .ProjectName }}_v{{ .Version }}_{{ .Os }}_{{ .Arch }}'
     no_unique_dist_dir: true
 archives:
