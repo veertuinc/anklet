@@ -208,7 +208,7 @@ func watchForJobCompletion(
 				if mainInProgressQueueJobJSON == "" {
 					logging.Error(pluginCtx, "waiting for runner registration timed out, will retry")
 					queuedJob.Action = "waiting_for_runner_registration_timed_out"
-					pluginGlobals.JobChannel <- queuedJob // required or removeSelfHostedRunner won't run
+					pluginGlobals.RetryChannel <- queuedJob // required or removeSelfHostedRunner won't run
 					return pluginCtx, nil
 				}
 			}
@@ -400,14 +400,14 @@ func checkForCompletedJobs(
 			pluginGlobals.PausedCancellationJobChannel <- internalGithub.QueueJob{Action: "finish"} // send second one so cleanup doesn't run
 			return
 		case job := <-pluginGlobals.RetryChannel:
+			logging.Info(pluginCtx, "retry channel job", "job", job)
 			if job.Action == "context_canceled" {
 				return
 			}
 			if job.Action == "waiting_for_runner_registration_timed_out" {
 				removeSelfHostedRunner(workerCtx, pluginCtx, &job, metricsData)
-				logging.Info(pluginCtx, "removed self-hosted runner", "job", job.Action)
+				logging.Info(pluginCtx, "removed self-hosted runner", "job", job)
 			}
-			logging.Warn(pluginCtx, "retrying job because of "+job.Action)
 			pluginGlobals.ReturnToMainQueue <- job.Action
 			pluginGlobals.JobChannel <- internalGithub.QueueJob{Action: "finish"}
 		case job := <-pluginGlobals.JobChannel:
