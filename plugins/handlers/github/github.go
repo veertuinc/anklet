@@ -387,7 +387,11 @@ func checkForCompletedJobs(
 		if workerGlobals.ReturnAllToMainQueue.Load() {
 			logging.Warn(pluginCtx, "main worker is returning all jobs to main queue")
 			if !pluginGlobals.IsUnreturnable() {
-				pluginGlobals.ReturnToMainQueue <- "return_all_to_main_queue"
+				select {
+				case <-pluginGlobals.ReturnToMainQueue:
+				default:
+					pluginGlobals.ReturnToMainQueue <- "return_all_to_main_queue"
+				}
 			}
 			select { // we don't care about other jobs in the channel
 			case <-pluginGlobals.JobChannel:
@@ -402,12 +406,16 @@ func checkForCompletedJobs(
 			pluginGlobals.PausedCancellationJobChannel <- internalGithub.QueueJob{Action: "finish"} // send second one so cleanup doesn't run
 			return
 		case retryReason := <-pluginGlobals.RetryChannel:
-			logging.Info(pluginCtx, "retry channel job", "retryReason", retryReason)
-			if retryReason == "context_canceled" {
-				return
+			select {
+			case <-pluginGlobals.ReturnToMainQueue:
+			default:
+				logging.Info(pluginCtx, "retry channel job", "retryReason", retryReason)
+				if retryReason == "context_canceled" {
+					return
+				}
+				pluginGlobals.ReturnToMainQueue <- retryReason
+				pluginGlobals.JobChannel <- internalGithub.QueueJob{Action: "finish"}
 			}
-			pluginGlobals.ReturnToMainQueue <- retryReason
-			pluginGlobals.JobChannel <- internalGithub.QueueJob{Action: "finish"}
 		case job := <-pluginGlobals.JobChannel:
 			if job.Action == "finish" {
 				return
@@ -1314,9 +1322,11 @@ func Run(
 	pluginGlobals.FirstCheckForCompletedJobsRan = false
 	counter := 0
 	for !pluginGlobals.FirstCheckForCompletedJobsRan {
-		if pluginCtx.Err() != nil {
-			logging.Warn(pluginCtx, "context canceled before first check for completed jobs")
+		select {
+		case <-pluginCtx.Done():
+			logging.Warn(pluginCtx, "context canceled before while check for completed jobs")
 			return pluginCtx, nil
+		default:
 		}
 		time.Sleep(1 * time.Second)
 		counter++
@@ -1852,7 +1862,6 @@ func removeSelfHostedRunner(
 	pluginCtx context.Context,
 	pluginQueueName string,
 ) {
-	logging.Info(pluginCtx, "removeSelfHostedRunner | started")
 	var err error
 	var runnersList *github.Runners
 	var response *github.Response
@@ -1872,8 +1881,8 @@ func removeSelfHostedRunner(
 
 	// we don't use cancelled here since the registration will auto unregister after the job finishes
 	if (queuedJob.WorkflowJob.Conclusion != nil && *queuedJob.WorkflowJob.Conclusion == "failure") ||
-		queuedJob.Action == "remove_self_hosted_runner" {
-		logging.Info(pluginCtx, "attempting to remove self-hosted runner", "job_id", *queuedJob.WorkflowJob.ID)
+		(queuedJob.Action != "" && queuedJob.Action == "remove_self_hosted_runner") {
+		logging.Info(pluginCtx, "removeSelfHostedRunner | checking for runners to delete", "queuedJob", queuedJob)
 		if pluginConfig.Repo != "" {
 			pluginCtx, runnersList, response, err = internalGithub.ExecuteGitHubClientFunction(workerCtx, pluginCtx, func() (*github.Runners, *github.Response, error) {
 				runnersList, resp, err := githubClient.Actions.ListRunners(context.Background(), pluginConfig.Owner, pluginConfig.Repo, &github.ListRunnersOptions{})
