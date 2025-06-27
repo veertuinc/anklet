@@ -13,7 +13,7 @@ import (
 type PluginGlobals struct {
 	FirstCheckForCompletedJobsRan bool
 	CheckForCompletedJobsMutex    *sync.Mutex
-	RetryChannel                  chan string
+	RetryChannel                  chan QueueJob
 	CleanupMutex                  *sync.Mutex
 	JobChannel                    chan QueueJob
 	PausedCancellationJobChannel  chan QueueJob
