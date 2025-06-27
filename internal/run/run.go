@@ -3,7 +3,6 @@ package run
 import (
 	"context"
 	"fmt"
-	"log/slog"
 
 	"github.com/veertuinc/anklet/internal/config"
 	"github.com/veertuinc/anklet/internal/metrics"
@@ -15,7 +14,6 @@ func Plugin(
 	workerCtx context.Context,
 	pluginCtx context.Context,
 	pluginCancel context.CancelFunc,
-	logger *slog.Logger,
 	metricsData *metrics.MetricsDataLock,
 ) (context.Context, error) {
 	var updatedPluginCtx context.Context
@@ -38,7 +36,6 @@ func Plugin(
 				workerCtx,
 				pluginCtx,
 				pluginCancel,
-				logger,
 				metricsData,
 			)
 			if err != nil {
@@ -51,8 +48,6 @@ func Plugin(
 		updatedPluginCtx, err = github_receiver.Run(
 			workerCtx,
 			pluginCtx,
-			pluginCancel,
-			logger,
 			metricsData,
 		)
 		if err != nil {

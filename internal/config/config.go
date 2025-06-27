@@ -210,10 +210,9 @@ func GetPluginFromContext(ctx context.Context) (Plugin, error) {
 
 type PluginGlobal struct {
 	PluginRunCount     atomic.Uint64
-	RepoSet            bool
-	Preparing          bool
-	FinishedInitialRun bool
-	Paused             bool
+	Preparing          atomic.Bool
+	FinishedInitialRun atomic.Bool
+	Paused             atomic.Bool
 }
 
 type Globals struct {
@@ -263,7 +262,7 @@ func GetWorkerGlobalsFromContext(ctx context.Context) (*Globals, error) {
 func (g *Globals) GetPausedPlugin() string {
 	for pluginName, plugin := range g.Plugins {
 		for _, pluginSettings := range plugin {
-			if pluginSettings.Paused {
+			if pluginSettings.Paused.Load() {
 				return pluginName
 			}
 		}
@@ -301,9 +300,9 @@ func GetConfigFileNameFromContext(ctx context.Context) (string, error) {
 	return configFileName, nil
 }
 
-func FindIndex(slice []string, value string) int {
+func FindIndexByName(slice []Plugin, name string) int {
 	for i, v := range slice {
-		if v == value {
+		if v.Name == name {
 			return i
 		}
 	}

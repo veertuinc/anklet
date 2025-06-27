@@ -24,17 +24,13 @@ func GetAnkaRegistryVmInfo(
 	if err != nil {
 		return nil, err
 	}
-	logger, err := logging.GetLoggerFromContext(pluginCtx)
-	if err != nil {
-		return nil, err
-	}
 	ankaShowOutput, err := ankaCLI.AnkaRegistryShowTemplate(pluginCtx, template, tag)
 	if err != nil {
-		logger.WarnContext(pluginCtx, "error getting anka show output", "err", err)
+		logging.Warn(pluginCtx, "error getting anka show output", "err", err)
 		return nil, fmt.Errorf("error getting anka show output: %s", err.Error())
 	}
 
-	logger.DebugContext(pluginCtx, "anka show output", "output", ankaShowOutput)
+	logging.Debug(pluginCtx, "anka show output", "output", ankaShowOutput)
 
 	//vm.Name = name this would end up the template name, which we don't want
 	vm.CPUCount = ankaShowOutput.CPU
@@ -48,17 +44,13 @@ func GetAnkaVmInfo(pluginCtx context.Context, name string) (*VM, error) {
 	if err != nil {
 		return nil, err
 	}
-	logger, err := logging.GetLoggerFromContext(pluginCtx)
-	if err != nil {
-		return nil, err
-	}
 	ankaShowOutput, err := ankaCLI.AnkaShow(pluginCtx, name)
 	if err != nil {
-		logger.ErrorContext(pluginCtx, "error getting anka show output", "err", err)
+		logging.Error(pluginCtx, "error getting anka show output", "err", err)
 		return nil, fmt.Errorf("error getting anka show output: %s", err.Error())
 	}
 
-	logger.DebugContext(pluginCtx, "anka show output", "output", ankaShowOutput)
+	logging.Debug(pluginCtx, "anka show output", "output", ankaShowOutput)
 
 	//vm.Name = name this would end up the template name, which we don't want
 	vm.CPUCount = ankaShowOutput.CPU
@@ -82,10 +74,6 @@ func VmHasEnoughHostResources(pluginCtx context.Context, vm VM) error {
 
 // compared to other VMs potentially running, do we have enough resources to run this VM?
 func VmHasEnoughResources(pluginCtx context.Context, vm VM) error {
-	logger, err := logging.GetLoggerFromContext(pluginCtx)
-	if err != nil {
-		return fmt.Errorf("error getting logger: %s", err.Error())
-	}
 	workerGlobals, err := config.GetWorkerGlobalsFromContext(pluginCtx)
 	if err != nil {
 		return fmt.Errorf("error getting globals from context: %s", err.Error())
@@ -117,11 +105,11 @@ func VmHasEnoughResources(pluginCtx context.Context, vm VM) error {
 	// logger.DebugContext(pluginCtx, "totalVMMEMBytesUsed", "totalVMMEMBytesUsed", totalVMMEMBytesUsed)
 	// check if the host has enough resources to run the VM given other VMs already running
 	if (vm.CPUCount + totalVMCPUUsed) > workerGlobals.HostCPUCount {
-		logger.DebugContext(pluginCtx, "host does not have enough CPU cores to run VM", "vm.CPUCount", vm.CPUCount, "totalVMCPUUsed", totalVMCPUUsed, "hostCPUCount", workerGlobals.HostCPUCount)
+		logging.Debug(pluginCtx, "host does not have enough CPU cores to run VM", "vm.CPUCount", vm.CPUCount, "totalVMCPUUsed", totalVMCPUUsed, "hostCPUCount", workerGlobals.HostCPUCount)
 		return fmt.Errorf("host does not have enough CPU cores to run VM")
 	}
 	if (vm.MEMBytes + totalVMMEMBytesUsed) > workerGlobals.HostMemoryBytes {
-		logger.DebugContext(pluginCtx, "host does not have enough memory to run VM", "vm.MEMBytes", vm.MEMBytes, "totalVMMEMBytesUsed", totalVMMEMBytesUsed, "hostMemoryBytes", workerGlobals.HostMemoryBytes)
+		logging.Debug(pluginCtx, "host does not have enough memory to run VM", "vm.MEMBytes", vm.MEMBytes, "totalVMMEMBytesUsed", totalVMMEMBytesUsed, "hostMemoryBytes", workerGlobals.HostMemoryBytes)
 		return fmt.Errorf("host does not have enough memory to run VM")
 	}
 	return nil
