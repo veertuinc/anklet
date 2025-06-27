@@ -549,7 +549,9 @@ func worker(
 					pluginCtx = context.WithValue(pluginCtx, config.ContextKey("database"), databaseClient)
 					logging.Dev(pluginCtx, "connected to database")
 					// cleanup metrics data when the plugin is stopped (otherwise it's orphaned in the aggregator)
-					defer metrics.Cleanup(pluginCtx, plugin.Owner, plugin.Name)
+					if index == 0 {
+						defer metrics.Cleanup(pluginCtx, plugin.Owner, plugin.Name)
+					}
 				}
 
 				// Metrics for the plugin
@@ -569,7 +571,11 @@ func worker(
 					pluginCancel()
 					return
 				}
-				metrics.ExportMetricsToDB(workerCtx, pluginCtx)
+				// the key is the first plugin in the list's name
+				// The goRoutine inside shouild continue to run so only run this once
+				if index == 0 {
+					metrics.ExportMetricsToDB(workerCtx, pluginCtx, loadedConfig.Plugins[0].Owner+"/"+loadedConfig.Plugins[0].Name)
+				}
 
 				for {
 					select {

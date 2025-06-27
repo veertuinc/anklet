@@ -25,8 +25,6 @@ type Server struct {
 	Port string
 }
 
-var once sync.Once
-
 // NewServer creates a new instance of Server
 func NewServer(port string) *Server {
 	return &Server{
@@ -63,26 +61,6 @@ func Run(
 	if err != nil {
 		return pluginCtx, err
 	}
-	metricsData, err := metrics.GetMetricsDataFromContext(workerCtx)
-	if err != nil {
-		return pluginCtx, err
-	}
-	err = metricsData.AddPlugin(
-		metrics.PluginBase{
-			Name:        pluginConfig.Name,
-			PluginName:  pluginConfig.Plugin,
-			RepoName:    pluginConfig.Repo,
-			OwnerName:   pluginConfig.Owner,
-			Status:      "initializing",
-			StatusSince: time.Now(),
-		},
-	)
-	if err != nil {
-		return pluginCtx, fmt.Errorf("error adding plugin to metrics: %s", err.Error())
-	}
-	once.Do(func() {
-		metrics.ExportMetricsToDB(workerCtx, pluginCtx)
-	})
 	configFileName, err := config.GetConfigFileNameFromContext(pluginCtx)
 	if err != nil {
 		return pluginCtx, err
