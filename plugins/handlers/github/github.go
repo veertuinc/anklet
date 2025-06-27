@@ -210,6 +210,7 @@ func watchForJobCompletion(
 				if mainInProgressQueueJobJSON == "" {
 					logging.Error(pluginCtx, "waiting for runner registration timed out, will retry")
 					pluginGlobals.RetryChannel <- "waiting_for_runner_registration_timed_out"
+					pluginGlobals.JobChannel <- queuedJob // required or removeSelfHostedRunner won't run
 					return pluginCtx, nil
 				}
 			}
@@ -403,6 +404,14 @@ func checkForCompletedJobs(
 		case retryReason := <-pluginGlobals.RetryChannel:
 			if retryReason == "context_canceled" {
 				return
+			}
+			if retryReason == "waiting_for_runner_registration_timed_out" {
+				select {
+				case job := <-pluginGlobals.JobChannel:
+					removeSelfHostedRunner(workerCtx, pluginCtx, &job, metricsData)
+				default:
+					logging.Warn(pluginCtx, "no job found in job channel, skipping removeSelfHostedRunner")
+				}
 			}
 			logging.Warn(pluginCtx, "retrying job because of "+retryReason)
 			pluginGlobals.ReturnToMainQueue <- retryReason
@@ -1328,7 +1337,7 @@ func Run(
 			pluginGlobals.JobChannel <- queuedJob
 			return pluginCtx, nil
 		}
-		logging.Info(pluginCtx, "job has attempts > 0, checking status from API to see if the job is still even running")
+		logging.Warn(pluginCtx, "job has attempts > 0, checking status from API to see if the job is still even running")
 		queuedJob, err = internalGithub.UpdateJobsWorkflowJobStatus(workerCtx, pluginCtx, &queuedJob)
 		if err != nil {
 			logging.Error(pluginCtx, "error updating job workflow job status", "err", err)
@@ -1518,7 +1527,7 @@ func Run(
 					return pluginCtx, fmt.Errorf("context canceled while waiting for resources")
 				}
 				time.Sleep(5 * time.Second)
-				logging.Info(pluginCtx, "waiting for enough resources to be available...")
+				logging.Warn(pluginCtx, "waiting for enough resources to be available...")
 				// check if the job was picked up by another host
 				// the other host would have pulled the job from the current host's plugin queue, so we check that
 				existingJobJSON, err := internalGithub.GetJobFromQueue(pluginCtx, *queuedJob.WorkflowJob.ID, pluginQueueName)
@@ -1767,7 +1776,7 @@ func Run(
 		if err != nil {
 			logging.Error(pluginCtx, "error updating job in db", "err", err)
 		}
-		defer removeSelfHostedRunner(workerCtx, pluginCtx, *vm, &queuedJob, metricsData)
+		// defer removeSelfHostedRunner(workerCtx, pluginCtx, *vm, &queuedJob, metricsData)
 		// Start runner
 		select {
 		case <-pluginGlobals.JobChannel:
@@ -1826,7 +1835,6 @@ func Run(
 func removeSelfHostedRunner(
 	workerCtx context.Context,
 	pluginCtx context.Context,
-	vm internalAnka.VM,
 	queuedJob *internalGithub.QueueJob,
 	metricsData *metrics.MetricsDataLock,
 ) {
@@ -1864,7 +1872,7 @@ func removeSelfHostedRunner(
 		} else {
 			// found := false
 			for _, runner := range runnersList.Runners {
-				if *runner.Name == vm.Name {
+				if *runner.Name == queuedJob.AnkaVM.Name {
 					// found = true
 					/*
 						We have to cancel the workflow run before we can remove the runner.
