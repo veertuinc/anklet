@@ -786,7 +786,7 @@ func (s *Server) handlePrometheusMetrics(ctx context.Context, soloReceiver bool)
 					panic(err)
 				}
 			}
-			if !soloReceiver {
+			if !strings.Contains(pluginName, "_receiver") {
 				_, err := fmt.Fprintf(w, "plugin_total_ran_vms{name=%s,plugin=%s,owner=%s} %d\n", name, pluginName, ownerName, totalRanVMs)
 				if err != nil {
 					panic(err)
