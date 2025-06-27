@@ -891,12 +891,6 @@ func ExportMetricsToDB(workerCtx context.Context, pluginCtx context.Context, key
 			if err != nil {
 				logging.Error(pluginCtx, "error parsing metrics as json", "error", err.Error())
 			}
-			var metricsDataMap map[string]any
-			if err := json.Unmarshal(metricsDataJson, &metricsDataMap); err != nil {
-				logging.Error(pluginCtx, "error unmarshalling metrics data", "error", err)
-				return
-			}
-			logging.Info(pluginCtx, "exporting metrics to DB", "key", metricsKey, "metricsData", metricsDataMap["plugins"])
 			select {
 			case <-pluginCtx.Done():
 				return
