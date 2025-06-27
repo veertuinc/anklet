@@ -4,9 +4,11 @@ set -eo pipefail
 PAT="${1}"
 OWNER="${2}"
 REPO="${3}"
+REGEX_PATTERN="${4}"
 [[ -n "$PAT" ]] || (echo "PAT as ARG1 is required" && exit 1)
 [[ -n "$OWNER" ]] || (echo "OWNER as ARG2 is required" && exit 1)
 [[ -n "$REPO" ]] || (echo "REPO as ARG3 is required" && exit 1)
+[[ -n "$REGEX_PATTERN" ]] || (echo "REGEX_PATTERN as ARG4 is required" && exit 1)
 
 TRIGGER_RUN_COUNT="${4:-10}"
 

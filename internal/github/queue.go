@@ -21,7 +21,7 @@ func GetQueueSize(pluginCtx context.Context, queueName string) (int64, error) {
 	return databaseContainer.Client.LLen(pluginCtx, queueName).Result()
 }
 
-func GetJobFromQueue(
+func GetJobJSONFromQueueByID(
 	pluginCtx context.Context,
 	jobID int64,
 	queue string,
@@ -54,6 +54,31 @@ func GetJobFromQueue(
 		}
 	}
 	return "", nil
+}
+
+func GetJobFromQueue(
+	pluginCtx context.Context,
+	queue string,
+) (QueueJob, error) {
+	databaseContainer, err := database.GetDatabaseFromContext(pluginCtx)
+	if err != nil {
+		logging.Panic(pluginCtx, pluginCtx, "error getting database client from context: "+err.Error())
+	}
+	localCtx := context.Background() // avoids context cancellation preventing this from running
+	queuedJobJSON, err := databaseContainer.Client.LIndex(localCtx, queue, 0).Result()
+	if err != nil {
+		logging.Error(pluginCtx, "error getting list of queued jobs", "err", err)
+		return QueueJob{}, err
+	}
+	queueJob, err, typeErr := database.Unwrap[QueueJob](queuedJobJSON)
+	if err != nil {
+		logging.Error(pluginCtx, "error unmarshalling job", "err", err)
+		return QueueJob{}, err
+	}
+	if typeErr != nil { // not the type we want
+		return QueueJob{}, fmt.Errorf("not the type we want")
+	}
+	return queueJob, nil
 }
 
 func DeleteFromQueue(ctx context.Context, jobID int64, queue string) error {
