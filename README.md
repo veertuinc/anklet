@@ -659,7 +659,9 @@ The `dev` LOG_LEVEL has colored output with text + pretty printed JSON for easie
 
 Plugins are, currently, stored in the `plugins/` directory. They will be moved into external binaries at some point in the future.
 
-Plugins are loaded in the order they are listed in the config.yml file. We use the `workerGlobals.Plugins[plugin.Plugin][plugin.Name].Paused.Store()` to handle this. Your plugin logic MUST set this to `false` when it handles cleanup.
+Plugins should follow a pattern of: `Pick up job from DB` -> `Run Job` -> `Cleanup Job` -> `Optionally Return to DB if it needs to be retried`. Advanced plugins can also handle pausing the plugin, waiting for the other job running to finish, if there are not enough resources to run the job on the host yet, and let others hosts that can run it take it from the paused queue.
+
+Plugins are loaded in the order they are listed in the config.yml file. We use the `workerGlobals.Plugins[plugin.Plugin][plugin.Name].Paused.Store(true)` and `workerGlobals.Plugins[plugin.Plugin][plugin.Name].FinishedInitialRun.Store(true)` to handle this. Your plugin logic MUST set this to `false` when it finishes running/does the cleanup phase.
 
 Each plugin will also wait others of its type to finish "preparing" before they start. Once it's safe to allow other plugins to start, the plugin logic must perform `workerGlobals.Plugins[plugin.Plugin][plugin.Name].Preparing.Store(false)`.
 
@@ -677,25 +679,45 @@ lrwxr-xr-x  1 nathanpierce  staff    62B Apr  4 16:02 register-runner.bash
 lrwxr-xr-x  1 nathanpierce  staff    59B Apr  4 16:02 start-runner.bash
 ```
 
-Each plugin must have a `{name}.go` file with a `Run` function that takes in `context.Context`, `logger *slog.Logger`, etc . See `github` plugin for an example.
+Each plugin must have a `{name}.go` file with a `Run` function that takes in `context.Context`, etc . See [`handlers/github`](./plugins/handlers/github) plugin for an example.
 
-The `Run` function should be designed to run multiple times in parallel. It should not rely on any state from the previous runs.
-    - Always `return` out of `Run` so the sleep interval and main.go can handle the next run properly with new context. Never loop inside of the plugin code.
-    - Should never panic but instead throw an ERROR and return. The `github` plugin has a go routine that loops and watches for cancellation, which then performs cleanup before exiting in all situations except for crashes.
-    - It's critical that you check for context cancellation after/before important logic that could orphan resources.
+The `Run` function should be designed to run multiple times in parallel between plugins. This means being aware of global context, locks, etc. It should not rely on any state from the previous runs and fully clean up at the end of each run.
+    - Always `return` out of `Run` so the sleep interval in `main.go` can handle the next run properly with new context. Never loop inside of the plugin's `Run` function.
+    - Should never panic but instead throw an ERROR and return. The `github` plugin has a go routine that loops and watches for completion of the job, context cancellation, or other signals, then performs cleanup before exiting in all situations. Be aware that context cancellation could prevent cleanup from happening, so use a context specifically for cleanup that is outside of the main context that got cancelled.
+    - It's critical that you check for context cancellation after/before important logic that could orphan resources. The sooner you catch it, the better.
 
 ### Handling Metrics
 
-Any of the plugins you run are done from within worker context. Each plugin also has a separate plugin context storing its Name, etc. The metrics for the anklet instance is stored in the worker context so they can be accessed by any of the plugins. Plugins should update the metrics for the plugin they are running in at the various phases.
+Metrics are created for each plugin from the `main.go`. A go routine is created when the first plugin is loaded and continues to run and update the DB with the most recent metrics for each plugin.
 
-For example, the `github` plugin will update the metrics for the plugin it is running in to be `running`, `pulling`, and `idle` when it is done or has yet to pick up a new job. To do this, it uses `metrics.UpdatePlugin` with the worker and plugin context. See `github` plugin for an example.
+Metrics for each plugin in a config are grouped into a DB key with the name of the first plugin in the config. This allows aggregation to more efficiently get the metrics for all plugins.
 
-But metrics.UpdateService can also update things like `LastSuccess`, and `LastFailure`. See `metrics.UpdateService` for more information.
+In your plugin code, you can use functions from metricsData to update in specific situatons. For example a failure:
 
-## FAQs
+```go
+				case "failure":
+					metricsData.IncrementTotalFailedRunsSinceStart(workerCtx, pluginCtx)
+					err = metricsData.UpdatePlugin(workerCtx, pluginCtx, metrics.Plugin{
+						PluginBase: &metrics.PluginBase{
+							Name: pluginConfig.Name,
+						},
+						LastFailedRun:       time.Now(),
+						LastFailedRunJobUrl: *queuedJob.WorkflowJob.HTMLURL,
+					})
+```
 
-- Can I guarantee that the logs for Anklet will contain the `anklet (and all plugins) shut down` message?
-  - No, there is no guarantee an error, not thrown from inside of a plugin, will do a graceful shutdown.
+Or a job being picked up:
+
+```go
+logging.Info(pluginCtx, "handling anka workflow run job")
+err = metricsData.SetStatus(pluginCtx, "in_progress")
+if err != nil {
+  logging.Error(pluginCtx, "error setting plugin status", "err", err)
+}
+```
+
+See [`internal/metrics/metrics.go`](./internal/metrics/metrics.go) for the full list of functions.
+
 
 ## Copyright
 

@@ -23,8 +23,6 @@ import (
 	"github.com/veertuinc/anklet/internal/metrics"
 )
 
-var once sync.Once
-
 // func exists_in_array_exact(array_to_search_in []string, desired []string) bool {
 // 	for _, desired_string := range desired {
 // 		found := false
