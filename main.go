@@ -409,6 +409,7 @@ func worker(
 		for index, plugin := range loadedConfig.Plugins {
 			wg.Add(1)
 			fmt.Println("index =================", index)
+
 			// support starting the plugins in the order they're listed in the config one by one
 			if index != 0 {
 			waitLoop:
@@ -474,7 +475,6 @@ func worker(
 
 				// must come after the log config is handled
 				pluginCtx = context.WithValue(pluginCtx, config.ContextKey("logger"), pluginLogger)
-				pluginCtx = context.WithValue(pluginCtx, config.ContextKey("metrics"), workerCtx.Value(config.ContextKey("metrics")))
 				pluginCtx = context.WithValue(pluginCtx, config.ContextKey("config"), workerCtx.Value(config.ContextKey("config")))
 				pluginCtx = context.WithValue(pluginCtx, config.ContextKey("globals"), workerCtx.Value(config.ContextKey("globals")))
 				pluginCtx = context.WithValue(pluginCtx, config.ContextKey("httpTransport"), workerCtx.Value(config.ContextKey("httpTransport")))
@@ -547,42 +547,38 @@ func worker(
 						return
 					}
 					pluginCtx = context.WithValue(pluginCtx, config.ContextKey("database"), databaseClient)
-					// cleanup metrics data when the plugin is stopped (otherwise it's orphaned in the aggregator)
-					if index == 0 { // only cleanup the first plugin's metrics data (they're aggregated by the first plugin's name)
-						defer metrics.Cleanup(pluginCtx, plugin.Owner, plugin.Name)
-					}
 					logging.Dev(pluginCtx, "connected to database")
+					// cleanup metrics data when the plugin is stopped (otherwise it's orphaned in the aggregator)
+					defer metrics.Cleanup(pluginCtx, plugin.Owner, plugin.Name)
 				}
 
-				// // wait for the previous plugin to finish starting
-				// if index != 0 {
-				// 	// Check if all plugins have completed their initial run
-				// 	allPluginsFinishedInitialRun := true
-				// 	for _, plugin := range workerGlobals.Plugins[loadedConfig.Plugins[index-1].Plugin] {
-				// 		if !plugin.FinishedInitialRun {
-				// 			allPluginsFinishedInitialRun = false
-				// 			break
-				// 		}
-				// 	}
-				// 	if !allPluginsFinishedInitialRun {
-				// 		logging.Dev(pluginCtx, "paused for plugin intitial runs to finish")
-				// 		err = metricsData.SetStatus(pluginCtx, pluginLogger, "paused")
-				// 		if err != nil {
-				// 			pluginLogger.ErrorContext(pluginCtx, "error setting plugin status", "error", err)
-				// 		}
-				// 		time.Sleep(time.Second * 1)
-				// 	}
-				// }
+				// Metrics for the plugin
+				err = metricsData.AddPlugin(metrics.Plugin{
+					PluginBase: &metrics.PluginBase{
+						Name:        plugin.Name,
+						PluginName:  plugin.Plugin,
+						RepoName:    plugin.Repo,
+						OwnerName:   plugin.Owner,
+						Status:      "idle",
+						StatusSince: time.Now(),
+					},
+				})
+				if err != nil {
+					parentLogger.ErrorContext(pluginCtx, "error adding plugin to metrics", "error", err)
+					workerCancel()
+					pluginCancel()
+					return
+				}
+				metrics.ExportMetricsToDB(workerCtx, pluginCtx)
 
 				for {
 					select {
 					case <-pluginCtx.Done():
-						// logging.Dev(pluginCtx, "plugin for loop::pluginCtx.Done()")
 						err = metricsData.SetStatus(pluginCtx, "stopped")
 						if err != nil {
 							logging.Error(pluginCtx, "error setting plugin status", "error", err)
 						}
-						logging.Warn(pluginCtx, shutDownMessage+" inside plugin loop")
+						logging.Warn(pluginCtx, shutDownMessage)
 						pluginCancel()
 						workerCancel()
 						return
@@ -635,7 +631,6 @@ func worker(
 							workerCtx,
 							pluginCtx,
 							pluginCancel,
-							metricsData,
 						)
 						if err != nil {
 							logging.Error(updatedPluginCtx, "error running plugin", "error", err)

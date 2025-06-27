@@ -871,7 +871,7 @@ func Cleanup(ctx context.Context, owner string, name string) {
 	// logging.Dev(ctx, "successfully deleted metrics data from Redis, key: anklet/metrics/"+owner+"/"+name)
 }
 
-func ExportMetricsToDB(pluginCtx context.Context) {
+func ExportMetricsToDB(workerCtx context.Context, pluginCtx context.Context) {
 	ctxPlugin, err := config.GetPluginFromContext(pluginCtx)
 	if err != nil {
 		logging.Error(pluginCtx, "error getting plugin from context", "error", err.Error())
@@ -880,7 +880,7 @@ func ExportMetricsToDB(pluginCtx context.Context) {
 	if err != nil {
 		logging.Error(pluginCtx, "error getting database client from context", "error", err.Error())
 	}
-	metricsData, err := GetMetricsDataFromContext(pluginCtx)
+	metricsData, err := GetMetricsDataFromContext(workerCtx)
 	if err != nil {
 		logging.Error(pluginCtx, "error getting metrics data from context", "error", err.Error())
 	}
@@ -891,12 +891,13 @@ func ExportMetricsToDB(pluginCtx context.Context) {
 	ticker := time.NewTicker(10 * time.Second)
 	amountOfErrorsAllowed := 60
 	metricsKey := "anklet/metrics/" + ctxPlugin.Owner + "/" + ctxPlugin.Name
+	atLeastOneRun := false
 	go func() {
 		for {
 			select {
 			case <-pluginCtx.Done():
 				return
-			case <-ticker.C:
+			default:
 				if pluginCtx.Err() == nil {
 					// add last_update
 					var metricsDataMap map[string]any
@@ -941,8 +942,13 @@ func ExportMetricsToDB(pluginCtx context.Context) {
 						logging.Info(pluginCtx, "errors resolved with metrics export")
 						amountOfErrorsAllowed = 60
 					}
+					atLeastOneRun = true
+					<-ticker.C
 				}
 			}
 		}
 	}()
+	for !atLeastOneRun {
+		time.Sleep(time.Second * 1)
+	}
 }

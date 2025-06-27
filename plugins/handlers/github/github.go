@@ -629,6 +629,17 @@ func cleanup(
 	pausedQueueName string,
 	onStartRun bool,
 ) {
+
+	// create an idependent copy of the pluginCtx so we can do cleanup even if pluginCtx got "context canceled"
+	cleanupContext := context.Background()
+
+	logger, err := logging.GetLoggerFromContext(pluginCtx)
+	if err != nil {
+		logging.Error(pluginCtx, "error getting logger from context", "err", err)
+		return
+	}
+	cleanupContext = context.WithValue(cleanupContext, config.ContextKey("logger"), logger)
+
 	logging.Info(pluginCtx, "cleanup | plugin cleanup started", "onStartRun", onStartRun)
 
 	pluginGlobals, err := internalGithub.GetPluginGlobalsFromContext(pluginCtx)
@@ -667,9 +678,6 @@ func cleanup(
 			}
 		}
 	}()
-
-	// create an idependent copy of the pluginCtx so we can do cleanup even if pluginCtx got "context canceled"
-	cleanupContext := context.Background()
 
 	serviceDatabase, err := database.GetDatabaseFromContext(pluginCtx)
 	if err != nil {
@@ -790,6 +798,7 @@ func cleanup(
 		case "WorkflowJobPayload": // MUST COME LAST
 			// logging.Debug(pluginCtx, "cleanup | WorkflowJobPayload | queuedJob", "queuedJob", queuedJob)
 			// delete the in_progress queue's index that matches the wrkflowJobID
+			// use cleanupContext so we don't orphan the job in the DB on context cancel of pluginCtx
 			err = internalGithub.DeleteFromQueue(cleanupContext, *queuedJob.WorkflowJob.ID, mainInProgressQueueName)
 			if err != nil {
 				logging.Error(pluginCtx, "error deleting from in_progress queue", "err", err)
@@ -869,7 +878,6 @@ func Run(
 	workerCtx context.Context,
 	pluginCtx context.Context,
 	pluginCancel context.CancelFunc,
-	metricsData *metrics.MetricsDataLock,
 ) (context.Context, error) {
 	logging.Info(pluginCtx, "running github plugin")
 
@@ -878,22 +886,10 @@ func Run(
 		return pluginCtx, err
 	}
 
-	err = metricsData.AddPlugin(metrics.Plugin{
-		PluginBase: &metrics.PluginBase{
-			Name:        pluginConfig.Name,
-			PluginName:  pluginConfig.Plugin,
-			RepoName:    pluginConfig.Repo,
-			OwnerName:   pluginConfig.Owner,
-			Status:      "idle",
-			StatusSince: time.Now(),
-		},
-	})
+	metricsData, err := metrics.GetMetricsDataFromContext(workerCtx)
 	if err != nil {
-		return pluginCtx, fmt.Errorf("error adding plugin to metrics: %s", err.Error())
+		return pluginCtx, err
 	}
-	once.Do(func() {
-		metrics.ExportMetricsToDB(pluginCtx)
-	})
 
 	workerGlobals, err := config.GetWorkerGlobalsFromContext(pluginCtx)
 	if err != nil {

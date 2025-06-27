@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	"github.com/veertuinc/anklet/internal/config"
-	"github.com/veertuinc/anklet/internal/metrics"
 	"github.com/veertuinc/anklet/plugins/handlers/github"
 	github_receiver "github.com/veertuinc/anklet/plugins/receivers/github"
 )
@@ -14,7 +13,6 @@ func Plugin(
 	workerCtx context.Context,
 	pluginCtx context.Context,
 	pluginCancel context.CancelFunc,
-	metricsData *metrics.MetricsDataLock,
 ) (context.Context, error) {
 	var updatedPluginCtx context.Context
 	ctxPlugin, err := config.GetPluginFromContext(pluginCtx)
@@ -36,7 +34,6 @@ func Plugin(
 				workerCtx,
 				pluginCtx,
 				pluginCancel,
-				metricsData,
 			)
 			if err != nil {
 				return updatedPluginCtx, fmt.Errorf("error running github plugin: %s", err.Error())
@@ -48,7 +45,6 @@ func Plugin(
 		updatedPluginCtx, err = github_receiver.Run(
 			workerCtx,
 			pluginCtx,
-			metricsData,
 		)
 		if err != nil {
 			return updatedPluginCtx, err

@@ -27,29 +27,19 @@ func (s *Server) StartAggregatorServer(
 		}
 	})
 	http.HandleFunc("/metrics/v1", func(w http.ResponseWriter, r *http.Request) {
-		databaseContainer, err := database.GetDatabaseFromContext(workerCtx)
-		if err != nil {
-			logger.ErrorContext(workerCtx, "error getting database client from context", "error", err)
-			return
-		}
 		if r.URL.Query().Get("format") == "json" {
-			s.handleAggregatorJsonMetricsV1(workerCtx, logger, databaseContainer)(w, r)
+			s.handleAggregatorJsonMetricsV1(workerCtx, logger)(w, r)
 		} else if r.URL.Query().Get("format") == "prometheus" {
-			s.handleAggregatorPrometheusMetrics(workerCtx, logger, databaseContainer)(w, r)
+			s.handleAggregatorPrometheusMetrics(workerCtx, logger)(w, r)
 		} else {
 			http.Error(w, "unsupported format, please use '?format=json' or '?format=prometheus'", http.StatusBadRequest)
 		}
 	})
 	http.HandleFunc("/metrics/v2", func(w http.ResponseWriter, r *http.Request) {
-		databaseContainer, err := database.GetDatabaseFromContext(workerCtx)
-		if err != nil {
-			logger.ErrorContext(workerCtx, "error getting database client from context", "error", err)
-			return
-		}
 		if r.URL.Query().Get("format") == "json" {
-			s.handleAggregatorJsonMetricsV2(workerCtx, logger, databaseContainer)(w, r)
+			s.handleAggregatorJsonMetricsV2(workerCtx, logger)(w, r)
 		} else if r.URL.Query().Get("format") == "prometheus" {
-			s.handleAggregatorPrometheusMetrics(workerCtx, logger, databaseContainer)(w, r)
+			s.handleAggregatorPrometheusMetrics(workerCtx, logger)(w, r)
 		} else {
 			http.Error(w, "unsupported format, please use '?format=json' or '?format=prometheus'", http.StatusBadRequest)
 		}
@@ -102,7 +92,6 @@ type jsonMetricsResponse struct {
 func (s *Server) handleAggregatorJsonMetricsV1(
 	workerCtx context.Context,
 	logger *slog.Logger,
-	databaseContainer *database.Database,
 ) func(w http.ResponseWriter, r *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
 		combinedMetrics := make(map[string]jsonMetricsResponse)
@@ -252,7 +241,6 @@ func (s *Server) handleAggregatorJsonMetricsV1(
 func (s *Server) handleAggregatorJsonMetricsV2(
 	workerCtx context.Context,
 	logger *slog.Logger,
-	databaseContainer *database.Database,
 ) func(w http.ResponseWriter, r *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
 		combinedMetrics := []jsonMetricsResponse{}
@@ -401,7 +389,6 @@ func (s *Server) handleAggregatorJsonMetricsV2(
 func (s *Server) handleAggregatorPrometheusMetrics(
 	workerCtx context.Context,
 	logger *slog.Logger,
-	databaseContainer *database.Database,
 ) func(w http.ResponseWriter, r *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain")

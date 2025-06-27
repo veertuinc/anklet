@@ -54,13 +54,16 @@ func exists_in_array_partial(array_to_search_in []string, desired []string) bool
 func Run(
 	workerCtx context.Context,
 	pluginCtx context.Context,
-	metricsData *metrics.MetricsDataLock,
 ) (context.Context, error) {
 	pluginConfig, err := config.GetPluginFromContext(pluginCtx)
 	if err != nil {
 		return pluginCtx, err
 	}
 	workerGlobals, err := config.GetWorkerGlobalsFromContext(workerCtx)
+	if err != nil {
+		return pluginCtx, err
+	}
+	metricsData, err := metrics.GetMetricsDataFromContext(workerCtx)
 	if err != nil {
 		return pluginCtx, err
 	}
@@ -78,7 +81,7 @@ func Run(
 		return pluginCtx, fmt.Errorf("error adding plugin to metrics: %s", err.Error())
 	}
 	once.Do(func() {
-		metrics.ExportMetricsToDB(pluginCtx)
+		metrics.ExportMetricsToDB(workerCtx, pluginCtx)
 	})
 	configFileName, err := config.GetConfigFileNameFromContext(pluginCtx)
 	if err != nil {
@@ -809,8 +812,7 @@ MainLoop:
 				return pluginCtx, fmt.Errorf("receiver shutdown error: %s", err.Error())
 			}
 			return pluginCtx, nil
-		case <-time.After(time.Second * 5):
-			logging.Info(pluginCtx, "sleeping for 5 seconds")
+		case <-time.After(time.Second * 1):
 			continue
 		}
 	}
