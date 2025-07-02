@@ -1,17 +1,22 @@
 #!/bin/bash
 set -exo pipefail
+echo "This script is EOL. We don't publish to dockerhub anymore."
+exit 1
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 pushd "${SCRIPT_DIR}"
 DOCKERFILE_PATH="${SCRIPT_DIR}/docker"
 NAME="anklet"
 cleanup() {
   rm -f "${DOCKERFILE_PATH}/${NAME}"*
-  rm -rf dist
   docker buildx rm mybuilder || true
 }
-rm -rf dist
-ARCH=amd64 make build-linux
-ARCH=arm64 make build-linux
+pushd dist
+for zipfile in *.zip; do
+    if [ -f "$zipfile" ]; then
+        unzip -f "$zipfile"
+    fi
+done
+popd
 cp -f dist/anklet_v$(cat "${SCRIPT_DIR}"/VERSION)_linux_amd64 "${DOCKERFILE_PATH}/anklet_linux_amd64"
 cp -f dist/anklet_v$(cat "${SCRIPT_DIR}"/VERSION)_linux_arm64 "${DOCKERFILE_PATH}/anklet_linux_arm64"
 ls -alht "${DOCKERFILE_PATH}/"
