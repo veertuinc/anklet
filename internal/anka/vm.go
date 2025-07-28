@@ -15,6 +15,7 @@ type VM struct {
 }
 
 func GetAnkaRegistryVmInfo(
+	workerCtx context.Context,
 	pluginCtx context.Context,
 	template string,
 	tag string,
@@ -24,7 +25,7 @@ func GetAnkaRegistryVmInfo(
 	if err != nil {
 		return nil, err
 	}
-	ankaShowOutput, err := ankaCLI.AnkaRegistryShowTemplate(pluginCtx, template, tag)
+	ankaShowOutput, err := ankaCLI.AnkaRegistryShowTemplate(workerCtx, pluginCtx, template, tag)
 	if err != nil {
 		logging.Warn(pluginCtx, "error getting anka show output", "err", err)
 		return nil, fmt.Errorf("error getting anka show output: %s", err.Error())

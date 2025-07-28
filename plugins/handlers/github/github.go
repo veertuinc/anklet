@@ -248,7 +248,7 @@ func watchForJobCompletion(
 		// 		})
 		// 	}
 		// } else if logCounter%2 == 0 {
-		// 	if pluginCtx.Err() != nil {
+		// 	if workerCtx.Err() != nil || pluginCtx.Err() != nil {
 		// 		logging.Warn(pluginCtx, "context canceled during job status check")
 		// 		return
 		// 	}
@@ -417,10 +417,12 @@ func checkForCompletedJobs(
 				pluginGlobals.JobChannel <- internalGithub.QueueJob{Action: "finish"}
 			}
 		case job := <-pluginGlobals.JobChannel:
+			// logging.Debug(pluginCtx, "checkForCompletedJobs -> job channel job", "job", job)
 			if job.Action == "finish" {
 				return
 			}
 			if job.Action == "cancel" {
+				// logging.Debug(pluginCtx, "checkForCompletedJobs -> cancel job", "job", job)
 				err := sendCancelWorkflowRun(workerCtx, pluginCtx, job)
 				if err != nil {
 					logging.Error(pluginCtx, "error sending cancel workflow run", "err", err)
@@ -985,7 +987,7 @@ func Run(
 	mainInProgressQueueName := "anklet/jobs/github/in_progress/" + pluginConfig.Owner
 	pausedQueueName := "anklet/jobs/github/paused/" + pluginConfig.Owner
 
-	if pluginCtx.Err() != nil {
+	if workerCtx.Err() != nil || pluginCtx.Err() != nil {
 		logging.Warn(pluginCtx, "context canceled before checking for jobs")
 		pluginGlobals.JobChannel <- internalGithub.QueueJob{Action: "finish"}
 		return pluginCtx, nil
@@ -1021,7 +1023,7 @@ func Run(
 	time.Sleep(1 * time.Second)
 	for !pluginGlobals.FirstCheckForCompletedJobsRan {
 		logging.Debug(pluginCtx, "waiting for first run checks to complete")
-		if pluginCtx.Err() != nil {
+		if workerCtx.Err() != nil || pluginCtx.Err() != nil {
 			return pluginCtx, fmt.Errorf("context canceled while waiting for first checkForCompletedJobs to run")
 		}
 		time.Sleep(1 * time.Second)
@@ -1093,7 +1095,7 @@ func Run(
 	// for !workerGlobals.IsMyTurnForPrepLock(pluginConfig.Name) {
 	// 	logging.Debug(pluginCtx, "not this plugin's turn for prep, waiting...")
 	// 	time.Sleep(2 * time.Second)
-	// 	if pluginCtx.Err() != nil {
+	// 	if workerCtx.Err() != nil || pluginCtx.Err() != nil {
 	// 		return pluginCtx, fmt.Errorf("context canceled while waiting for prep lock")
 	// 	}
 	// }
@@ -1127,7 +1129,7 @@ func Run(
 		var pausedQueuedJobString string
 		var pausedQueueTargetIndex int64 = 0
 		for {
-			if pluginCtx.Err() != nil {
+			if workerCtx.Err() != nil || pluginCtx.Err() != nil {
 				logging.Warn(pluginCtx, "context canceled before first check for paused jobs")
 				pluginGlobals.JobChannel <- internalGithub.QueueJob{Action: "finish"}
 				return pluginCtx, nil
@@ -1440,7 +1442,7 @@ func Run(
 			return pluginCtx, nil
 		}
 		if isRegistryRunning {
-			ankaRegistryVMInfo, err := internalAnka.GetAnkaRegistryVmInfo(pluginCtx, ankaTemplate, ankaTemplateTag)
+			ankaRegistryVMInfo, err := internalAnka.GetAnkaRegistryVmInfo(workerCtx, pluginCtx, ankaTemplate, ankaTemplateTag)
 			if err != nil {
 				if strings.Contains(err.Error(), "not found") {
 					logging.Warn(pluginCtx, err.Error())
@@ -1546,7 +1548,7 @@ func Run(
 			}
 			logging.Warn(pluginCtx, "cannot run vm yet, waiting for enough resources to be available...")
 			for {
-				if pluginCtx.Err() != nil {
+				if workerCtx.Err() != nil || pluginCtx.Err() != nil {
 					pluginGlobals.RetryChannel <- "context_canceled"
 					return pluginCtx, fmt.Errorf("context canceled while waiting for resources")
 				}
@@ -1596,6 +1598,11 @@ func Run(
 	// See if VM Template existing already
 	if !pluginConfig.SkipPull {
 		noTemplateTagExistsError, templateExistsError := ankaCLI.EnsureVMTemplateExists(workerCtx, pluginCtx, ankaTemplate, ankaTemplateTag)
+		if workerCtx.Err() != nil || pluginCtx.Err() != nil {
+			logging.Error(pluginCtx, "context canceled while ensuring vm template exists")
+			pluginGlobals.RetryChannel <- "context_canceled"
+			return pluginCtx, nil
+		}
 		if templateExistsError != nil {
 			// DO NOT RETURN AN ERROR TO MAIN. It will cause the other job on this node to be cancelled.
 			logging.Warn(pluginCtx, "problem ensuring vm template exists on host", "err", templateExistsError)
@@ -1604,21 +1611,17 @@ func Run(
 		}
 		if noTemplateTagExistsError != nil {
 			logging.Error(pluginCtx, "error ensuring vm template exists on host", "err", noTemplateTagExistsError)
-			if pluginCtx.Err() != nil {
-				pluginGlobals.RetryChannel <- "context_canceled"
-				return pluginCtx, fmt.Errorf("context canceled after EnsureVMTemplateExists")
-			}
 			queuedJob.Action = "cancel"
 			err = internalGithub.UpdateJobInDB(pluginCtx, pluginQueueName, &queuedJob)
 			if err != nil {
 				logging.Error(pluginCtx, "error updating job in db", "err", err)
 			}
 			pluginGlobals.JobChannel <- queuedJob
-			skipPrep = true
+			return pluginCtx, nil
 		}
 	}
 
-	if pluginCtx.Err() != nil {
+	if workerCtx.Err() != nil || pluginCtx.Err() != nil {
 		// logging.Warn(pluginCtx, "context canceled during vm template check")
 		pluginGlobals.RetryChannel <- "context_canceled"
 		return pluginCtx, fmt.Errorf("context canceled during vm template check")
@@ -1653,7 +1656,7 @@ func Run(
 			return pluginCtx, nil
 		}
 
-		if pluginCtx.Err() != nil {
+		if workerCtx.Err() != nil || pluginCtx.Err() != nil {
 			// logging.Warn(pluginCtx, "context canceled before ObtainAnkaVM")
 			pluginGlobals.RetryChannel <- "context_canceled"
 			return pluginCtx, fmt.Errorf("context canceled before ObtainAnkaVM")
@@ -1683,7 +1686,7 @@ func Run(
 				return pluginCtx, fmt.Errorf("error marshalling vm to json: %s", wrappedVmErr.Error())
 			}
 		}
-		if pluginCtx.Err() != nil {
+		if workerCtx.Err() != nil || pluginCtx.Err() != nil {
 			err = ankaCLI.AnkaDelete(workerCtx, pluginCtx, vm.Name)
 			if err != nil {
 				logging.Error(pluginCtx, "error deleting vm", "err", err)
@@ -1711,7 +1714,7 @@ func Run(
 			return pluginCtx, nil
 		}
 
-		if pluginCtx.Err() != nil {
+		if workerCtx.Err() != nil || pluginCtx.Err() != nil {
 			// logging.Warn(pluginCtx, "context canceled after ObtainAnkaVM")
 			pluginGlobals.RetryChannel <- "context_canceled"
 			return pluginCtx, fmt.Errorf("context canceled after ObtainAnkaVM")
@@ -1737,7 +1740,7 @@ func Run(
 
 		// Copy runner scripts to VM
 		logging.Debug(pluginCtx, "copying install-runner.bash, register-runner.bash, and start-runner.bash to vm")
-		err = ankaCLI.AnkaCopyIntoVM(pluginCtx,
+		err = ankaCLI.AnkaCopyIntoVM(workerCtx, pluginCtx,
 			queuedJob.AnkaVM.Name,
 			installRunnerPath,
 			registerRunnerPath,
