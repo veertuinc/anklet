@@ -1593,8 +1593,6 @@ func Run(
 
 	logging.Info(pluginCtx, "vm has enough resources now to run; starting runner")
 
-	skipPrep := false // allows us to wait for the cancellation we sent to be received so we can clean up properly
-
 	// See if VM Template existing already
 	if !pluginConfig.SkipPull {
 		noTemplateTagExistsError, templateExistsError := ankaCLI.EnsureVMTemplateExists(workerCtx, pluginCtx, ankaTemplate, ankaTemplateTag)
@@ -1627,214 +1625,210 @@ func Run(
 		return pluginCtx, fmt.Errorf("context canceled during vm template check")
 	}
 
-	if !skipPrep {
+	// Get runner registration token
+	var runnerRegistration *github.RegistrationToken
+	var response *github.Response
+	if pluginConfig.Repo != "" {
+		pluginCtx, runnerRegistration, response, err = internalGithub.ExecuteGitHubClientFunction(workerCtx, pluginCtx, func() (*github.RegistrationToken, *github.Response, error) {
+			runnerRegistration, resp, err := githubClient.Actions.CreateRegistrationToken(context.Background(), pluginConfig.Owner, pluginConfig.Repo)
+			return runnerRegistration, resp, err
+		})
+	} else {
+		pluginCtx, runnerRegistration, response, err = internalGithub.ExecuteGitHubClientFunction(workerCtx, pluginCtx, func() (*github.RegistrationToken, *github.Response, error) {
+			runnerRegistration, resp, err := githubClient.Actions.CreateOrganizationRegistrationToken(context.Background(), pluginConfig.Owner)
+			return runnerRegistration, resp, err
+		})
+	}
+	if err != nil {
+		logging.Error(pluginCtx, "error creating registration token", "err", err, "response", response)
+		metricsData.IncrementTotalFailedRunsSinceStart(workerCtx, pluginCtx)
+		pluginGlobals.RetryChannel <- "error_creating_registration_token"
+		return pluginCtx, nil
+	}
+	if *runnerRegistration.Token == "" {
+		logging.Error(pluginCtx, "registration token is empty; something wrong with github or your service token", "response", response)
+		pluginGlobals.RetryChannel <- "registration_token_empty"
+		return pluginCtx, nil
+	}
 
-		// Get runner registration token
-		var runnerRegistration *github.RegistrationToken
-		var response *github.Response
-		var err error
-		if pluginConfig.Repo != "" {
-			pluginCtx, runnerRegistration, response, err = internalGithub.ExecuteGitHubClientFunction(workerCtx, pluginCtx, func() (*github.RegistrationToken, *github.Response, error) {
-				runnerRegistration, resp, err := githubClient.Actions.CreateRegistrationToken(context.Background(), pluginConfig.Owner, pluginConfig.Repo)
-				return runnerRegistration, resp, err
-			})
-		} else {
-			pluginCtx, runnerRegistration, response, err = internalGithub.ExecuteGitHubClientFunction(workerCtx, pluginCtx, func() (*github.RegistrationToken, *github.Response, error) {
-				runnerRegistration, resp, err := githubClient.Actions.CreateOrganizationRegistrationToken(context.Background(), pluginConfig.Owner)
-				return runnerRegistration, resp, err
-			})
-		}
-		if err != nil {
-			logging.Error(pluginCtx, "error creating registration token", "err", err, "response", response)
-			metricsData.IncrementTotalFailedRunsSinceStart(workerCtx, pluginCtx)
-			pluginGlobals.RetryChannel <- "error_creating_registration_token"
-			return pluginCtx, nil
-		}
-		if *runnerRegistration.Token == "" {
-			logging.Error(pluginCtx, "registration token is empty; something wrong with github or your service token", "response", response)
-			pluginGlobals.RetryChannel <- "registration_token_empty"
-			return pluginCtx, nil
-		}
+	if workerCtx.Err() != nil || pluginCtx.Err() != nil {
+		// logging.Warn(pluginCtx, "context canceled before ObtainAnkaVM")
+		pluginGlobals.RetryChannel <- "context_canceled"
+		return pluginCtx, fmt.Errorf("context canceled before ObtainAnkaVM")
+	}
 
-		if workerCtx.Err() != nil || pluginCtx.Err() != nil {
-			// logging.Warn(pluginCtx, "context canceled before ObtainAnkaVM")
-			pluginGlobals.RetryChannel <- "context_canceled"
-			return pluginCtx, fmt.Errorf("context canceled before ObtainAnkaVM")
+	// Obtain Anka VM (and name)
+	vm, err := ankaCLI.ObtainAnkaVM(workerCtx, pluginCtx, ankaTemplate)
+	if vm != nil {
+		queuedJob.AnkaVM.Name = vm.Name
+	}
+	var wrappedVmJSON []byte
+	var wrappedVmErr error
+	if vm != nil {
+		wrappedVM := internalGithub.QueueJob{
+			Type:        "anka.VM",
+			AnkaVM:      queuedJob.AnkaVM,
+			WorkflowJob: queuedJob.WorkflowJob,
 		}
-
-		// Obtain Anka VM (and name)
-		vm, err := ankaCLI.ObtainAnkaVM(workerCtx, pluginCtx, ankaTemplate)
-		if vm != nil {
-			queuedJob.AnkaVM.Name = vm.Name
-		}
-		var wrappedVmJSON []byte
-		var wrappedVmErr error
-		if vm != nil {
-			wrappedVM := internalGithub.QueueJob{
-				Type:        "anka.VM",
-				AnkaVM:      queuedJob.AnkaVM,
-				WorkflowJob: queuedJob.WorkflowJob,
-			}
-			wrappedVmJSON, wrappedVmErr = json.Marshal(wrappedVM)
-			if wrappedVmErr != nil {
-				// logging.Error(pluginCtx, "error marshalling vm to json", "err", wrappedVmErr)
-				err = ankaCLI.AnkaDelete(workerCtx, pluginCtx, vm.Name)
-				if err != nil {
-					logging.Error(pluginCtx, "error deleting vm", "err", err)
-				}
-				pluginGlobals.RetryChannel <- "error_marshalling_vm_to_json"
-				return pluginCtx, fmt.Errorf("error marshalling vm to json: %s", wrappedVmErr.Error())
-			}
-		}
-		if workerCtx.Err() != nil || pluginCtx.Err() != nil {
+		wrappedVmJSON, wrappedVmErr = json.Marshal(wrappedVM)
+		if wrappedVmErr != nil {
+			// logging.Error(pluginCtx, "error marshalling vm to json", "err", wrappedVmErr)
 			err = ankaCLI.AnkaDelete(workerCtx, pluginCtx, vm.Name)
 			if err != nil {
 				logging.Error(pluginCtx, "error deleting vm", "err", err)
 			}
-			return pluginCtx, fmt.Errorf("context canceled after ObtainAnkaVM")
+			pluginGlobals.RetryChannel <- "error_marshalling_vm_to_json"
+			return pluginCtx, fmt.Errorf("error marshalling vm to json: %s", wrappedVmErr.Error())
 		}
-
-		// free up other plugins to run
-		workerGlobals.Plugins[pluginConfig.Plugin][pluginConfig.Name].Preparing.Store(false)
-		workerGlobals.Plugins[pluginConfig.Plugin][pluginConfig.Name].Paused.Store(false)
-
-		pluginCtx = logging.AppendCtx(pluginCtx, slog.Any("vm", queuedJob.AnkaVM))
-
-		dbErr := databaseContainer.Client.RPush(pluginCtx, pluginQueueName, wrappedVmJSON).Err()
-		if dbErr != nil {
-			// logging.Error(pluginCtx, "error pushing vm data to database", "err", dbErr)
-			pluginGlobals.RetryChannel <- "error_pushing_vm_data_to_database"
-			return pluginCtx, fmt.Errorf("error pushing vm data to database: %s", dbErr.Error())
-		}
+	}
+	if workerCtx.Err() != nil || pluginCtx.Err() != nil {
+		err = ankaCLI.AnkaDelete(workerCtx, pluginCtx, vm.Name)
 		if err != nil {
-			// this is thrown, for example, when there is no capacity on the host
-			// we must be sure to create the DB entry so cleanup happens properly
-			logging.Error(pluginCtx, "error obtaining anka vm", "err", err)
-			pluginGlobals.RetryChannel <- "error_obtaining_anka_vm"
-			return pluginCtx, nil
+			logging.Error(pluginCtx, "error deleting vm", "err", err)
 		}
+		return pluginCtx, fmt.Errorf("context canceled after ObtainAnkaVM")
+	}
 
-		if workerCtx.Err() != nil || pluginCtx.Err() != nil {
-			// logging.Warn(pluginCtx, "context canceled after ObtainAnkaVM")
-			pluginGlobals.RetryChannel <- "context_canceled"
-			return pluginCtx, fmt.Errorf("context canceled after ObtainAnkaVM")
-		}
+	// free up other plugins to run
+	workerGlobals.Plugins[pluginConfig.Plugin][pluginConfig.Name].Preparing.Store(false)
+	workerGlobals.Plugins[pluginConfig.Plugin][pluginConfig.Name].Paused.Store(false)
 
-		// Install runner
-		installRunnerPath := filepath.Join(workerGlobals.PluginsPath, "handlers", "github", "install-runner.bash")
-		registerRunnerPath := filepath.Join(workerGlobals.PluginsPath, "handlers", "github", "register-runner.bash")
-		startRunnerPath := filepath.Join(workerGlobals.PluginsPath, "handlers", "github", "start-runner.bash")
-		_, installRunnerErr := os.Stat(installRunnerPath)
-		_, registerRunnerErr := os.Stat(registerRunnerPath)
-		_, startRunnerErr := os.Stat(startRunnerPath)
-		if installRunnerErr != nil || registerRunnerErr != nil || startRunnerErr != nil {
-			// logging.Error(pluginCtx, "must include install-runner.bash, register-runner.bash, and start-runner.bash in "+globals.PluginsPath+"/handlers/github/", "err", err)
-			pluginGlobals.RetryChannel <- "cancel"
-			err = internalGithub.UpdateJobInDB(pluginCtx, pluginQueueName, &queuedJob)
-			if err != nil {
-				logging.Error(pluginCtx, "error updating job in db", "err", err)
-			}
-			pluginGlobals.JobChannel <- queuedJob
-			return pluginCtx, fmt.Errorf("must include install-runner.bash, register-runner.bash, and start-runner.bash in %s/handlers/github/", workerGlobals.PluginsPath)
-		}
+	pluginCtx = logging.AppendCtx(pluginCtx, slog.Any("vm", queuedJob.AnkaVM))
 
-		// Copy runner scripts to VM
-		logging.Debug(pluginCtx, "copying install-runner.bash, register-runner.bash, and start-runner.bash to vm")
-		err = ankaCLI.AnkaCopyIntoVM(workerCtx, pluginCtx,
-			queuedJob.AnkaVM.Name,
-			installRunnerPath,
-			registerRunnerPath,
-			startRunnerPath,
-		)
-		if err != nil {
-			// logging.Error(pluginCtx, "error executing anka copy", "err", err)
-			metricsData.IncrementTotalFailedRunsSinceStart(workerCtx, pluginCtx)
-			pluginGlobals.RetryChannel <- "error_executing_anka_copy"
-			return pluginCtx, fmt.Errorf("error executing anka copy: %s", err.Error())
-		}
-		select {
-		case <-pluginGlobals.JobChannel:
-			logging.Warn(pluginCtx, "completed job found before installing runner")
-			pluginGlobals.JobChannel <- internalGithub.QueueJob{Action: "finish"}
-			return pluginCtx, nil
-		case <-pluginCtx.Done():
-			logging.Warn(pluginCtx, "context canceled before install runner")
-			return pluginCtx, nil
-		default:
-		}
+	dbErr := databaseContainer.Client.RPush(pluginCtx, pluginQueueName, wrappedVmJSON).Err()
+	if dbErr != nil {
+		// logging.Error(pluginCtx, "error pushing vm data to database", "err", dbErr)
+		pluginGlobals.RetryChannel <- "error_pushing_vm_data_to_database"
+		return pluginCtx, fmt.Errorf("error pushing vm data to database: %s", dbErr.Error())
+	}
+	if err != nil {
+		// this is thrown, for example, when there is no capacity on the host
+		// we must be sure to create the DB entry so cleanup happens properly
+		logging.Error(pluginCtx, "error obtaining anka vm", "err", err)
+		pluginGlobals.RetryChannel <- "error_obtaining_anka_vm"
+		return pluginCtx, nil
+	}
 
-		// Install runner
-		logging.Debug(pluginCtx, "installing github runner inside of vm")
-		installRunnerErr = ankaCLI.AnkaRun(pluginCtx, queuedJob.AnkaVM.Name, "./install-runner.bash")
-		if installRunnerErr != nil {
-			logging.Error(pluginCtx, "error executing install-runner.bash", "err", installRunnerErr)
-			pluginGlobals.RetryChannel <- "error_executing_install_runner_bash"
-			return pluginCtx, nil // do not return error here; curl can fail and we need to retry
-		}
-		// Register runner
-		select {
-		case <-pluginGlobals.JobChannel:
-			logging.Info(pluginCtx, "completed job found before registering runner")
-			pluginGlobals.JobChannel <- internalGithub.QueueJob{Action: "finish"}
-			return pluginCtx, nil
-		case <-pluginCtx.Done():
-			logging.Warn(pluginCtx, "context canceled before register runner")
-			return pluginCtx, nil
-		default:
-		}
-		logging.Debug(pluginCtx, "registering github runner inside of vm", "queuedJob", queuedJob)
-		registerRunnerErr = ankaCLI.AnkaRun(pluginCtx,
-			queuedJob.AnkaVM.Name,
-			"./register-runner.bash",
-			queuedJob.AnkaVM.Name,
-			*runnerRegistration.Token,
-			repositoryURL,
-			strings.Join(queuedJob.WorkflowJob.Labels, ","),
-			pluginConfig.RunnerGroup,
-		)
-		if registerRunnerErr != nil {
-			// logging.Error(pluginCtx, "error executing register-runner.bash", "err", registerRunnerErr)
-			pluginGlobals.RetryChannel <- "error_executing_register_runner_bash"
-			return pluginCtx, fmt.Errorf("error executing register-runner.bash: %s", registerRunnerErr.Error())
-		}
-		// make sure we can clean up properly if we interrupt early
-		queuedJob.Action = "registered"
+	if workerCtx.Err() != nil || pluginCtx.Err() != nil {
+		// logging.Warn(pluginCtx, "context canceled after ObtainAnkaVM")
+		pluginGlobals.RetryChannel <- "context_canceled"
+		return pluginCtx, fmt.Errorf("context canceled after ObtainAnkaVM")
+	}
+
+	// Install runner
+	installRunnerPath := filepath.Join(workerGlobals.PluginsPath, "handlers", "github", "install-runner.bash")
+	registerRunnerPath := filepath.Join(workerGlobals.PluginsPath, "handlers", "github", "register-runner.bash")
+	startRunnerPath := filepath.Join(workerGlobals.PluginsPath, "handlers", "github", "start-runner.bash")
+	_, installRunnerErr := os.Stat(installRunnerPath)
+	_, registerRunnerErr := os.Stat(registerRunnerPath)
+	_, startRunnerErr := os.Stat(startRunnerPath)
+	if installRunnerErr != nil || registerRunnerErr != nil || startRunnerErr != nil {
+		// logging.Error(pluginCtx, "must include install-runner.bash, register-runner.bash, and start-runner.bash in "+globals.PluginsPath+"/handlers/github/", "err", err)
+		pluginGlobals.RetryChannel <- "cancel"
 		err = internalGithub.UpdateJobInDB(pluginCtx, pluginQueueName, &queuedJob)
 		if err != nil {
 			logging.Error(pluginCtx, "error updating job in db", "err", err)
 		}
-		// needed to clean up registered runners
-		defer removeSelfHostedRunner(workerCtx, pluginCtx, pluginQueueName)
-		// Start runner
-		select {
-		case <-pluginGlobals.JobChannel:
-			logging.Info(pluginCtx, "completed job found before starting runner")
-			pluginGlobals.JobChannel <- internalGithub.QueueJob{Action: "finish"}
-			return pluginCtx, nil
-		case <-pluginCtx.Done():
-			logging.Warn(pluginCtx, "context canceled before start runner")
-			return pluginCtx, nil
-		default:
-		}
-		logging.Debug(pluginCtx, "starting github runner inside of vm")
-		startRunnerErr = ankaCLI.AnkaRun(pluginCtx, queuedJob.AnkaVM.Name, "./start-runner.bash")
-		if startRunnerErr != nil {
-			// logging.Error(pluginCtx, "error executing start-runner.bash", "err", startRunnerErr)
-			pluginGlobals.RetryChannel <- "error_executing_start_runner_bash"
-			return pluginCtx, fmt.Errorf("error executing start-runner.bash: %s", startRunnerErr.Error())
-		}
+		pluginGlobals.JobChannel <- queuedJob
+		return pluginCtx, fmt.Errorf("must include install-runner.bash, register-runner.bash, and start-runner.bash in %s/handlers/github/", workerGlobals.PluginsPath)
+	}
 
-		select {
-		case <-pluginGlobals.JobChannel:
-			logging.Info(pluginCtx, "completed job found before jobCompleted checks")
-			pluginGlobals.JobChannel <- internalGithub.QueueJob{Action: "finish"}
-			return pluginCtx, nil
-		case <-pluginCtx.Done():
-			logging.Warn(pluginCtx, "context canceled before jobCompleted checks")
-			return pluginCtx, nil
-		default:
-		}
-	} // skipPrep
+	// Copy runner scripts to VM
+	logging.Debug(pluginCtx, "copying install-runner.bash, register-runner.bash, and start-runner.bash to vm")
+	err = ankaCLI.AnkaCopyIntoVM(workerCtx, pluginCtx,
+		queuedJob.AnkaVM.Name,
+		installRunnerPath,
+		registerRunnerPath,
+		startRunnerPath,
+	)
+	if err != nil {
+		// logging.Error(pluginCtx, "error executing anka copy", "err", err)
+		metricsData.IncrementTotalFailedRunsSinceStart(workerCtx, pluginCtx)
+		pluginGlobals.RetryChannel <- "error_executing_anka_copy"
+		return pluginCtx, fmt.Errorf("error executing anka copy: %s", err.Error())
+	}
+	select {
+	case <-pluginGlobals.JobChannel:
+		logging.Warn(pluginCtx, "completed job found before installing runner")
+		pluginGlobals.JobChannel <- internalGithub.QueueJob{Action: "finish"}
+		return pluginCtx, nil
+	case <-pluginCtx.Done():
+		logging.Warn(pluginCtx, "context canceled before install runner")
+		return pluginCtx, nil
+	default:
+	}
+
+	// Install runner
+	logging.Debug(pluginCtx, "installing github runner inside of vm")
+	installRunnerErr = ankaCLI.AnkaRun(pluginCtx, queuedJob.AnkaVM.Name, "./install-runner.bash")
+	if installRunnerErr != nil {
+		logging.Error(pluginCtx, "error executing install-runner.bash", "err", installRunnerErr)
+		pluginGlobals.RetryChannel <- "error_executing_install_runner_bash"
+		return pluginCtx, nil // do not return error here; curl can fail and we need to retry
+	}
+	// Register runner
+	select {
+	case <-pluginGlobals.JobChannel:
+		logging.Info(pluginCtx, "completed job found before registering runner")
+		pluginGlobals.JobChannel <- internalGithub.QueueJob{Action: "finish"}
+		return pluginCtx, nil
+	case <-pluginCtx.Done():
+		logging.Warn(pluginCtx, "context canceled before register runner")
+		return pluginCtx, nil
+	default:
+	}
+	logging.Debug(pluginCtx, "registering github runner inside of vm", "queuedJob", queuedJob)
+	registerRunnerErr = ankaCLI.AnkaRun(pluginCtx,
+		queuedJob.AnkaVM.Name,
+		"./register-runner.bash",
+		queuedJob.AnkaVM.Name,
+		*runnerRegistration.Token,
+		repositoryURL,
+		strings.Join(queuedJob.WorkflowJob.Labels, ","),
+		pluginConfig.RunnerGroup,
+	)
+	if registerRunnerErr != nil {
+		// logging.Error(pluginCtx, "error executing register-runner.bash", "err", registerRunnerErr)
+		pluginGlobals.RetryChannel <- "error_executing_register_runner_bash"
+		return pluginCtx, fmt.Errorf("error executing register-runner.bash: %s", registerRunnerErr.Error())
+	}
+	// make sure we can clean up properly if we interrupt early
+	queuedJob.Action = "registered"
+	err = internalGithub.UpdateJobInDB(pluginCtx, pluginQueueName, &queuedJob)
+	if err != nil {
+		logging.Error(pluginCtx, "error updating job in db", "err", err)
+	}
+	// needed to clean up registered runners
+	defer removeSelfHostedRunner(workerCtx, pluginCtx, pluginQueueName)
+	// Start runner
+	select {
+	case <-pluginGlobals.JobChannel:
+		logging.Info(pluginCtx, "completed job found before starting runner")
+		pluginGlobals.JobChannel <- internalGithub.QueueJob{Action: "finish"}
+		return pluginCtx, nil
+	case <-pluginCtx.Done():
+		logging.Warn(pluginCtx, "context canceled before start runner")
+		return pluginCtx, nil
+	default:
+	}
+	logging.Debug(pluginCtx, "starting github runner inside of vm")
+	startRunnerErr = ankaCLI.AnkaRun(pluginCtx, queuedJob.AnkaVM.Name, "./start-runner.bash")
+	if startRunnerErr != nil {
+		// logging.Error(pluginCtx, "error executing start-runner.bash", "err", startRunnerErr)
+		pluginGlobals.RetryChannel <- "error_executing_start_runner_bash"
+		return pluginCtx, fmt.Errorf("error executing start-runner.bash: %s", startRunnerErr.Error())
+	}
+
+	select {
+	case <-pluginGlobals.JobChannel:
+		logging.Info(pluginCtx, "completed job found before jobCompleted checks")
+		pluginGlobals.JobChannel <- internalGithub.QueueJob{Action: "finish"}
+		return pluginCtx, nil
+	case <-pluginCtx.Done():
+		logging.Warn(pluginCtx, "context canceled before jobCompleted checks")
+		return pluginCtx, nil
+	default:
+	}
 
 	logging.Info(pluginCtx, "finished preparing anka VM with actions runner")
 	queuedJob.Action = "in_progress"
