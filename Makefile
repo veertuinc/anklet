@@ -32,7 +32,7 @@ go.releaser:
 
 #go.lint:		@ Run `golangci-lint run` against the current code
 go.lint:
-	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/HEAD/install.sh | sh -s -- -b $(shell go env GOPATH)/bin v2.3.0
+	curl -SfL https://raw.githubusercontent.com/golangci/golangci-lint/HEAD/install.sh | sh -s -- -b $(shell go env GOPATH)/bin v2.3.0
 	golangci-lint run
 
 go.test:
