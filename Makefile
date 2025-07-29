@@ -30,6 +30,7 @@ go.releaser:
 	goreleaser release --verbose --clean
 	file dist/* | grep executable | awk '{print $1}' | cut -d: -f1 | xargs rm -f
 
+
 #go.lint:		@ Run `golangci-lint run` against the current code
 go.lint:
 	curl -L https://raw.githubusercontent.com/golangci/golangci-lint/HEAD/install.sh
