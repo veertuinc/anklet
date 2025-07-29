@@ -83,10 +83,10 @@ builds:
     no_unique_dist_dir: true
 archives:
   - id: archive
-    formats: [ 'zip' ]
-    files:
-      - none*
+    format: zip
     name_template: '{{ .ProjectName }}_v{{ .Version }}_{{ .Os }}_{{ .Arch }}'
+    files:
+      - '{{ .ProjectName }}_v{{ .Version }}_{{ .Os }}_{{ .Arch }}'
 # checksum:
 #   name_template: 'checksums.txt'
 release:
