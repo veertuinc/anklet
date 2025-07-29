@@ -86,7 +86,7 @@ archives:
     formats: ['zip']
     name_template: '{{ .ProjectName }}_v{{ .Version }}_{{ .Os }}_{{ .Arch }}'
     files:
-      - '{{ .ProjectName }}_v{{ .Version }}_{{ .Os }}_{{ .Arch }}'
+      - '{{ .ProjectName }}_v{{ .Version }}_{{ .Os }}_{{ .Arch }}.zip'
 # checksum:
 #   name_template: 'checksums.txt'
 release:
