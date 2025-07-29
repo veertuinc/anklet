@@ -147,7 +147,9 @@ func Run(
 				},
 				Action: *workflowJob.Action,
 				Repository: internalGithub.Repository{
-					Name: workflowJob.Repo.Name,
+					Name:       workflowJob.Repo.Name,
+					Visibility: workflowJob.Repo.Visibility,
+					Private:    workflowJob.Repo.Private,
 				},
 				AnkaVM:   anka.VM{},
 				Attempts: 0,

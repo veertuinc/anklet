@@ -144,8 +144,12 @@ func (cli *Cli) ExecuteParseJson(pluginCtx context.Context, args ...string) (*An
 	return ankaJson, nil
 }
 
-func (cli *Cli) ExecuteAndParseJsonOnError(pluginCtx context.Context, args ...string) ([]byte, error) {
-	if pluginCtx.Err() != nil {
+func (cli *Cli) ExecuteAndParseJsonOnError(
+	workerCtx context.Context,
+	pluginCtx context.Context,
+	args ...string,
+) ([]byte, error) {
+	if workerCtx.Err() != nil || pluginCtx.Err() != nil {
 		return nil, fmt.Errorf("context canceled before ExecuteAndParseJsonOnError")
 	}
 	ankaJson := &AnkaJson{}
@@ -216,11 +220,12 @@ func (cli *Cli) AnkaExecuteRegistryCommand(pluginCtx context.Context, args ...st
 }
 
 func (cli *Cli) AnkaRegistryShowTemplate(
+	workerCtx context.Context,
 	pluginCtx context.Context,
 	template string,
 	tag string,
 ) (*AnkaShowOutput, error) {
-	if pluginCtx.Err() != nil {
+	if workerCtx.Err() != nil || pluginCtx.Err() != nil {
 		return nil, fmt.Errorf("context canceled before AnkaRegistryShowTemplate")
 	}
 	var args []string
@@ -248,7 +253,7 @@ func (cli *Cli) AnkaRegistryPull(
 	template string,
 	tag string,
 ) (*AnkaJson, error) {
-	if pluginCtx.Err() != nil {
+	if workerCtx.Err() != nil || pluginCtx.Err() != nil {
 		return nil, fmt.Errorf("context canceled before AnkaRegistryPull")
 	}
 
@@ -280,6 +285,9 @@ func (cli *Cli) AnkaRegistryPull(
 		args = append(args, "pull", "--shrink", template)
 	}
 	pullJson, err := cli.AnkaExecuteRegistryCommand(pluginCtx, args...)
+	if workerCtx.Err() != nil || pluginCtx.Err() != nil {
+		return nil, fmt.Errorf("context canceled while pulling template")
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -327,7 +335,7 @@ func (cli *Cli) ObtainAnkaVM(
 	pluginCtx context.Context,
 	ankaTemplate string,
 ) (*VM, error) {
-	if pluginCtx.Err() != nil {
+	if workerCtx.Err() != nil || pluginCtx.Err() != nil {
 		return nil, fmt.Errorf("context canceled before ObtainAnkaVMAndName")
 	}
 	vmID, err := uuid.NewRandom()
@@ -337,13 +345,13 @@ func (cli *Cli) ObtainAnkaVM(
 	}
 	vmName := fmt.Sprintf("anklet-vm-%s", vmID.String())
 	vm := &VM{Name: vmName}
-	err = cli.AnkaClone(pluginCtx, vmName, ankaTemplate)
+	err = cli.AnkaClone(workerCtx, pluginCtx, vmName, ankaTemplate)
 	if err != nil {
 		logging.Error(pluginCtx, "error executing anka clone", "err", err)
 		return vm, err
 	}
 	// Start
-	err = cli.AnkaStart(pluginCtx, vmName)
+	err = cli.AnkaStart(workerCtx, pluginCtx, vmName)
 	if err != nil {
 		logging.Debug(pluginCtx, "vm", "vm", vm)
 		logging.Error(pluginCtx, "error executing anka start", "err", err)
@@ -358,8 +366,13 @@ func (cli *Cli) ObtainAnkaVM(
 	return vm, nil
 }
 
-func (cli *Cli) AnkaClone(pluginCtx context.Context, vmName string, template string) error {
-	if pluginCtx.Err() != nil {
+func (cli *Cli) AnkaClone(
+	workerCtx context.Context,
+	pluginCtx context.Context,
+	vmName string,
+	template string,
+) error {
+	if workerCtx.Err() != nil || pluginCtx.Err() != nil {
 		return fmt.Errorf("context canceled before AnkaClone")
 	}
 
@@ -374,8 +387,12 @@ func (cli *Cli) AnkaClone(pluginCtx context.Context, vmName string, template str
 	return nil
 }
 
-func (cli *Cli) AnkaStart(pluginCtx context.Context, vmName string) error {
-	if pluginCtx.Err() != nil {
+func (cli *Cli) AnkaStart(
+	workerCtx context.Context,
+	pluginCtx context.Context,
+	vmName string,
+) error {
+	if workerCtx.Err() != nil || pluginCtx.Err() != nil {
 		return fmt.Errorf("context canceled before AnkaStart")
 	}
 	startOutput, err := cli.ExecuteParseJson(pluginCtx, "anka", "-j", "start", vmName)
@@ -412,8 +429,13 @@ func (cli *Cli) AnkaCopyOutOfVM(pluginCtx context.Context, vmName string, object
 	return nil
 }
 
-func (cli *Cli) AnkaCopyIntoVM(pluginCtx context.Context, vmName string, filesToCopyIn ...string) error {
-	if pluginCtx.Err() != nil {
+func (cli *Cli) AnkaCopyIntoVM(
+	workerCtx context.Context,
+	pluginCtx context.Context,
+	vmName string,
+	filesToCopyIn ...string,
+) error {
+	if workerCtx.Err() != nil || pluginCtx.Err() != nil {
 		return fmt.Errorf("context canceled before AnkaCopyIntoVM")
 	}
 	for _, hostLevelFile := range filesToCopyIn {
@@ -423,7 +445,7 @@ func (cli *Cli) AnkaCopyIntoVM(pluginCtx context.Context, vmName string, filesTo
 			return fmt.Errorf("error evaluating symlink for %s: %w", hostLevelFile, err)
 		}
 		hostLevelFile = realPath
-		if pluginCtx.Err() != nil {
+		if workerCtx.Err() != nil || pluginCtx.Err() != nil {
 			return fmt.Errorf("context canceled before AnkaCopyIntoVM executing anka cp")
 		}
 		copyOutput, err := cli.ExecuteParseJson(pluginCtx, "anka", "-j", "cp", "-a", hostLevelFile, fmt.Sprintf("%s:", vmName))
@@ -536,6 +558,10 @@ func (cli *Cli) EnsureVMTemplateExists(workerCtx context.Context, pluginCtx cont
 		}
 		defer workerGlobals.PullLock.Unlock()
 		pullJson, err := cli.AnkaRegistryPull(workerCtx, pluginCtx, targetTemplate, targetTag)
+		if workerCtx.Err() != nil || pluginCtx.Err() != nil {
+			logging.Error(pluginCtx, "context canceled while pulling template")
+			return nil, nil
+		}
 		if pullJson == nil || pullJson.Code == 3 { // registry doesn't have template (or tag)
 			return err, nil
 		}

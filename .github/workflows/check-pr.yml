@@ -7,7 +7,7 @@ on:
 jobs:
 
   goreleaser:
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v3
         with:
@@ -15,12 +15,12 @@ jobs:
           fetch-depth: 0
       # - run: git tag $(cat VERSION)
       - name: Set up Go
-        uses: actions/setup-go@v4
+        uses: actions/setup-go@v5
         with:
           go-version: 1.24.1
           cache: false
       - name: Run GoReleaser build
-        uses: goreleaser/goreleaser-action@v4
+        uses: goreleaser/goreleaser-action@v6
         with:
           version: latest
           args: build --single-target --snapshot --clean

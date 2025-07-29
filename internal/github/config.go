@@ -53,7 +53,9 @@ type QueueJob struct {
 }
 
 type Repository struct {
-	Name *string `json:"name"`
+	Name       *string `json:"name"`
+	Visibility *string `json:"visibility"`
+	Private    *bool   `json:"private"`
 }
 
 type SimplifiedWorkflowJob struct {
