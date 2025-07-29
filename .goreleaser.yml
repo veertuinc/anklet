@@ -83,7 +83,7 @@ builds:
     no_unique_dist_dir: true
 archives:
   - id: archive
-    format: zip
+    formats: ['zip']
     name_template: '{{ .ProjectName }}_v{{ .Version }}_{{ .Os }}_{{ .Arch }}'
     files:
       - '{{ .ProjectName }}_v{{ .Version }}_{{ .Os }}_{{ .Arch }}'
