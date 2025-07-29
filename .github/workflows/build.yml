@@ -22,8 +22,23 @@ jobs:
         with:
           version: latest
           args: build
-      - name: Upload artifacts
+      - name: Upload Darwin amd64 Artifact
         uses: actions/upload-artifact@v4
         with:
-            path: dist/*
+            path: dist/anklet_*_darwin_amd64
+            retention-days: 1
+      - name: Upload Darwin arm64 Artifact
+        uses: actions/upload-artifact@v4
+        with:
+            path: dist/anklet_*_darwin_arm64
+            retention-days: 1
+      - name: Upload Linux amd64 Artifact
+        uses: actions/upload-artifact@v4
+        with:
+            path: dist/anklet_*_linux_amd64
+            retention-days: 1
+      - name: Upload Linux arm64 Artifact
+        uses: actions/upload-artifact@v4
+        with:
+            path: dist/anklet_*_linux_arm64
             retention-days: 1
