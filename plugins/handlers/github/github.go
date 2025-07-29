@@ -637,6 +637,7 @@ func cleanup(
 	pluginQueueName string,
 	mainInProgressQueueName string,
 	pluginCompletedQueueName string,
+	mainCompletedQueueName string,
 	pausedQueueName string,
 	onStartRun bool,
 ) {
@@ -807,7 +808,7 @@ func cleanup(
 			databaseContainer.Client.Del(cleanupContext, pluginQueueName+"/cleaning")
 			continue // required to keep processing tasks in the db list
 		case "WorkflowJobPayload": // MUST COME LAST
-			// logging.Debug(pluginCtx, "cleanup | WorkflowJobPayload | queuedJob", "queuedJob", queuedJob)
+			logging.Debug(pluginCtx, "cleanup | WorkflowJobPayload | queuedJob", "queuedJob", queuedJob)
 			// delete the in_progress queue's index that matches the wrkflowJobID
 			// use cleanupContext so we don't orphan the job in the DB on context cancel of pluginCtx
 			err = internalGithub.DeleteFromQueue(cleanupContext, *queuedJob.WorkflowJob.ID, mainInProgressQueueName)
@@ -815,8 +816,35 @@ func cleanup(
 				logging.Error(pluginCtx, "error deleting from in_progress queue", "err", err)
 			}
 
+			// clean up completed jobs from the database
 			if queuedJob.WorkflowJob.Status != nil && *queuedJob.WorkflowJob.Status == "completed" {
-				logging.Debug(pluginCtx, "cleanup | status is completed, cleaning up")
+				logging.Debug(pluginCtx, "cleanup | removing completed job from database", "queuedJob", queuedJob)
+				// cleanup the mainCompletedQueue job if it exists so we don't orphan it
+				// needed because we don't move it to the pluginCompletedQueue under specific conditions
+				mainCompletedQueueJobJSON, err := internalGithub.GetJobJSONFromQueueByID(pluginCtx, *queuedJob.WorkflowJob.ID, mainCompletedQueueName)
+				if err != nil {
+					logging.Error(pluginCtx, "error searching in queue", "error", err)
+				}
+				if mainCompletedQueueJobJSON != "" {
+					success, err := databaseContainer.Client.LRem(cleanupContext, mainCompletedQueueName, 1, mainCompletedQueueJobJSON).Result()
+					if err != nil {
+						logging.Error(pluginCtx,
+							"error removing completedJob from "+mainCompletedQueueName,
+							"err", err,
+							"mainCompletedQueueJobJSON", mainCompletedQueueJobJSON,
+						)
+						return
+					}
+					if success != 1 {
+						logging.Error(
+							pluginCtx,
+							"non-successful removal of completedJob from "+mainCompletedQueueName,
+							"err", err,
+							"mainCompletedQueueJobJSON", mainCompletedQueueJobJSON,
+						)
+						return
+					}
+				}
 				databaseContainer.Client.Del(cleanupContext, pluginCompletedQueueName)
 				databaseContainer.Client.Del(cleanupContext, pluginQueueName+"/cleaning")
 				break
@@ -1002,6 +1030,7 @@ func Run(
 			pluginQueueName,
 			mainInProgressQueueName,
 			pluginCompletedQueueName,
+			mainCompletedQueueName,
 			pausedQueueName,
 			false,
 		)
@@ -1032,7 +1061,7 @@ func Run(
 	case jobFromJobChannel := <-pluginGlobals.JobChannel:
 		// return if completed so the cleanup doesn't run twice
 		if *jobFromJobChannel.WorkflowJob.Status == "completed" || *jobFromJobChannel.WorkflowJob.Status == "failed" {
-			logging.Info(pluginCtx, "completed job found at start", "jobFromJobChannel", jobFromJobChannel)
+			logging.Info(pluginCtx, *jobFromJobChannel.WorkflowJob.Status+" job found at start", "jobFromJobChannel", jobFromJobChannel)
 			pluginGlobals.JobChannel <- jobFromJobChannel
 			return pluginCtx, nil
 		}
@@ -1067,6 +1096,7 @@ func Run(
 		pluginQueueName,
 		mainInProgressQueueName,
 		pluginCompletedQueueName,
+		mainCompletedQueueName,
 		pausedQueueName,
 		true,
 	)
@@ -1074,7 +1104,7 @@ func Run(
 	case runningJob := <-pluginGlobals.JobChannel:
 		// fmt.Println("after first cleanup status", runningJob.WorkflowJob.Status)
 		if *runningJob.WorkflowJob.Status == "completed" || *runningJob.WorkflowJob.Status == "failed" {
-			logging.Info(pluginCtx, "completed or failed job found at start")
+			logging.Info(pluginCtx, *runningJob.WorkflowJob.Status+" job found at start")
 			pluginGlobals.JobChannel <- runningJob
 			return pluginCtx, nil
 		}
@@ -1339,7 +1369,7 @@ func Run(
 	select {
 	case job := <-pluginGlobals.JobChannel:
 		if *job.WorkflowJob.Status == "completed" || *job.WorkflowJob.Status == "failed" {
-			logging.Info(pluginCtx, "job found by checkForCompletedJobs (at start of Run)")
+			logging.Info(pluginCtx, *job.WorkflowJob.Status+" job found by checkForCompletedJobs (at start of Run)")
 			pluginGlobals.JobChannel <- job // send true to the channel to stop the check for completed jobs goroutine
 			return pluginCtx, nil
 		}
@@ -1904,6 +1934,7 @@ func removeSelfHostedRunner(
 
 					// found = true
 					/*
+						UPDATE as of 0.14.2: We can't really prevent this from happening. Since the job can be retried, we don't want to cancel it.
 						We have to cancel the workflow run before we can remove the runner.
 						[11:12:53.736] ERROR: error executing githubClient.Actions.RemoveRunner {
 						"ankaTemplate": "d792c6f6-198c-470f-9526-9c998efe7ab4",
