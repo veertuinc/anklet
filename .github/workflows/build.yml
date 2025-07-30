@@ -21,7 +21,7 @@ jobs:
         uses: goreleaser/goreleaser-action@v6
         with:
           version: latest
-          args: release --snapshot --clean
+          args: release --clean
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
