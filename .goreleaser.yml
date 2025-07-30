@@ -82,9 +82,9 @@ builds:
     binary: '{{ .ProjectName }}_v{{ .Version }}_{{ .Os }}_{{ .Arch }}'
     no_unique_dist_dir: true
 archives:
-  - id: archive
-    formats: [ 'zip' ]
-    meta: false
+  - formats: [ 'zip' ]
+    files:
+      - none*
     name_template: '{{ .ProjectName }}_v{{ .Version }}_{{ .Os }}_{{ .Arch }}'
 # checksum:
 #   name_template: 'checksums.txt'
