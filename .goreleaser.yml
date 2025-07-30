@@ -84,8 +84,6 @@ builds:
 archives:
   - id: archive
     formats: [ 'zip' ]
-    files:
-      - none*
     name_template: '{{ .ProjectName }}_v{{ .Version }}_{{ .Os }}_{{ .Arch }}'
 # checksum:
 #   name_template: 'checksums.txt'
