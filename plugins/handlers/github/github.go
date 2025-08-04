@@ -123,6 +123,12 @@ func watchForJobCompletion(
 	jobStatusCheckIntervalSeconds := 10
 	firstLog := true
 	for {
+		// Check for shutdown signal more frequently
+		if workerCtx.Err() != nil || pluginCtx.Err() != nil {
+			logging.Warn(pluginCtx, "context canceled while watching for job completion")
+			return pluginCtx, nil
+		}
+
 		select {
 		case <-pluginCtx.Done():
 			logging.Warn(pluginCtx, "context canceled while watching for job completion")
@@ -297,6 +303,11 @@ func sendCancelWorkflowRun(
 			if tries > 3 {
 				return err
 			}
+			// Check for shutdown signal before sleeping
+			if workerCtx.Err() != nil || pluginCtx.Err() != nil {
+				logging.Warn(pluginCtx, "context canceled while retrying workflow run")
+				return fmt.Errorf("context canceled while retrying workflow run")
+			}
 			time.Sleep(10 * time.Second)
 			continue
 		}
@@ -331,6 +342,11 @@ func sendCancelWorkflowRun(
 				pluginCtx = newPluginCtx
 				cancelSent = true
 				logging.Warn(pluginCtx, "sent cancel workflow run", "workflow_run_id", *queuedJob.WorkflowJob.RunID)
+			}
+			// Check for shutdown signal before sleeping
+			if workerCtx.Err() != nil || pluginCtx.Err() != nil {
+				logging.Warn(pluginCtx, "context canceled while waiting for workflow cancellation")
+				return fmt.Errorf("context canceled while waiting for workflow cancellation")
 			}
 			time.Sleep(10 * time.Second)
 		}
@@ -382,6 +398,8 @@ func checkForCompletedJobs(
 		pluginGlobals.IncrementCheckForCompletedJobsRunCount()
 		// do not use 'continue' in the loop or else the ranOnce won't happen
 		// logging.Dev(pluginCtx, "checkForCompletedJobs "+pluginConfig.Name+" | runOnce "+fmt.Sprint(runOnce))
+
+		// do NOT use context cancellation here or it will orphan the job
 
 		// must come before the select below
 		if workerGlobals.ReturnAllToMainQueue.Load() {
@@ -624,6 +642,18 @@ func checkForCompletedJobs(
 			pluginGlobals.CheckForCompletedJobsMutex.Unlock()
 		}
 		// logging.Debug(pluginCtx, "checkForCompletedJobs end loop")
+
+		// Check for shutdown signal before sleeping
+		if workerCtx.Err() != nil || pluginCtx.Err() != nil {
+			logging.Warn(pluginCtx, "context canceled in checkForCompletedJobs loop")
+			return
+		}
+
+		// Check for ReturnAllToMainQueue signal before sleeping
+		if workerGlobals.ReturnAllToMainQueue.Load() {
+			logging.Warn(pluginCtx, "ReturnAllToMainQueue signal received in checkForCompletedJobs loop")
+			return
+		}
 		time.Sleep(time.Second * 3)
 	}
 }
@@ -743,6 +773,8 @@ func cleanup(
 	}
 
 	for {
+		// do NOT use context cancellation here (or look for ReturnAllToMainQueue) or it will orphan the job
+
 		var queuedJob internalGithub.QueueJob
 		var typeErr error
 		var cleaningJobJSON string
@@ -1039,6 +1071,7 @@ func Run(
 
 	// check constantly for a cancelled/completed webhook to be received for our job
 	go func() {
+		defer wg.Done()
 		checkForCompletedJobs(
 			workerCtx,
 			pluginCtx,
@@ -1047,7 +1080,6 @@ func Run(
 			mainCompletedQueueName,
 			mainInProgressQueueName,
 		)
-		wg.Done()
 	}()
 	time.Sleep(1 * time.Second)
 	for !pluginGlobals.FirstCheckForCompletedJobsRan {
@@ -1081,7 +1113,7 @@ func Run(
 			return pluginCtx, nil
 		}
 	default:
-		logging.Info(pluginCtx, "no existing jobs found on initial startup")
+		logging.Info(pluginCtx, "no existing in_progress jobs found on initial startup")
 		if !workerGlobals.Plugins[pluginConfig.Plugin][pluginConfig.Name].FinishedInitialRun.Load() { // exit early if it's the first time running
 			pluginGlobals.JobChannel <- internalGithub.QueueJob{Action: "finish"}
 			return pluginCtx, nil
@@ -1159,11 +1191,20 @@ func Run(
 		var pausedQueuedJobString string
 		var pausedQueueTargetIndex int64 = 0
 		for {
+			// Check for shutdown signal more frequently
 			if workerCtx.Err() != nil || pluginCtx.Err() != nil {
 				logging.Warn(pluginCtx, "context canceled before first check for paused jobs")
 				pluginGlobals.JobChannel <- internalGithub.QueueJob{Action: "finish"}
 				return pluginCtx, nil
 			}
+
+			// Check for ReturnAllToMainQueue signal
+			if workerGlobals.ReturnAllToMainQueue.Load() {
+				logging.Warn(pluginCtx, "ReturnAllToMainQueue signal received in paused jobs loop")
+				pluginGlobals.JobChannel <- internalGithub.QueueJob{Action: "finish"}
+				return pluginCtx, nil
+			}
+
 			// fmt.Println(pluginConfig.Name, "checking for paused jobs")
 			// Check the length of the paused queue
 			pausedQueueLength, err := databaseContainer.Client.LLen(pluginCtx, pausedQueueName).Result()
@@ -1353,7 +1394,30 @@ func Run(
 	// a job in anklet/jobs/github/queued and also a anklet/jobs/github/completed
 	pluginGlobals.FirstCheckForCompletedJobsRan = false
 	counter := 0
+
+	// Check for shutdown signal before entering the loop
+	if workerCtx.Err() != nil || pluginCtx.Err() != nil {
+		logging.Warn(pluginCtx, "context canceled before first check for completed jobs")
+		return pluginCtx, nil
+	}
+
+	if workerGlobals.ReturnAllToMainQueue.Load() {
+		logging.Warn(pluginCtx, "ReturnAllToMainQueue signal received before first check for completed jobs")
+		return pluginCtx, nil
+	}
 	for !pluginGlobals.FirstCheckForCompletedJobsRan {
+		// Check for shutdown signal more frequently
+		if workerCtx.Err() != nil || pluginCtx.Err() != nil {
+			logging.Warn(pluginCtx, "context canceled before while check for completed jobs")
+			return pluginCtx, nil
+		}
+
+		// Check for ReturnAllToMainQueue signal
+		if workerGlobals.ReturnAllToMainQueue.Load() {
+			logging.Warn(pluginCtx, "ReturnAllToMainQueue signal received in first check for completed jobs loop")
+			return pluginCtx, nil
+		}
+
 		select {
 		case <-pluginCtx.Done():
 			logging.Warn(pluginCtx, "context canceled before while check for completed jobs")
@@ -1582,7 +1646,7 @@ func Run(
 					pluginGlobals.RetryChannel <- "context_canceled"
 					return pluginCtx, fmt.Errorf("context canceled while waiting for resources")
 				}
-				time.Sleep(5 * time.Second)
+				time.Sleep(1 * time.Second) // Reduced from 5 seconds to 1 second for faster shutdown response
 				logging.Warn(pluginCtx, "waiting for enough resources to be available...")
 				// check if the job was picked up by another host
 				// the other host would have pulled the job from the current host's plugin queue, so we check that
