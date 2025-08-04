@@ -412,8 +412,7 @@ func worker(
 		// Plugins //
 		soloReceiver := false
 		for index, plugin := range loadedConfig.Plugins {
-			fmt.Println("index", index)
-			// wg.Add(1)
+			wg.Add(1)
 			// support starting the plugins in the order they're listed in the config one by one
 			if index != 0 {
 			waitLoop:
@@ -687,12 +686,11 @@ func worker(
 				soloReceiver = false
 			}
 		}
-		wg.Add(1)
+		// wg.Add(1)
 		go func() {
 			metricsService.Start(workerCtx, soloReceiver)
 		}()
 	}
-	fmt.Println("wg.Wait()")
 	wg.Wait()
 	time.Sleep(time.Second) // prevents exiting before the logger has a chance to write the final log entry (from panics)
 	parentLogger.WarnContext(parentCtx, "anklet (and all plugins) shut down")
