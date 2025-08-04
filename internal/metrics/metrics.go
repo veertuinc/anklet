@@ -331,9 +331,13 @@ func UpdateSystemMetrics(pluginCtx context.Context, metricsData *MetricsDataLock
 	if err != nil {
 		logging.Error(pluginCtx, "Error getting CPU usage", "error", err)
 		metricsData.HostCPUUsagePercentage = 0
+		metricsData.HostCPUUsedCount = 0
+		return
 	}
 	metricsData.HostCPUUsagePercentage = cpuUsedPercent[0]
-	metricsData.HostCPUUsedCount = int(float64(cpuCount) * (metricsData.HostCPUUsagePercentage / 100))
+	// Calculate CPU used count with more precision to avoid stagnation
+	usedCount := float64(cpuCount) * (metricsData.HostCPUUsagePercentage / 100)
+	metricsData.HostCPUUsedCount = int(usedCount)
 	// MEMORY
 	memStat, err := mem.VirtualMemory()
 	if err != nil {
@@ -887,6 +891,8 @@ func ExportMetricsToDB(workerCtx context.Context, pluginCtx context.Context, key
 			if err != nil {
 				logging.Error(pluginCtx, "error getting metrics data from context", "error", err.Error())
 			}
+			// Update system metrics before exporting
+			UpdateSystemMetrics(pluginCtx, metricsData)
 			metricsDataJson, err := json.Marshal(metricsData.MetricsData)
 			if err != nil {
 				logging.Error(pluginCtx, "error parsing metrics as json", "error", err.Error())
