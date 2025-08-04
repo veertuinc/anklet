@@ -872,6 +872,7 @@ func Cleanup(ctx context.Context, owner string, name string) {
 }
 
 func ExportMetricsToDB(workerCtx context.Context, pluginCtx context.Context, keyEnding string) {
+	logging.Info(pluginCtx, "starting ExportMetricsToDB", "keyEnding", keyEnding)
 	databaseContainer, err := database.GetDatabaseFromContext(pluginCtx)
 	if err != nil {
 		logging.Error(pluginCtx, "error getting database client from context", "error", err)

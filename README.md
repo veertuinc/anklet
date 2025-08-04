@@ -309,7 +309,7 @@ global_database_database: 0
 metrics:
   aggregator: true
   port: 8081 # port to serve aggregator on
-  sleep_interval: 10 # how often to fetch metrics from each Anklet defined
+  sleep_interval: 10 # how often to fetch metrics from the Database (note: handlers push their metrics to the Database every 10 seconds)
 ```
 
 You can see that this requires a database to be running. The aggregator will store the metrics in Redis so that it can serve them up without delay.
