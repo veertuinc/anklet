@@ -619,11 +619,12 @@ func worker(
 
 						workerGlobals.IncrementPluginRunCount(plugin.Name)
 
-						pluginCtx = logging.AppendCtx(pluginCtx, slog.Int64("QueueTargetIndex", *workerGlobals.QueueTargetIndex))
+						// Create a fresh context for this iteration to avoid accumulating QueueTargetIndex
+						iterationCtx := logging.AppendCtx(pluginCtx, slog.Int64("QueueTargetIndex", *workerGlobals.QueueTargetIndex))
 
 						updatedPluginCtx, err := run.Plugin(
 							workerCtx,
-							pluginCtx,
+							iterationCtx,
 							pluginCancel,
 						)
 						if err != nil {
