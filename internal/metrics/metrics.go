@@ -511,9 +511,27 @@ func (s *Server) Start(parentCtx context.Context, soloReceiver bool) {
 			logging.Error(parentCtx, "error writing response", "error", err)
 		}
 	})
-	err := http.ListenAndServe(":"+s.Port, nil)
+	server := &http.Server{
+		Addr: ":" + s.Port,
+	}
+
+	go func() {
+		err := server.ListenAndServe()
+		if err != nil && err != http.ErrServerClosed {
+			logging.Error(parentCtx, "error starting metrics server", "error", err)
+		}
+	}()
+
+	// Wait for context cancellation
+	<-parentCtx.Done()
+
+	// Gracefully shutdown the server
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	err := server.Shutdown(shutdownCtx)
 	if err != nil {
-		logging.Error(parentCtx, "error starting metrics server", "error", err)
+		logging.Error(parentCtx, "error shutting down metrics server", "error", err)
 	}
 }
 

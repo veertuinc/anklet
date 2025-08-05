@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
@@ -51,10 +50,27 @@ func (s *Server) StartAggregatorServer(
 			logger.ErrorContext(workerCtx, "error writing response", "error", err)
 		}
 	})
-	err := http.ListenAndServe(":"+s.Port, nil)
+	server := &http.Server{
+		Addr: ":" + s.Port,
+	}
+
+	go func() {
+		err := server.ListenAndServe()
+		if err != nil && err != http.ErrServerClosed {
+			logger.ErrorContext(workerCtx, "error starting aggregator server", "error", err)
+		}
+	}()
+
+	// Wait for context cancellation
+	<-workerCtx.Done()
+
+	// Gracefully shutdown the server
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	err := server.Shutdown(shutdownCtx)
 	if err != nil {
-		logger.ErrorContext(workerCtx, "error starting aggregator server", "error", err)
-		os.Exit(1)
+		logger.ErrorContext(workerCtx, "error shutting down aggregator server", "error", err)
 	}
 }
 

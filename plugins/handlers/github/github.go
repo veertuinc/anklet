@@ -123,6 +123,12 @@ func watchForJobCompletion(
 	jobStatusCheckIntervalSeconds := 10
 	firstLog := true
 	for {
+		// Check for shutdown signal more frequently
+		if workerCtx.Err() != nil || pluginCtx.Err() != nil {
+			logging.Warn(pluginCtx, "context canceled while watching for job completion")
+			return pluginCtx, nil
+		}
+
 		select {
 		case <-pluginCtx.Done():
 			logging.Warn(pluginCtx, "context canceled while watching for job completion")
@@ -297,6 +303,11 @@ func sendCancelWorkflowRun(
 			if tries > 3 {
 				return err
 			}
+			// Check for shutdown signal before sleeping
+			if workerCtx.Err() != nil || pluginCtx.Err() != nil {
+				logging.Warn(pluginCtx, "context canceled while retrying workflow run")
+				return fmt.Errorf("context canceled while retrying workflow run")
+			}
 			time.Sleep(10 * time.Second)
 			continue
 		}
@@ -331,6 +342,11 @@ func sendCancelWorkflowRun(
 				pluginCtx = newPluginCtx
 				cancelSent = true
 				logging.Warn(pluginCtx, "sent cancel workflow run", "workflow_run_id", *queuedJob.WorkflowJob.RunID)
+			}
+			// Check for shutdown signal before sleeping
+			if workerCtx.Err() != nil || pluginCtx.Err() != nil {
+				logging.Warn(pluginCtx, "context canceled while waiting for workflow cancellation")
+				return fmt.Errorf("context canceled while waiting for workflow cancellation")
 			}
 			time.Sleep(10 * time.Second)
 		}
@@ -369,23 +385,19 @@ func checkForCompletedJobs(
 		os.Exit(1)
 	}
 	checkForCompletedJobsContext := context.Background() // needed so we can finalize database changes without orphaning or losing jobs
-	defer func() {
-		if pluginGlobals.CheckForCompletedJobsMutex != nil {
-			pluginGlobals.CheckForCompletedJobsMutex.Unlock()
-		}
-		pluginGlobals.FirstCheckForCompletedJobsRan = true
-	}()
+
 	for {
 		var updateDB = false
 		// BE VERY CAREFUL when you use return here. You could orphan the job if you're not careful.
-		pluginGlobals.CheckForCompletedJobsMutex.Lock()
 		pluginGlobals.IncrementCheckForCompletedJobsRunCount()
 		// do not use 'continue' in the loop or else the ranOnce won't happen
-		// logging.Dev(pluginCtx, "checkForCompletedJobs "+pluginConfig.Name+" | runOnce "+fmt.Sprint(runOnce))
+		// logging.Dev(pluginCtx, "checkForCompletedJobs "+pluginConfig.Name+" | getFirstCheckForCompletedJobsRan "+fmt.Sprint(pluginGlobals.GetFirstCheckForCompletedJobsRan()))
+
+		// do NOT use context cancellation here or it will orphan the job
 
 		// must come before the select below
 		if workerGlobals.ReturnAllToMainQueue.Load() {
-			logging.Warn(pluginCtx, "main worker is returning all jobs to main queue")
+			logging.Warn(pluginCtx, "main worker is attempting to return all jobs to main queue")
 			if !pluginGlobals.IsUnreturnable() {
 				select {
 				case <-pluginGlobals.ReturnToMainQueue:
@@ -444,7 +456,7 @@ func checkForCompletedJobs(
 		if err == redis.Nil || existingJobString == "" {
 			logging.Debug(pluginCtx, "checkForCompletedJobs -> no job found in pluginQueue")
 		} else {
-			logging.Debug(pluginCtx, "checkForCompletedJobs -> job found in pluginQueue")
+			// logging.Debug(pluginCtx, "checkForCompletedJobs -> job found in pluginQueue")
 			queuedJob, err, typeErr := database.Unwrap[internalGithub.QueueJob](existingJobString)
 			if err != nil || typeErr != nil {
 				logging.Error(pluginCtx,
@@ -463,12 +475,12 @@ func checkForCompletedJobs(
 				return
 			}
 			if mainInProgressQueueJobJSON != "" {
-				if pluginGlobals.CheckForCompletedJobsRunCount%5 == 0 {
+				if pluginGlobals.GetCheckForCompletedJobsRunCount()%5 == 0 {
 					logging.Info(
 						pluginCtx,
 						"job is still in progress",
 						"job_id", *queuedJob.WorkflowJob.ID,
-						"run_count", pluginGlobals.CheckForCompletedJobsRunCount,
+						"run_count", pluginGlobals.GetCheckForCompletedJobsRunCount(),
 						"html_url", *queuedJob.WorkflowJob.HTMLURL,
 						"workflow_name", *queuedJob.WorkflowJob.Name,
 					)
@@ -577,7 +589,7 @@ func checkForCompletedJobs(
 			}
 
 			// if in progress, but no completed job found, we need to check the status of the job in github's API
-			if !pluginGlobals.FirstCheckForCompletedJobsRan &&
+			if !pluginGlobals.GetFirstCheckForCompletedJobsRan() &&
 				mainCompletedQueueJobJSON == "" && pluginCompletedQueueJobJSON == "" &&
 				mainInProgressQueueJobJSON != "" {
 				logging.Debug(pluginCtx, "checkForCompletedJobs -> job is in mainInProgressQueue, checking status from API")
@@ -619,11 +631,16 @@ func checkForCompletedJobs(
 			}
 		}
 
-		pluginGlobals.FirstCheckForCompletedJobsRan = true
-		if pluginGlobals.CheckForCompletedJobsMutex != nil {
-			pluginGlobals.CheckForCompletedJobsMutex.Unlock()
-		}
 		// logging.Debug(pluginCtx, "checkForCompletedJobs end loop")
+
+		// Check for shutdown signal before sleeping
+		if workerCtx.Err() != nil || pluginCtx.Err() != nil {
+			logging.Warn(pluginCtx, "context canceled in checkForCompletedJobs loop")
+			return
+		}
+
+		pluginGlobals.SetFirstCheckForCompletedJobsRan(true)
+
 		time.Sleep(time.Second * 3)
 	}
 }
@@ -743,6 +760,8 @@ func cleanup(
 	}
 
 	for {
+		// do NOT use context cancellation here (or look for ReturnAllToMainQueue) or it will orphan the job
+
 		var queuedJob internalGithub.QueueJob
 		var typeErr error
 		var cleaningJobJSON string
@@ -937,14 +956,13 @@ func Run(
 
 	// must come after first cleanup
 	pluginGlobals := internalGithub.PluginGlobals{
-		FirstCheckForCompletedJobsRan: false,
-		CheckForCompletedJobsMutex:    &sync.Mutex{},
+		FirstCheckForCompletedJobsRan: 0,                    // atomic: 0 = false
 		RetryChannel:                  make(chan string, 1), // TODO: do we need this if we have ReturnToMainQueue?
 		CleanupMutex:                  &sync.Mutex{},
 		JobChannel:                    make(chan internalGithub.QueueJob, 1),
 		ReturnToMainQueue:             make(chan string, 1),
 		PausedCancellationJobChannel:  make(chan internalGithub.QueueJob, 1),
-		CheckForCompletedJobsRunCount: 0,
+		CheckForCompletedJobsRunCount: 0, // atomic counter
 		Unreturnable:                  false,
 	}
 	// TODO: replace this with workerGlobals
@@ -1039,6 +1057,9 @@ func Run(
 
 	// check constantly for a cancelled/completed webhook to be received for our job
 	go func() {
+		defer func() {
+			wg.Done()
+		}()
 		checkForCompletedJobs(
 			workerCtx,
 			pluginCtx,
@@ -1047,10 +1068,9 @@ func Run(
 			mainCompletedQueueName,
 			mainInProgressQueueName,
 		)
-		wg.Done()
 	}()
 	time.Sleep(1 * time.Second)
-	for !pluginGlobals.FirstCheckForCompletedJobsRan {
+	for !pluginGlobals.GetFirstCheckForCompletedJobsRan() {
 		logging.Debug(pluginCtx, "waiting for first run checks to complete")
 		if workerCtx.Err() != nil || pluginCtx.Err() != nil {
 			return pluginCtx, fmt.Errorf("context canceled while waiting for first checkForCompletedJobs to run")
@@ -1081,7 +1101,7 @@ func Run(
 			return pluginCtx, nil
 		}
 	default:
-		logging.Info(pluginCtx, "no existing jobs found on initial startup")
+		// logging.Info(pluginCtx, "no existing in_progress jobs found on initial startup")
 		if !workerGlobals.Plugins[pluginConfig.Plugin][pluginConfig.Name].FinishedInitialRun.Load() { // exit early if it's the first time running
 			pluginGlobals.JobChannel <- internalGithub.QueueJob{Action: "finish"}
 			return pluginCtx, nil
@@ -1159,11 +1179,13 @@ func Run(
 		var pausedQueuedJobString string
 		var pausedQueueTargetIndex int64 = 0
 		for {
+			// Check for shutdown signal more frequently
 			if workerCtx.Err() != nil || pluginCtx.Err() != nil {
 				logging.Warn(pluginCtx, "context canceled before first check for paused jobs")
 				pluginGlobals.JobChannel <- internalGithub.QueueJob{Action: "finish"}
 				return pluginCtx, nil
 			}
+
 			// fmt.Println(pluginConfig.Name, "checking for paused jobs")
 			// Check the length of the paused queue
 			pausedQueueLength, err := databaseContainer.Client.LLen(pluginCtx, pausedQueueName).Result()
@@ -1349,11 +1371,24 @@ func Run(
 	pluginCtx = logging.AppendCtx(pluginCtx, slog.String("workflowJobURL", *queuedJob.WorkflowJob.HTMLURL))
 	pluginCtx = logging.AppendCtx(pluginCtx, slog.Int("attempts", queuedJob.Attempts))
 
-	// now that the job is in the plugin's queue,check if the job is already completed so we don't orphan if there is
+	// now that the job is in the plugin's queue, check if the job is already completed so we don't orphan if there is
 	// a job in anklet/jobs/github/queued and also a anklet/jobs/github/completed
-	pluginGlobals.FirstCheckForCompletedJobsRan = false
+	pluginGlobals.SetFirstCheckForCompletedJobsRan(false)
 	counter := 0
-	for !pluginGlobals.FirstCheckForCompletedJobsRan {
+
+	// Check for shutdown signal before entering the loop
+	if workerCtx.Err() != nil || pluginCtx.Err() != nil {
+		logging.Warn(pluginCtx, "context canceled before first check for completed jobs")
+		return pluginCtx, nil
+	}
+
+	for !pluginGlobals.GetFirstCheckForCompletedJobsRan() {
+		// Check for shutdown signal more frequently
+		if workerCtx.Err() != nil || pluginCtx.Err() != nil {
+			logging.Warn(pluginCtx, "context canceled before while check for completed jobs")
+			return pluginCtx, nil
+		}
+
 		select {
 		case <-pluginCtx.Done():
 			logging.Warn(pluginCtx, "context canceled before while check for completed jobs")
@@ -1576,14 +1611,18 @@ func Run(
 				}
 				logging.Info(pluginCtx, "pushed job to paused queue", "queuedJob.WorkflowJob.ID", *queuedJob.WorkflowJob.ID)
 			}
+			enoughResourcesLoopCount := 0
 			logging.Warn(pluginCtx, "cannot run vm yet, waiting for enough resources to be available...")
 			for {
 				if workerCtx.Err() != nil || pluginCtx.Err() != nil {
 					pluginGlobals.RetryChannel <- "context_canceled"
 					return pluginCtx, fmt.Errorf("context canceled while waiting for resources")
 				}
-				time.Sleep(5 * time.Second)
-				logging.Warn(pluginCtx, "waiting for enough resources to be available...")
+				time.Sleep(1 * time.Second) // Reduced from 5 seconds to 1 second for faster shutdown response
+				if enoughResourcesLoopCount%10 == 0 {
+					logging.Warn(pluginCtx, "waiting for enough resources to be available...")
+				}
+				enoughResourcesLoopCount++
 				// check if the job was picked up by another host
 				// the other host would have pulled the job from the current host's plugin queue, so we check that
 				existingJobJSON, err := internalGithub.GetJobJSONFromQueueByID(pluginCtx, *queuedJob.WorkflowJob.ID, pluginQueueName)
@@ -1603,7 +1642,9 @@ func Run(
 				// If there is still a queued job, check if the host has enough resources to run it
 				err = internalAnka.VmHasEnoughResources(pluginCtx, queuedJob.AnkaVM)
 				if err != nil {
-					logging.Warn(pluginCtx, "error from vm has enough resources check", "err", err)
+					if enoughResourcesLoopCount%10 == 0 {
+						logging.Warn(pluginCtx, "error from vm has enough resources check", "err", err)
+					}
 					continue
 				}
 				// remove from paused queue so other hosts won't try to pick it up anymore.

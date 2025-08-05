@@ -297,13 +297,18 @@ func worker(
 				parentLogger.WarnContext(workerCtx, "graceful shutdown, waiting for jobs to finish...")
 				workerGlobals.ReturnAllToMainQueue.Store(true)
 				toRunOnce = true
+				// Don't call workerCancel() immediately - let plugins finish gracefully
+				// The plugins will detect ReturnAllToMainQueue and return jobs to main queue
 			default:
 				sigCount++
 				if sigCount >= 2 {
 					parentLogger.WarnContext(workerCtx, "forceful shutdown after second interrupt... be sure to clean up any self-hosted runners and VMs!")
 					os.Exit(1)
 				}
-				parentLogger.WarnContext(workerCtx, "best effort graceful shutdown, interrupting the job as soon as possible...")
+
+				if !loadedConfig.Metrics.Aggregator {
+					parentLogger.WarnContext(workerCtx, "best effort graceful shutdown, interrupting the job as soon as possible...")
+				}
 				workerGlobals.ReturnAllToMainQueue.Store(true)
 				workerCancel()
 			}
@@ -420,6 +425,11 @@ func worker(
 							// parentLogger.DebugContext(workerCtx, "previous plugin finished initial run, continuing", "plugin.Name", plugin.Name, "plugin.Plugin", plugin.Plugin)
 							workerGlobals.Plugins[plugin.Plugin][plugin.Name].Paused.Store(false)
 							break waitLoop
+						}
+						// Check for shutdown signal before sleeping
+						if workerCtx.Err() != nil {
+							logging.Warn(workerCtx, "context canceled while waiting for previous plugin to finish initial run")
+							return
 						}
 						time.Sleep(time.Second * 5)
 					}
@@ -585,6 +595,14 @@ func worker(
 							index != 0 {
 							// pause all other plugins when we find one that's paused
 							for workerGlobals.GetPausedPlugin() != "" {
+								// Check for shutdown signal
+								if workerCtx.Err() != nil || pluginCtx.Err() != nil {
+									logging.Warn(pluginCtx, "context canceled while waiting for paused plugin")
+									pluginCancel()
+									workerCancel()
+									return
+								}
+
 								logging.Dev(pluginCtx, "paused for another plugin to finish running")
 								// When paused, sleep briefly and continue checking
 								err = metricsData.SetStatus(pluginCtx, "paused")
@@ -668,7 +686,10 @@ func worker(
 				soloReceiver = false
 			}
 		}
-		go metricsService.Start(workerCtx, soloReceiver)
+		// wg.Add(1)
+		go func() {
+			metricsService.Start(workerCtx, soloReceiver)
+		}()
 	}
 	wg.Wait()
 	time.Sleep(time.Second) // prevents exiting before the logger has a chance to write the final log entry (from panics)

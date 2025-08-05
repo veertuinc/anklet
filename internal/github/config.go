@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 
 	"github.com/google/go-github/v66/github"
 	"github.com/veertuinc/anklet/internal/anka"
@@ -11,15 +12,14 @@ import (
 )
 
 type PluginGlobals struct {
-	FirstCheckForCompletedJobsRan bool
-	CheckForCompletedJobsMutex    *sync.Mutex
-	RetryChannel                  chan string
-	CleanupMutex                  *sync.Mutex
-	JobChannel                    chan QueueJob
-	PausedCancellationJobChannel  chan QueueJob
-	ReturnToMainQueue             chan string
-	CheckForCompletedJobsRunCount int
-	Unreturnable                  bool
+	FirstCheckForCompletedJobsRan int32         // atomic flag: 0 = false, 1 = true - allows us to do a full check for completed jobs on startup
+	RetryChannel                  chan string   // Send a string to this channel to send the job back to the main queue after checking for reason
+	CleanupMutex                  *sync.Mutex   // prevent multiple cleanup jobs from running at the same time
+	JobChannel                    chan QueueJob // Used in the CheckForCompletedJobs to handle logic specific to the job
+	PausedCancellationJobChannel  chan QueueJob // If a job is paused on the host, getting a job in this channel cleans it up so another host can continue to handle it
+	ReturnToMainQueue             chan string   // Similar to the RetryChannel, but used to acually send the job back to the main queue
+	CheckForCompletedJobsRunCount int32         // atomic counter - Used to track how many times the CheckForCompletedJobs function has run so we can log every 5 runs the "job is still in progress" message
+	Unreturnable                  bool          // Used to prevent a job from being returned to the main queue if it's not returnable
 }
 
 func (p *PluginGlobals) SetUnreturnable(unreturnable bool) {
@@ -31,7 +31,23 @@ func (p *PluginGlobals) IsUnreturnable() bool {
 }
 
 func (p *PluginGlobals) IncrementCheckForCompletedJobsRunCount() {
-	p.CheckForCompletedJobsRunCount++
+	atomic.AddInt32(&p.CheckForCompletedJobsRunCount, 1)
+}
+
+func (p *PluginGlobals) GetCheckForCompletedJobsRunCount() int32 {
+	return atomic.LoadInt32(&p.CheckForCompletedJobsRunCount)
+}
+
+func (p *PluginGlobals) SetFirstCheckForCompletedJobsRan(ran bool) {
+	var value int32
+	if ran {
+		value = 1
+	}
+	atomic.StoreInt32(&p.FirstCheckForCompletedJobsRan, value)
+}
+
+func (p *PluginGlobals) GetFirstCheckForCompletedJobsRan() bool {
+	return atomic.LoadInt32(&p.FirstCheckForCompletedJobsRan) == 1
 }
 
 func GetPluginGlobalsFromContext(ctx context.Context) (*PluginGlobals, error) {
