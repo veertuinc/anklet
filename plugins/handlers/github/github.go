@@ -1611,6 +1611,7 @@ func Run(
 				}
 				logging.Info(pluginCtx, "pushed job to paused queue", "queuedJob.WorkflowJob.ID", *queuedJob.WorkflowJob.ID)
 			}
+			enoughResourcesLoopCount := 0
 			logging.Warn(pluginCtx, "cannot run vm yet, waiting for enough resources to be available...")
 			for {
 				if workerCtx.Err() != nil || pluginCtx.Err() != nil {
@@ -1618,7 +1619,10 @@ func Run(
 					return pluginCtx, fmt.Errorf("context canceled while waiting for resources")
 				}
 				time.Sleep(1 * time.Second) // Reduced from 5 seconds to 1 second for faster shutdown response
-				logging.Warn(pluginCtx, "waiting for enough resources to be available...")
+				if enoughResourcesLoopCount%5 == 0 {
+					logging.Warn(pluginCtx, "waiting for enough resources to be available...")
+				}
+				enoughResourcesLoopCount++
 				// check if the job was picked up by another host
 				// the other host would have pulled the job from the current host's plugin queue, so we check that
 				existingJobJSON, err := internalGithub.GetJobJSONFromQueueByID(pluginCtx, *queuedJob.WorkflowJob.ID, pluginQueueName)
@@ -1638,7 +1642,9 @@ func Run(
 				// If there is still a queued job, check if the host has enough resources to run it
 				err = internalAnka.VmHasEnoughResources(pluginCtx, queuedJob.AnkaVM)
 				if err != nil {
-					logging.Warn(pluginCtx, "error from vm has enough resources check", "err", err)
+					if enoughResourcesLoopCount%5 == 0 {
+						logging.Warn(pluginCtx, "error from vm has enough resources check", "err", err)
+					}
 					continue
 				}
 				// remove from paused queue so other hosts won't try to pick it up anymore.
