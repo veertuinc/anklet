@@ -1619,7 +1619,7 @@ func Run(
 					return pluginCtx, fmt.Errorf("context canceled while waiting for resources")
 				}
 				time.Sleep(1 * time.Second) // Reduced from 5 seconds to 1 second for faster shutdown response
-				if enoughResourcesLoopCount%5 == 0 {
+				if enoughResourcesLoopCount%10 == 0 {
 					logging.Warn(pluginCtx, "waiting for enough resources to be available...")
 				}
 				enoughResourcesLoopCount++
@@ -1642,7 +1642,7 @@ func Run(
 				// If there is still a queued job, check if the host has enough resources to run it
 				err = internalAnka.VmHasEnoughResources(pluginCtx, queuedJob.AnkaVM)
 				if err != nil {
-					if enoughResourcesLoopCount%5 == 0 {
+					if enoughResourcesLoopCount%10 == 0 {
 						logging.Warn(pluginCtx, "error from vm has enough resources check", "err", err)
 					}
 					continue
