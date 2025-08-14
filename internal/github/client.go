@@ -3,6 +3,7 @@ package github
 import (
 	"context"
 	"fmt"
+	"math"
 	"net/http"
 	"os"
 	"strings"
@@ -110,9 +111,21 @@ func ExecuteGitHubClientFunction[T any](
 	pluginCtx context.Context,
 	executeFunc func() (*T, *github.Response, error),
 ) (context.Context, *T, *github.Response, error) {
+	return executeGitHubClientFunctionWithRetry(workerCtx, pluginCtx, executeFunc, 0)
+}
+
+// executeGitHubClientFunctionWithRetry handles the actual retry logic with exponential backoff
+func executeGitHubClientFunctionWithRetry[T any](
+	workerCtx context.Context,
+	pluginCtx context.Context,
+	executeFunc func() (*T, *github.Response, error),
+	retryAttempt int,
+) (context.Context, *T, *github.Response, error) {
 	executeGitHubClientFunctionCtx, cancel := context.WithCancel(pluginCtx) // Inherit from parent context
 	defer cancel()
+
 	result, response, err := executeFunc()
+
 	if response != nil {
 		logging.Debug(pluginCtx,
 			"GitHub API rate limit",
@@ -151,13 +164,58 @@ func ExecuteGitHubClientFunction[T any](
 					logging.Error(workerCtx, "error updating plugin metrics", "error", err)
 					return pluginCtx, nil, nil, err
 				}
-				return ExecuteGitHubClientFunction(workerCtx, executeGitHubClientFunctionCtx, executeFunc) // Retry the function after waiting
+				return executeGitHubClientFunctionWithRetry(workerCtx, executeGitHubClientFunctionCtx, executeFunc, retryAttempt) // Retry the function after waiting
 			case <-pluginCtx.Done():
 				return pluginCtx, nil, nil, pluginCtx.Err()
 			}
 		}
 	}
+
 	if err != nil {
+		// Check if this is a 404 error that we should retry
+		if is404Error(err) {
+			if retryAttempt < 10 { // Retry up to 10 times as requested
+				// Calculate exponential backoff with jitter
+				// Base delay starts at 30 seconds, doubles each time
+				baseDelay := time.Duration(30) * time.Second
+				backoffDelay := time.Duration(math.Pow(2, float64(retryAttempt))) * baseDelay
+
+				// Cap the maximum delay at 30 minutes to prevent excessive waits
+				maxDelay := 30 * time.Minute
+				if backoffDelay > maxDelay {
+					backoffDelay = maxDelay
+				}
+
+				logging.Warn(pluginCtx,
+					"GitHub API returned 404, retrying with exponential backoff",
+					"attempt", retryAttempt+1,
+					"maxAttempts", 10,
+					"backoffDelay", backoffDelay.String(),
+					"error", err.Error(),
+				)
+
+				// Check for shutdown signal before sleeping
+				if workerCtx.Err() != nil || pluginCtx.Err() != nil {
+					logging.Warn(pluginCtx, "context canceled while retrying 404 error")
+					return pluginCtx, nil, nil, fmt.Errorf("context canceled while retrying 404 error")
+				}
+
+				select {
+				case <-time.After(backoffDelay):
+					return executeGitHubClientFunctionWithRetry(workerCtx, pluginCtx, executeFunc, retryAttempt+1)
+				case <-pluginCtx.Done():
+					return pluginCtx, nil, nil, pluginCtx.Err()
+				case <-workerCtx.Done():
+					return pluginCtx, nil, nil, workerCtx.Err()
+				}
+			} else {
+				logging.Error(pluginCtx, "GitHub API 404 error: maximum retry attempts exceeded",
+					"attempts", retryAttempt,
+					"error", err.Error())
+			}
+		}
+
+		// Log non-404 errors or final 404 error after all retries
 		if err.Error() != "context canceled" {
 			if !strings.Contains(err.Error(), "try again later") {
 				logging.Error(pluginCtx, "error executing GitHub client function: "+err.Error())
@@ -165,5 +223,16 @@ func ExecuteGitHubClientFunction[T any](
 		}
 		return pluginCtx, nil, nil, err
 	}
+
 	return pluginCtx, result, response, nil
+}
+
+// is404Error checks if the error is a 404 Not Found error from GitHub API
+func is404Error(err error) bool {
+	if err == nil {
+		return false
+	}
+	errorStr := err.Error()
+	return strings.Contains(errorStr, "404 Not Found") ||
+		strings.Contains(errorStr, "404") && strings.Contains(errorStr, "Not Found")
 }
