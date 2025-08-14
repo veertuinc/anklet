@@ -1188,8 +1188,26 @@ func Run(
 			pausedQueuedJobString, err = internalGithub.PopJobOffQueue(pluginCtx, pausedQueueName, pausedQueueTargetIndex)
 			defer func() {
 				// there is a chance a failure could cause the paused job to be permanently removed, so make sure it gets put back no matter what
+				// BUT first check if the job status has changed to completed/failed - if so, don't put it back
 				// fmt.Println(pluginConfig.Name, "end of paused jobs loop iteration")
 				if pausedQueuedJobString != "" {
+					// Parse the job to get its ID and check current status in DB
+					pausedJob, parseErr, typeErr := database.Unwrap[internalGithub.QueueJob](pausedQueuedJobString)
+					if parseErr == nil && typeErr == nil && pausedJob.WorkflowJob.ID != nil {
+						// Check the current job status in the original host's queue
+						currentJobJSON, err := internalGithub.GetJobJSONFromQueueByID(pluginCtx, *pausedJob.WorkflowJob.ID, "anklet/jobs/github/queued/"+pluginConfig.Owner+"/{"+pausedJob.PausedOn+"}")
+						if err == nil && currentJobJSON != "" {
+							currentJob, currentParseErr, currentTypeErr := database.Unwrap[internalGithub.QueueJob](currentJobJSON)
+							if currentParseErr == nil && currentTypeErr == nil && currentJob.WorkflowJob.Status != nil {
+								if *currentJob.WorkflowJob.Status == "completed" || *currentJob.WorkflowJob.Status == "failed" {
+									logging.Info(pluginCtx, "not putting job back in paused queue because it's "+*currentJob.WorkflowJob.Status, "workflowJobID", *pausedJob.WorkflowJob.ID)
+									return // Don't put it back in paused queue
+								}
+							}
+						}
+					}
+
+					// Job is still active, put it back in paused queue
 					err := databaseContainer.Client.LPush(pluginCtx, pausedQueueName, pausedQueuedJobString).Err()
 					if err != nil {
 						logging.Error(pluginCtx, "error pushing job to paused queue", "err", err)
@@ -1280,11 +1298,30 @@ func Run(
 
 		// don't hold on to paused jobs
 		if pausedQueuedJobString != "" {
-			err := databaseContainer.Client.LPush(pluginCtx, pausedQueueName, pausedQueuedJobString).Err()
-			if err != nil {
-				logging.Error(pluginCtx, "error pushing job to paused queue", "err", err)
+			// Check if job status has changed to completed/failed before putting back
+			pausedJob, parseErr, typeErr := database.Unwrap[internalGithub.QueueJob](pausedQueuedJobString)
+			shouldPutBack := true
+			if parseErr == nil && typeErr == nil && pausedJob.WorkflowJob.ID != nil {
+				// Check the current job status in the original host's queue
+				currentJobJSON, err := internalGithub.GetJobJSONFromQueueByID(pluginCtx, *pausedJob.WorkflowJob.ID, "anklet/jobs/github/queued/"+pluginConfig.Owner+"/{"+pausedJob.PausedOn+"}")
+				if err == nil && currentJobJSON != "" {
+					currentJob, currentParseErr, currentTypeErr := database.Unwrap[internalGithub.QueueJob](currentJobJSON)
+					if currentParseErr == nil && currentTypeErr == nil && currentJob.WorkflowJob.Status != nil {
+						if *currentJob.WorkflowJob.Status == "completed" || *currentJob.WorkflowJob.Status == "failed" {
+							logging.Info(pluginCtx, "not putting job back in paused queue because it's "+*currentJob.WorkflowJob.Status, "workflowJobID", *pausedJob.WorkflowJob.ID)
+							shouldPutBack = false
+						}
+					}
+				}
 			}
-			logging.Debug(pluginCtx, "pushed job back to paused queue", "pausedQueuedJobString", pausedQueuedJobString)
+
+			if shouldPutBack {
+				err := databaseContainer.Client.LPush(pluginCtx, pausedQueueName, pausedQueuedJobString).Err()
+				if err != nil {
+					logging.Error(pluginCtx, "error pushing job to paused queue", "err", err)
+				}
+				logging.Debug(pluginCtx, "pushed job back to paused queue", "pausedQueuedJobString", pausedQueuedJobString)
+			}
 			pausedQueuedJobString = "" // don't let the defer function push it back
 		}
 
@@ -1603,6 +1640,26 @@ func Run(
 			enoughResourcesLoopCount := 0
 			logging.Warn(pluginCtx, "cannot run vm yet, waiting for enough resources to be available...")
 			for {
+				// Check for completed jobs or context cancellation
+				select {
+				case job := <-pluginGlobals.JobChannel:
+					if job.WorkflowJob.Status != nil && (*job.WorkflowJob.Status == "completed" || *job.WorkflowJob.Status == "failed") {
+						logging.Info(pluginCtx, *job.WorkflowJob.Status+" job found while waiting for resources")
+						// Clean up paused queue entry
+						err := internalGithub.DeleteFromQueue(pluginCtx, *queuedJob.WorkflowJob.ID, pausedQueueName)
+						if err != nil {
+							// no need to error, as it's not a big deal if it's not there
+							logging.Warn(pluginCtx, "error deleting from paused queue", "err", err)
+						}
+						pluginGlobals.JobChannel <- job // put the job back for cleanup
+						return pluginCtx, nil
+					}
+					// Put the job back if it's not completed
+					pluginGlobals.JobChannel <- job
+				default:
+					// No job in channel, continue with resource checks
+				}
+
 				if workerCtx.Err() != nil || pluginCtx.Err() != nil {
 					pluginGlobals.RetryChannel <- "context_canceled"
 					return pluginCtx, fmt.Errorf("context canceled while waiting for resources")
