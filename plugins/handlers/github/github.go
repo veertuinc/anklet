@@ -943,6 +943,9 @@ func Run(
 		return pluginCtx, err
 	}
 
+	pluginCtx = logging.AppendCtx(pluginCtx, slog.Int("hostCPUCount", workerGlobals.HostCPUCount))
+	pluginCtx = logging.AppendCtx(pluginCtx, slog.Uint64("hostMemoryBytes", workerGlobals.HostMemoryBytes))
+
 	// must come after first cleanup
 	pluginGlobals := internalGithub.PluginGlobals{
 		FirstCheckForCompletedJobsRan: 0,                    // atomic: 0 = false
