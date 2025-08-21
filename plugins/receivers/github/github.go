@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -154,21 +155,26 @@ func Run(
 				AnkaVM:   anka.VM{},
 				Attempts: 0,
 			}
-			logging.Info(pluginCtx, "received workflow job to consider",
-				"workflowJob.WorkflowJob.Labels", simplifiedWorkflowJobEvent.WorkflowJob.Labels,
-				"workflowJob.WorkflowJob.ID", simplifiedWorkflowJobEvent.WorkflowJob.ID,
-				"workflowJob.WorkflowJob.Name", simplifiedWorkflowJobEvent.WorkflowJob.Name,
-				"workflowJob.WorkflowJob.RunID", simplifiedWorkflowJobEvent.WorkflowJob.RunID,
-				"workflowJob.WorkflowJob.HTMLURL", simplifiedWorkflowJobEvent.WorkflowJob.HTMLURL,
-				"workflowJob.WorkflowJob.Status", simplifiedWorkflowJobEvent.WorkflowJob.Status,
-				"workflowJob.WorkflowJob.Conclusion", simplifiedWorkflowJobEvent.WorkflowJob.Conclusion,
-				"workflowJob.WorkflowJob.StartedAt", simplifiedWorkflowJobEvent.WorkflowJob.StartedAt,
-				"workflowJob.WorkflowJob.CompletedAt", simplifiedWorkflowJobEvent.WorkflowJob.CompletedAt,
-				"workflowJob.Action", simplifiedWorkflowJobEvent.Action,
-				"workflowJob.WorkflowJob.WorkflowName", simplifiedWorkflowJobEvent.WorkflowJob.WorkflowName,
-				"workflowJob.Repository.Name", simplifiedWorkflowJobEvent.Repository.Name,
-				"workflowJob.AnkaVM", simplifiedWorkflowJobEvent.AnkaVM,
-			)
+			// Add job context for all subsequent logging
+			pluginCtx = logging.AppendCtx(pluginCtx, slog.Group("job",
+				slog.Group("workflowJob",
+					slog.Any("labels", simplifiedWorkflowJobEvent.WorkflowJob.Labels),
+					slog.Any("id", simplifiedWorkflowJobEvent.WorkflowJob.ID),
+					slog.Any("name", simplifiedWorkflowJobEvent.WorkflowJob.Name),
+					slog.Any("runID", simplifiedWorkflowJobEvent.WorkflowJob.RunID),
+					slog.Any("htmlURL", simplifiedWorkflowJobEvent.WorkflowJob.HTMLURL),
+					slog.Any("status", simplifiedWorkflowJobEvent.WorkflowJob.Status),
+					slog.Any("conclusion", simplifiedWorkflowJobEvent.WorkflowJob.Conclusion),
+					slog.Any("startedAt", simplifiedWorkflowJobEvent.WorkflowJob.StartedAt),
+					slog.Any("completedAt", simplifiedWorkflowJobEvent.WorkflowJob.CompletedAt),
+					slog.Any("workflowName", simplifiedWorkflowJobEvent.WorkflowJob.WorkflowName),
+				),
+				slog.String("action", simplifiedWorkflowJobEvent.Action),
+				slog.Any("repository", simplifiedWorkflowJobEvent.Repository),
+				slog.Any("ankaVM", simplifiedWorkflowJobEvent.AnkaVM),
+			))
+
+			logging.Info(pluginCtx, "received workflow job to consider")
 			if *workflowJob.Action == "queued" {
 				if exists_in_array_partial(simplifiedWorkflowJobEvent.WorkflowJob.Labels, []string{"anka-template"}) {
 					// make sure it doesn't already exist
@@ -189,19 +195,7 @@ func Run(
 							logging.Error(pluginCtx, "error pushing job to queue", "error", push.Err())
 							return
 						}
-						logging.Info(pluginCtx, "job pushed to queued queue",
-							"workflowJob.ID", simplifiedWorkflowJobEvent.WorkflowJob.ID,
-							"workflowJob.Name", simplifiedWorkflowJobEvent.WorkflowJob.Name,
-							"workflowJob.RunID", simplifiedWorkflowJobEvent.WorkflowJob.RunID,
-							"html_url", simplifiedWorkflowJobEvent.WorkflowJob.HTMLURL,
-							"status", simplifiedWorkflowJobEvent.WorkflowJob.Status,
-							"conclusion", simplifiedWorkflowJobEvent.WorkflowJob.Conclusion,
-							"started_at", simplifiedWorkflowJobEvent.WorkflowJob.StartedAt,
-							"completed_at", simplifiedWorkflowJobEvent.WorkflowJob.CompletedAt,
-							"repository", simplifiedWorkflowJobEvent.Repository,
-							"action", simplifiedWorkflowJobEvent.Action,
-							"anka_vm", simplifiedWorkflowJobEvent.AnkaVM,
-						)
+						logging.Info(pluginCtx, "job pushed to queued queue")
 					}
 				}
 			} else if *workflowJob.Action == "in_progress" {
@@ -228,16 +222,7 @@ func Run(
 							logging.Error(pluginCtx, "error pushing job to queue", "error", push.Err())
 							return
 						}
-						logging.Info(pluginCtx, "job pushed to in_progress queue",
-							"workflowJob.ID", simplifiedWorkflowJobEvent.WorkflowJob.ID,
-							"workflowJob.Name", simplifiedWorkflowJobEvent.WorkflowJob.Name,
-							"workflowJob.RunID", simplifiedWorkflowJobEvent.WorkflowJob.RunID,
-							"html_url", simplifiedWorkflowJobEvent.WorkflowJob.HTMLURL,
-							"status", simplifiedWorkflowJobEvent.WorkflowJob.Status,
-							"conclusion", simplifiedWorkflowJobEvent.WorkflowJob.Conclusion,
-							"started_at", simplifiedWorkflowJobEvent.WorkflowJob.StartedAt,
-							"completed_at", simplifiedWorkflowJobEvent.WorkflowJob.CompletedAt,
-						)
+						logging.Info(pluginCtx, "job pushed to in_progress queue")
 					}
 				}
 			} else if *workflowJob.Action == "completed" {
@@ -292,16 +277,7 @@ func Run(
 								logging.Error(pluginCtx, "error pushing job to queue", "error", push.Err())
 								return
 							}
-							logging.Info(pluginCtx, "job pushed to completed queue",
-								"workflowJob.ID", *simplifiedWorkflowJobEvent.WorkflowJob.ID,
-								"workflowJob.Name", *simplifiedWorkflowJobEvent.WorkflowJob.Name,
-								"workflowJob.RunID", *simplifiedWorkflowJobEvent.WorkflowJob.RunID,
-								"html_url", *simplifiedWorkflowJobEvent.WorkflowJob.HTMLURL,
-								"status", *simplifiedWorkflowJobEvent.WorkflowJob.Status,
-								"conclusion", *simplifiedWorkflowJobEvent.WorkflowJob.Conclusion,
-								"started_at", *simplifiedWorkflowJobEvent.WorkflowJob.StartedAt,
-								"completed_at", *simplifiedWorkflowJobEvent.WorkflowJob.CompletedAt,
-							)
+							logging.Info(pluginCtx, "job pushed to completed queue")
 						}
 					}
 
@@ -760,11 +736,17 @@ MainLoop:
 		// err doesn't matter here and it will always throw "job scheduled on GitHub side; try again later"
 		logging.Info(pluginCtx, "hook redelivered",
 			"redelivery", redelivery,
-			"hookDelivery.GUID", *hookDelivery.GUID,
-			"workflowJob.ID", *workflowJob.ID,
-			"hookDelivery.Action", *hookDelivery.Action,
-			"hookDelivery.StatusCode", *hookDelivery.StatusCode,
-			"hookDelivery.Redelivery", *hookDelivery.Redelivery,
+			"hookDelivery", map[string]interface{}{
+				"guid":       *hookDelivery.GUID,
+				"action":     *hookDelivery.Action,
+				"statusCode": *hookDelivery.StatusCode,
+				"redelivery": *hookDelivery.Redelivery,
+			},
+			"job", map[string]interface{}{
+				"workflowJob": map[string]interface{}{
+					"id": *workflowJob.ID,
+				},
+			},
 			"inCompleted", inCompleted,
 		)
 	}

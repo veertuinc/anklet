@@ -28,13 +28,20 @@ func IsDebugEnabled() bool {
 func New() *slog.Logger {
 	logLevel := os.Getenv("LOG_LEVEL")
 	var options *slog.HandlerOptions
-	if IsDebugEnabled() {
+	if strings.ToUpper(logLevel) == "DEBUG" {
+		// DEBUG uses pretty handler for development readability
 		handler := &ContextHandler{Handler: NewPrettyHandler(&slog.HandlerOptions{
 			Level:       slog.LevelDebug,
 			AddSource:   true,
 			ReplaceAttr: nil,
 		})}
 		return slog.New(handler)
+	} else if strings.ToUpper(logLevel) == "DEV" {
+		// DEV uses JSON handler for pure JSON output
+		options = &slog.HandlerOptions{
+			Level:     slog.LevelDebug,
+			AddSource: true,
+		}
 	} else if strings.ToUpper(logLevel) == "ERROR" {
 		options = &slog.HandlerOptions{Level: slog.LevelError}
 	} else {
