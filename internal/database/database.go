@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math/rand"
+	"strings"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -15,11 +16,85 @@ import (
 )
 
 type Database struct {
-	UniqueRunKey string
-	Client       *redis.Client
+	UniqueRunKey       string
+	Client             *redis.Client
+	MaxRetries         int
+	RetryDelay         time.Duration
+	RetryBackoffFactor float64
+}
+
+// isRetriableError determines if an error is worth retrying
+func isRetriableError(err error) bool {
+	if err == nil {
+		return false
+	}
+	errStr := strings.ToLower(err.Error())
+	// Common retriable errors for Redis connections
+	return strings.Contains(errStr, "timeout") ||
+		strings.Contains(errStr, "connection refused") ||
+		strings.Contains(errStr, "connection reset") ||
+		strings.Contains(errStr, "no route to host") ||
+		strings.Contains(errStr, "network is unreachable") ||
+		strings.Contains(errStr, "broken pipe") ||
+		strings.Contains(errStr, "dial tcp") ||
+		strings.Contains(errStr, "i/o timeout")
+}
+
+// retryOperation performs an operation with retry logic
+func (db *Database) retryOperation(ctx context.Context, operationName string, operation func() error) error {
+	var lastErr error
+	for attempt := 0; attempt <= db.MaxRetries; attempt++ {
+		if attempt > 0 {
+			// Calculate delay with exponential backoff
+			delay := time.Duration(float64(db.RetryDelay) * float64(attempt) * db.RetryBackoffFactor)
+			logging.Debug(ctx, fmt.Sprintf("retrying %s in %v (attempt %d/%d)", operationName, delay, attempt, db.MaxRetries))
+
+			select {
+			case <-ctx.Done():
+				return fmt.Errorf("context canceled during retry for %s: %w", operationName, ctx.Err())
+			case <-time.After(delay):
+				// Continue with retry
+			}
+		}
+
+		lastErr = operation()
+		if lastErr == nil {
+			if attempt > 0 {
+				logging.Info(ctx, fmt.Sprintf("%s succeeded after %d retries", operationName, attempt))
+			}
+			return nil
+		}
+
+		if !isRetriableError(lastErr) {
+			// logging.Debug(ctx, fmt.Sprintf("%s failed with non-retriable error: %v", operationName, lastErr))
+			return lastErr
+		}
+
+		if attempt < db.MaxRetries {
+			logging.Debug(ctx, fmt.Sprintf("%s failed (attempt %d/%d): %v", operationName, attempt+1, db.MaxRetries+1, lastErr))
+		}
+	}
+
+	return fmt.Errorf("%s failed after %d retries: %w", operationName, db.MaxRetries, lastErr)
 }
 
 func NewClient(ctx context.Context, config config.Database) (*Database, error) {
+	// Set default retry configuration if not specified
+	maxRetries := config.MaxRetries
+	if maxRetries == 0 {
+		maxRetries = 5 // Default to 5 retries
+	}
+
+	retryDelay := time.Duration(config.RetryDelay) * time.Millisecond
+	if retryDelay == 0 {
+		retryDelay = 1000 * time.Millisecond // Default to 1 second
+	}
+
+	retryBackoffFactor := config.RetryBackoffFactor
+	if retryBackoffFactor == 0 {
+		retryBackoffFactor = 2.0 // Default to 2x backoff
+	}
+
 	rdb := redis.NewClient(&redis.Options{
 		Addr:     fmt.Sprintf("%s:%d", config.URL, config.Port),
 		Username: config.User,
@@ -28,25 +103,39 @@ func NewClient(ctx context.Context, config config.Database) (*Database, error) {
 	})
 	logging.Dev(ctx, fmt.Sprintf("created redis client: %v", rdb))
 
-	logging.Dev(ctx, "pinging redis client")
-	ping := rdb.Ping(ctx)
-	if ping.Err() != nil && ping.Err().Error() != "" {
-		return nil, errors.New("error pinging redis client: " + ping.Err().Error())
+	// Create Database instance with retry configuration
+	db := &Database{
+		Client:             rdb,
+		MaxRetries:         maxRetries,
+		RetryDelay:         retryDelay,
+		RetryBackoffFactor: retryBackoffFactor,
 	}
-	pong, err := ping.Result()
+
+	// Test connection with retry logic
+	err := db.retryOperation(ctx, "initial connection ping", func() error {
+		logging.Dev(ctx, "pinging redis client")
+		ping := rdb.Ping(ctx)
+		if ping.Err() != nil && ping.Err().Error() != "" {
+			return fmt.Errorf("error pinging redis client: %s", ping.Err().Error())
+		}
+		pong, err := ping.Result()
+		if err != nil {
+			return err
+		}
+
+		logging.Dev(ctx, fmt.Sprintf("pinged redis client: %s", pong))
+
+		if pong != "PONG" {
+			return fmt.Errorf("unable to connect to Redis, received: %s", pong)
+		}
+		return nil
+	})
+
 	if err != nil {
 		return nil, err
 	}
 
-	logging.Dev(ctx, fmt.Sprintf("pinged redis client: %s", pong))
-
-	if pong != "PONG" {
-		return nil, fmt.Errorf("unable to connect to Redis, received: %s", pong)
-	}
-
-	return &Database{
-		Client: rdb,
-	}, nil
+	return db, nil
 }
 
 func GetDatabaseFromContext(ctx context.Context) (*Database, error) {
@@ -73,7 +162,15 @@ func RemoveUniqueKeyFromDB(ctx context.Context) (context.Context, error) {
 		return ctx, fmt.Errorf("database not found in context")
 	}
 	// we don't use ctx for the database deletion so we avoid getting the cancelled context state, which fails when Del runs
-	deletion, err := database.Client.Del(context.Background(), database.UniqueRunKey).Result()
+	var deletion int64
+	err := database.retryOperation(context.Background(), "delete unique key", func() error {
+		result, err := database.RetryDel(context.Background(), database.UniqueRunKey)
+		if err != nil {
+			return err
+		}
+		deletion = result
+		return nil
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -94,7 +191,16 @@ func CheckIfKeyExists(ctx context.Context, key string) (bool, error) {
 	r := rand.New(src)
 	randomSleep := time.Duration(r.Intn(100)) * time.Millisecond
 	time.Sleep(randomSleep)
-	exists, err := database.Client.Exists(ctx, key).Result()
+
+	var exists int64
+	err = database.retryOperation(ctx, "check key exists", func() error {
+		result, err := database.RetryExists(ctx, key)
+		if err != nil {
+			return err
+		}
+		exists = result
+		return nil
+	})
 	if err != nil {
 		return false, err
 	}
@@ -114,13 +220,215 @@ func AddUniqueRunKey(ctx context.Context) (bool, error) {
 		return false, err
 	}
 	if !exists {
-		setting := database.Client.Set(ctx, database.UniqueRunKey, "true", 0)
-		if setting.Err() != nil {
-			return false, setting.Err()
+		err = database.retryOperation(ctx, "set unique key", func() error {
+			return database.RetrySet(ctx, database.UniqueRunKey, "true", 0)
+		})
+		if err != nil {
+			return false, err
 		}
 		return true, nil
 	}
 	return true, errors.New("unique run key already exists")
+}
+
+// Retry wrapper methods for common Redis operations
+
+// RetryGet performs a GET operation with retry logic
+func (db *Database) RetryGet(ctx context.Context, key string) (string, error) {
+	var result string
+	err := db.retryOperation(ctx, "get key", func() error {
+		val, err := db.Client.Get(ctx, key).Result()
+		if err != nil {
+			return err
+		}
+		result = val
+		return nil
+	})
+	return result, err
+}
+
+// RetrySet performs a SET operation with retry logic
+func (db *Database) RetrySet(ctx context.Context, key string, value any, expiration time.Duration) error {
+	return db.retryOperation(ctx, "set key", func() error {
+		return db.Client.Set(ctx, key, value, expiration).Err()
+	})
+}
+
+// RetryDel performs a DEL operation with retry logic
+func (db *Database) RetryDel(ctx context.Context, keys ...string) (int64, error) {
+	var result int64
+	err := db.retryOperation(ctx, "delete keys", func() error {
+		val, err := db.Client.Del(ctx, keys...).Result()
+		if err != nil {
+			return err
+		}
+		result = val
+		return nil
+	})
+	return result, err
+}
+
+// RetryExists performs an EXISTS operation with retry logic
+func (db *Database) RetryExists(ctx context.Context, keys ...string) (int64, error) {
+	var result int64
+	err := db.retryOperation(ctx, "check exists", func() error {
+		val, err := db.Client.Exists(ctx, keys...).Result()
+		if err != nil {
+			return err
+		}
+		result = val
+		return nil
+	})
+	return result, err
+}
+
+// RetryLPush performs an LPUSH operation with retry logic
+func (db *Database) RetryLPush(ctx context.Context, key string, values ...any) (int64, error) {
+	var result int64
+	err := db.retryOperation(ctx, "list push", func() error {
+		val, err := db.Client.LPush(ctx, key, values...).Result()
+		if err != nil {
+			return err
+		}
+		result = val
+		return nil
+	})
+	return result, err
+}
+
+// RetryRPush performs an RPUSH operation with retry logic
+func (db *Database) RetryRPush(ctx context.Context, key string, values ...any) (int64, error) {
+	var result int64
+	err := db.retryOperation(ctx, "list rpush", func() error {
+		val, err := db.Client.RPush(ctx, key, values...).Result()
+		if err != nil {
+			return err
+		}
+		result = val
+		return nil
+	})
+	return result, err
+}
+
+// RetryLRange performs an LRANGE operation with retry logic
+func (db *Database) RetryLRange(ctx context.Context, key string, start, stop int64) ([]string, error) {
+	var result []string
+	err := db.retryOperation(ctx, "list range", func() error {
+		val, err := db.Client.LRange(ctx, key, start, stop).Result()
+		if err != nil {
+			return err
+		}
+		result = val
+		return nil
+	})
+	return result, err
+}
+
+// RetryLRem performs an LREM operation with retry logic
+func (db *Database) RetryLRem(ctx context.Context, key string, count int64, value any) (int64, error) {
+	var result int64
+	err := db.retryOperation(ctx, "list remove", func() error {
+		val, err := db.Client.LRem(ctx, key, count, value).Result()
+		if err != nil {
+			return err
+		}
+		result = val
+		return nil
+	})
+	return result, err
+}
+
+// RetryLIndex performs an LINDEX operation with retry logic
+func (db *Database) RetryLIndex(ctx context.Context, key string, index int64) (string, error) {
+	var result string
+	err := db.retryOperation(ctx, "list index", func() error {
+		val, err := db.Client.LIndex(ctx, key, index).Result()
+		if err != nil {
+			return err
+		}
+		result = val
+		return nil
+	})
+	return result, err
+}
+
+// RetryLLen performs an LLEN operation with retry logic
+func (db *Database) RetryLLen(ctx context.Context, key string) (int64, error) {
+	var result int64
+	err := db.retryOperation(ctx, "list length", func() error {
+		val, err := db.Client.LLen(ctx, key).Result()
+		if err != nil {
+			return err
+		}
+		result = val
+		return nil
+	})
+	return result, err
+}
+
+// RetryRPopLPush performs an RPOPLPUSH operation with retry logic
+func (db *Database) RetryRPopLPush(ctx context.Context, source, destination string) (string, error) {
+	var result string
+	err := db.retryOperation(ctx, "rpop lpush", func() error {
+		val, err := db.Client.RPopLPush(ctx, source, destination).Result()
+		if err != nil {
+			return err
+		}
+		result = val
+		return nil
+	})
+	return result, err
+}
+
+// RetryRPop performs an RPOP operation with retry logic
+func (db *Database) RetryRPop(ctx context.Context, key string) (string, error) {
+	var result string
+	err := db.retryOperation(ctx, "rpop", func() error {
+		val, err := db.Client.RPop(ctx, key).Result()
+		if err != nil {
+			return err
+		}
+		result = val
+		return nil
+	})
+	return result, err
+}
+
+// RetryKeys performs a KEYS operation with retry logic
+func (db *Database) RetryKeys(ctx context.Context, pattern string) ([]string, error) {
+	var result []string
+	err := db.retryOperation(ctx, "keys search", func() error {
+		val, err := db.Client.Keys(ctx, pattern).Result()
+		if err != nil {
+			return err
+		}
+		result = val
+		return nil
+	})
+	return result, err
+}
+
+// RetryScan performs a SCAN operation with retry logic
+func (db *Database) RetryScan(ctx context.Context, cursor uint64, match string, count int64) ([]string, uint64, error) {
+	var keys []string
+	var nextCursor uint64
+	err := db.retryOperation(ctx, "scan", func() error {
+		resultKeys, resultCursor, err := db.Client.Scan(ctx, cursor, match, count).Result()
+		if err != nil {
+			return err
+		}
+		keys = resultKeys
+		nextCursor = resultCursor
+		return nil
+	})
+	return keys, nextCursor, err
+}
+
+// RetryLSet performs an LSET operation with retry logic
+func (db *Database) RetryLSet(ctx context.Context, key string, index int64, value any) error {
+	return db.retryOperation(ctx, "list set", func() error {
+		return db.Client.LSet(ctx, key, index, value).Err()
+	})
 }
 
 func Unwrap[T any](payload string) (T, error, error) {

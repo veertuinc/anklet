@@ -137,7 +137,7 @@ func main() {
 		loadedConfig.WorkDir = "./"
 	}
 
-	// Handle setting defaults for receiver plugins
+	// Handle setting defaults
 	for index, plugin := range loadedConfig.Plugins {
 		if strings.Contains(plugin.Plugin, "_receiver") {
 			if plugin.RedeliverHours == 0 {
@@ -145,6 +145,11 @@ func main() {
 			}
 			if loadedConfig.GlobalReceiverSecret != "" {
 				loadedConfig.Plugins[index].Secret = loadedConfig.GlobalReceiverSecret
+			}
+		} else { // handlers and others
+			// Set default TemplateDiskBuffer if not specified
+			if plugin.TemplateDiskBuffer == 0 {
+				loadedConfig.Plugins[index].TemplateDiskBuffer = 10.0
 			}
 		}
 	}
@@ -199,12 +204,12 @@ func main() {
 	parentCtx = context.WithValue(parentCtx, config.ContextKey("globals"), &config.Globals{
 		RunPluginsOnce:       runOnce == "true",
 		ReturnAllToMainQueue: atomic.Bool{},
-		PullLock:             &sync.Mutex{},
 		PluginsPath:          pluginsPath,
 		DebugEnabled:         logging.IsDebugEnabled(),
 		HostCPUCount:         hostCPUCount,
 		HostMemoryBytes:      hostMemoryBytes,
 		QueueTargetIndex:     new(int64),
+		TemplateTracker:      config.NewTemplateTracker(),
 		Plugins: func() map[string]map[string]*config.PluginGlobal {
 			plugins := make(map[string]map[string]*config.PluginGlobal)
 			for _, p := range loadedConfig.Plugins {
@@ -509,6 +514,18 @@ func worker(
 					}
 					pluginCtx = context.WithValue(pluginCtx, config.ContextKey("ankacli"), ankaCLI)
 					logging.Dev(pluginCtx, "loaded the anka CLI")
+
+					// Discover and populate existing templates in the TemplateTracker
+					// This only needs to be done once per system, so we check if templates are already populated
+					if len(workerGlobals.TemplateTracker.Templates) == 0 {
+						logging.Dev(pluginCtx, "discovering existing templates on system")
+						err = ankaCLI.DiscoverAndPopulateExistingTemplates(pluginCtx, workerGlobals.TemplateTracker)
+						if err != nil {
+							logging.Warn(pluginCtx, "failed to discover existing templates", "error", err)
+							// Don't fail the plugin startup for this, just log the warning
+						}
+					}
+					logging.Debug(pluginCtx, "populated existing templates in TemplateTracker", "templates", workerGlobals.TemplateTracker.Templates)
 				}
 
 				var databaseURL = loadedConfig.GlobalDatabaseURL

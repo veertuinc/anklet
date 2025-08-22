@@ -886,9 +886,9 @@ func Cleanup(ctx context.Context, owner string, name string) {
 	if err != nil {
 		logging.Error(ctx, "error getting database client from context", "error", err.Error())
 	}
-	result := databaseContainer.Client.Del(context.Background(), "anklet/metrics/"+owner+"/"+name)
-	if result.Err() != nil {
-		logging.Error(ctx, "error deleting metrics data from Redis", "error", result.Err().Error())
+	_, result := databaseContainer.RetryDel(context.Background(), "anklet/metrics/"+owner+"/"+name)
+	if result != nil {
+		logging.Error(ctx, "error deleting metrics data from Redis", "error", result.Error())
 	}
 	// logging.Dev(ctx, "successfully deleted metrics data from Redis, key: anklet/metrics/"+owner+"/"+name)
 }
@@ -941,16 +941,16 @@ func ExportMetricsToDB(workerCtx context.Context, pluginCtx context.Context, key
 						continue
 					}
 					// This will create a single key using the first plugin's name. It will contain all plugin metrics though.
-					setting := databaseContainer.Client.Set(pluginCtx, metricsKey, metricsDataJson, time.Hour*24*7) // keep metrics for one week max
-					if setting.Err() != nil {
-						logging.Error(pluginCtx, "error storing metrics data in Redis", "error", setting.Err())
+					err = databaseContainer.RetrySet(pluginCtx, metricsKey, metricsDataJson, time.Hour*24*7) // keep metrics for one week max
+					if err != nil {
+						logging.Error(pluginCtx, "error storing metrics data in Redis", "error", err)
 						amountOfErrorsAllowed--
 						if amountOfErrorsAllowed == 0 {
 							os.Exit(1)
 						}
 						continue
 					}
-					_, err := databaseContainer.Client.Exists(pluginCtx, metricsKey).Result()
+					_, err = databaseContainer.RetryExists(pluginCtx, metricsKey)
 					if err != nil {
 						logging.Error(pluginCtx, "error checking if key exists in Redis", "key", metricsKey, "error", err)
 						amountOfErrorsAllowed--

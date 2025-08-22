@@ -125,7 +125,12 @@ It is also possible to use ENVs for several of the items in the config. They ove
 | ANKLET_GLOBAL_DATABASE_USER | User to use (ex: "") |
 | ANKLET_GLOBAL_DATABASE_PASSWORD | Password to use (ex: "") |
 | ANKLET_GLOBAL_DATABASE_DATABASE | Database to use (ex: 0) |
+| ANKLET_GLOBAL_DATABASE_MAX_RETRIES | Maximum number of retries for database operations (ex: 5) |
+| ANKLET_GLOBAL_DATABASE_RETRY_DELAY | Delay between retries for database operations (ex: 1000) |
+| ANKLET_GLOBAL_DATABASE_RETRY_BACKOFF_FACTOR | Backoff factor for database operations (ex: 2.0) |
 | ANKLET_GLOBAL_PRIVATE_KEY | Absolute path to private key for anklet (ex: /Users/myUser/.private-key.pem) |
+| ANKLET_GLOBAL_RECEIVER_SECRET | Secret to use for receiver plugin (ex: "my-secret") |
+| ANKLET_GLOBAL_TEMPLATE_DISK_BUFFER | Disk buffer (how much disk space to leave free on the host) percentage for templates (ex: 10.0 for 10%) |
 
 ### Database Setup
 

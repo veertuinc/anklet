@@ -33,6 +33,7 @@ go.releaser:
 
 #go.lint:		@ Run `golangci-lint run` against the current code
 go.lint:
+	go vet ./...
 	curl -L https://raw.githubusercontent.com/golangci/golangci-lint/HEAD/install.sh
 	curl -SfL https://raw.githubusercontent.com/golangci/golangci-lint/HEAD/install.sh | sh -s -- -b $(shell go env GOPATH)/bin v2.3.0
 	echo "golangci-lint run"
@@ -41,6 +42,22 @@ go.lint:
 go.test:
 	go mod tidy
 	# go test -v *
+
+#cross-compile-check:	@ Check compilation for all target platforms without building
+cross-compile-check:
+	@echo "Checking compilation for all target platforms..."
+	@echo "Using goreleaser to test all platform builds..."
+	goreleaser build --snapshot --clean --single-target=false --skip-validate
+	@echo "✅ All target platforms compile successfully via goreleaser"
+
+#quick-compile-check:	@ Quick check for obvious cross-platform issues
+quick-compile-check:
+	@echo "Quick cross-platform syntax check (individual packages)..."
+	@for pkg in $$(go list ./internal/... | grep -v internal/host); do \
+		echo "Checking $$pkg..."; \
+		GOOS=linux GOARCH=amd64 go build -o /dev/null $$pkg || exit 1; \
+	done
+	@echo "✅ Internal packages (except host) compile for Linux"
 
 install:
 	mkdir -p ~/bin
