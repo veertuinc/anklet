@@ -105,6 +105,7 @@ func watchJobStatus(
 	pluginQueueName string,
 	mainInProgressQueueName string,
 ) (context.Context, error) {
+	logging.Debug(pluginCtx, "starting watchForJobCompletion")
 	pluginGlobals, err := internalGithub.GetPluginGlobalsFromContext(pluginCtx)
 	if err != nil {
 		return pluginCtx, err
@@ -431,7 +432,7 @@ func checkForCompletedJobs(
 				job.Action = "canceled"
 				err = internalGithub.UpdateJobInDB(pluginCtx, pluginQueueName, &job)
 				if err != nil {
-					logging.Error(pluginCtx, "error updating job in db", "err", err)
+					logging.Error(pluginCtx, "error updating job in db (checkForCompletedJobs)", "err", err)
 				}
 			}
 		// case <-pluginCtx.Done():
@@ -2006,6 +2007,8 @@ func removeSelfHostedRunner(
 	if err != nil {
 		logging.Error(pluginCtx, "error getting job from queue", "err", err)
 	}
+
+	logging.Debug(pluginCtx, "running removeSelfHostedRunner")
 
 	// we don't use cancelled here since the registration will auto unregister after the job finishes
 	if (queuedJob.WorkflowJob.Conclusion != nil && *queuedJob.WorkflowJob.Conclusion == "failure") ||

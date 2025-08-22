@@ -41,7 +41,7 @@ func (cli *Cli) EnsureSpaceForTemplateOnDarwin(
 	// Get the configured disk buffer percentage
 	bufferPercentage, err := config.GetEffectiveTemplateDiskBuffer(pluginCtx)
 	if err != nil {
-		// bufferPercentage = 10.0
+		return fmt.Errorf("unable to get effective template disk buffer: %w", err)
 	}
 
 	// Check if we have enough space (leave configured buffer)
@@ -94,6 +94,8 @@ func (cli *Cli) EnsureSpaceForTemplateOnDarwin(
 			"size", templateUsage.ImageSize,
 			"lastUsed", templateUsage.LastUsed,
 			"usageCount", templateUsage.UsageCount)
+
+		panic("test")
 
 		err := cli.AnkaDeleteTemplate(pluginCtx, templateUsage.Template, templateUsage.Tag)
 		if err != nil {

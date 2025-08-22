@@ -417,7 +417,6 @@ func (cli *Cli) getTemplateSizeFromFilesystem(pluginCtx context.Context, templat
 // AnkaDeleteTemplate deletes a template from the host
 func (cli *Cli) AnkaDeleteTemplate(pluginCtx context.Context, template, tag string) error {
 	logging.Info(pluginCtx, "deleting template from host", "template", template, "tag", tag)
-
 	var args []string
 	if tag != "(using latest)" {
 		args = []string{"anka", "-j", "delete", "--yes", template, "--tag", tag}
