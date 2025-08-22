@@ -1,22 +1,31 @@
 # ANKLET
 
-Inspired by our customer requirements, **Anklet** is a solution created to meet the specific needs of our users.
+Inspired by our customer requirements, **Anklet** is a solution created to meet the specific on-demand and ephemeral macoS VM automation needs of our users, no matter what CI platform or tool they use.
 
-## At a glance
+## High Level Overview
 
-- Veertu's Anklet is a service that runs custom [plugins](./plugins) to communicate with your CI platform and the Anka CLI running on macOS hosts.
-- It can run multiple plugins, in parallel, on the same host.
-- Depending on the plugin, it can run on both linux containers/instances and macOS hosts. Plugins using the Anka CLI to spin up macOS VMs would need to run on a macOS host.
+Veertu's Anklet is a tool that runs custom [plugins](./plugins) to communicate with your CI platform/tools and the Anka CLI running on macOS hosts.
+
+Depending on the plugin, generally you'll create a cluster with:
+
+1. One linux container running Anklet + a **[Receiver](./plugins/receivers)** plugin.
+2. One or more macOS hosts that have the Anka CLI installed and are running Anklet + a **[Handler](./plugins/handlers)** plugin. Note: Each Anklet can run multiple plugins in parallel on the same host. This means you can service multiple CI platforms/tools on the same macOS hosts or just run multiple VMs on the same host for the same tool.
+
+The **Receiver** is responsible for listening for events from your CI platform/tool and placing them in a queue (redis DB).
+
+The **Handler** is responsible for pulling jobs from the queue, preparing a macOS VM, and registering the VM to the CI platform/tool so it can execute the job inside.
+
+Optionally, you can run a **Metrics Aggregator** to collect metrics from the DB and serve them up in a single endpoint.
 
 ## Why Anklet?
 
 Here are a few needs our customers expressed so you can understand the motivation for Anklet:
 
-1. Each team and repository should not have knowledge of the Anka Build Cloud Controller URL, potential auth methods, Anka Node Groups, etc. These are all things that had to be set in the job yaml for our older github actions solution. This should be abstracted away for security and simplicity of use.
-2. Developer CI workflow files cannot have multiple stages (start -> the actual job that runs in the VM -> a cleanup step) just to run a single Anka VM... that's just too much overhead to ask developers to manage. Instead, something should spin up the VM behind the scenes, register the runner, and then execute the job inside the VM directly.
-3. They don't want the job to be responsible for cleaning up the VM + registered runner either. Something should watch the status of the job and clean up the VM when it's complete.
+1. Each team, repository, and CI platform should not have knowledge of the Anka Build Cloud Controller URL, potential auth methods, etc. These are all things that had to be set in the job yaml for our older, for example, Github Actions solution. This should be abstracted away for security and simplicity of use.
+2. Teams should have minimal definition necessary and just expect their jobs to run inside of a macOS VM. Developer CI workflow files cannot have multiple stages (start -> the actual job that runs in the VM -> a cleanup step) just to run a single Anka VM... That's just too much overhead to ask developers to manage! Instead, something should spin up the VM behind the scenes, register the runner, and then execute the job inside the VM directly.
+3. In the same vein, the job that runs in the CI tool should not be responsible for cleaning up the VM or registered runner either. Something else should watch the status of the job and clean up the VM when it's complete. Developers don't want to be responsible for this.
 
-While these reasons are specific to Github Actions, they apply to many other CI platforms too. Let's get started!
+While these reasons are specific to Github Actions, they apply to many other CI platforms too.
 
 ---
 
