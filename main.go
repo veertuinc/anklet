@@ -205,6 +205,7 @@ func main() {
 		HostCPUCount:         hostCPUCount,
 		HostMemoryBytes:      hostMemoryBytes,
 		QueueTargetIndex:     new(int64),
+		TemplateTracker:      config.NewTemplateTracker(),
 		Plugins: func() map[string]map[string]*config.PluginGlobal {
 			plugins := make(map[string]map[string]*config.PluginGlobal)
 			for _, p := range loadedConfig.Plugins {

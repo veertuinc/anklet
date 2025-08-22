@@ -1730,6 +1730,11 @@ func Run(
 		if templateExistsError != nil {
 			// DO NOT RETURN AN ERROR TO MAIN. It will cause the other job on this node to be cancelled.
 			logging.Warn(pluginCtx, "problem ensuring vm template exists on host", "err", templateExistsError)
+			// Check if this is a space-related error that won't resolve on retry
+			if strings.Contains(templateExistsError.Error(), "insufficient space on host even after cleanup") {
+				logging.Info(pluginCtx, "incrementing queue target index due to insufficient disk space")
+				workerGlobals.IncrementQueueTargetIndex() // prevent trying to run this job again on this host
+			}
 			pluginGlobals.RetryChannel <- "problem_ensuring_vm_template_exists_on_host" // return to queue so another node can pick it up
 			return pluginCtx, nil
 		}
