@@ -120,13 +120,13 @@ func (s *Server) handleAggregatorJsonMetricsV1(
 				logger.ErrorContext(workerCtx, "error getting database client from context", "error", err)
 				break
 			}
-			keys, nextCursor, err := databaseContainer.Client.Scan(workerCtx, cursor, match, 10).Result()
+			keys, nextCursor, err := databaseContainer.RetryScan(workerCtx, cursor, match, 10)
 			if err != nil {
 				logger.ErrorContext(workerCtx, "error scanning database for metrics", "error", err)
 				break
 			}
 			for _, key := range keys {
-				value, err := databaseContainer.Client.Get(workerCtx, key).Result()
+				value, err := databaseContainer.RetryGet(workerCtx, key)
 				if err != nil {
 					logger.ErrorContext(workerCtx, "error getting value from Redis", "key", key, "error", err)
 					return
@@ -154,7 +154,7 @@ func (s *Server) handleAggregatorJsonMetricsV1(
 					var totalSuccessfulRunsSinceStart int
 					var totalFailedRunsSinceStart int
 					var totalCanceledRunsSinceStart int
-					pluginMap, ok := plugin.(map[string]interface{})
+					pluginMap, ok := plugin.(map[string]any)
 					if !ok {
 						logger.ErrorContext(workerCtx, "error asserting plugin to map", "plugin", plugin)
 						return
@@ -269,13 +269,13 @@ func (s *Server) handleAggregatorJsonMetricsV2(
 				logger.ErrorContext(workerCtx, "error getting database client from context", "error", err)
 				break
 			}
-			keys, nextCursor, err := databaseContainer.Client.Scan(workerCtx, cursor, match, 10).Result()
+			keys, nextCursor, err := databaseContainer.RetryScan(workerCtx, cursor, match, 10)
 			if err != nil {
 				logger.ErrorContext(workerCtx, "error scanning database for metrics", "error", err)
 				break
 			}
 			for _, key := range keys {
-				value, err := databaseContainer.Client.Get(workerCtx, key).Result()
+				value, err := databaseContainer.RetryGet(workerCtx, key)
 				if err != nil {
 					logger.ErrorContext(workerCtx, "error getting value from Redis", "key", key, "error", err)
 					return
@@ -303,7 +303,7 @@ func (s *Server) handleAggregatorJsonMetricsV2(
 					var totalSuccessfulRunsSinceStart int
 					var totalFailedRunsSinceStart int
 					var totalCanceledRunsSinceStart int
-					pluginMap, ok := plugin.(map[string]interface{})
+					pluginMap, ok := plugin.(map[string]any)
 					if !ok {
 						logger.ErrorContext(workerCtx, "error asserting plugin to map", "plugin", plugin)
 						return
@@ -416,13 +416,13 @@ func (s *Server) handleAggregatorPrometheusMetrics(
 				logger.ErrorContext(workerCtx, "error getting database client from context", "error", err)
 				break
 			}
-			keys, nextCursor, err := databaseContainer.Client.Scan(workerCtx, cursor, match, 10).Result()
+			keys, nextCursor, err := databaseContainer.RetryScan(workerCtx, cursor, match, 10)
 			if err != nil {
 				logger.ErrorContext(workerCtx, "error scanning database for metrics", "error", err)
 				break
 			}
 			for _, key := range keys {
-				value, err := databaseContainer.Client.Get(workerCtx, key).Result()
+				value, err := databaseContainer.RetryGet(workerCtx, key)
 				if err != nil {
 					logger.ErrorContext(workerCtx, "error getting value from Redis", "key", key, "error", err)
 					return
@@ -451,7 +451,7 @@ func (s *Server) handleAggregatorPrometheusMetrics(
 					var totalSuccessfulRunsSinceStart int
 					var totalFailedRunsSinceStart int
 					var totalCanceledRunsSinceStart int
-					pluginMap, ok := plugin.(map[string]interface{})
+					pluginMap, ok := plugin.(map[string]any)
 					if !ok {
 						logger.ErrorContext(workerCtx, "error asserting plugin to map", "plugin", plugin)
 						return

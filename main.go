@@ -199,12 +199,12 @@ func main() {
 	parentCtx = context.WithValue(parentCtx, config.ContextKey("globals"), &config.Globals{
 		RunPluginsOnce:       runOnce == "true",
 		ReturnAllToMainQueue: atomic.Bool{},
-		PullLock:             &sync.Mutex{},
 		PluginsPath:          pluginsPath,
 		DebugEnabled:         logging.IsDebugEnabled(),
 		HostCPUCount:         hostCPUCount,
 		HostMemoryBytes:      hostMemoryBytes,
 		QueueTargetIndex:     new(int64),
+		TemplateTracker:      config.NewTemplateTracker(),
 		Plugins: func() map[string]map[string]*config.PluginGlobal {
 			plugins := make(map[string]map[string]*config.PluginGlobal)
 			for _, p := range loadedConfig.Plugins {

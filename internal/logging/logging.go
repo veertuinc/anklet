@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"runtime"
 	"strings"
 
 	"github.com/veertuinc/anklet/internal/config"
@@ -25,6 +26,27 @@ func IsDebugEnabled() bool {
 	return strings.ToUpper(os.Getenv("LOG_LEVEL")) == "DEBUG" || strings.ToUpper(os.Getenv("LOG_LEVEL")) == "DEV"
 }
 
+// getCallerSource returns the source information for the actual caller,
+// skipping the logging wrapper functions
+func getCallerSource(skip int) *slog.Source {
+	pc, file, line, ok := runtime.Caller(skip)
+	if !ok {
+		return nil
+	}
+
+	fn := runtime.FuncForPC(pc)
+	var name string
+	if fn != nil {
+		name = fn.Name()
+	}
+
+	return &slog.Source{
+		Function: name,
+		File:     file,
+		Line:     line,
+	}
+}
+
 func New() *slog.Logger {
 	logLevel := os.Getenv("LOG_LEVEL")
 	var options *slog.HandlerOptions
@@ -32,7 +54,7 @@ func New() *slog.Logger {
 		// DEBUG uses pretty handler for development readability
 		handler := &ContextHandler{Handler: NewPrettyHandler(&slog.HandlerOptions{
 			Level:       slog.LevelDebug,
-			AddSource:   true,
+			AddSource:   false, // We handle source manually
 			ReplaceAttr: nil,
 		})}
 		return slog.New(handler)
@@ -40,7 +62,7 @@ func New() *slog.Logger {
 		// DEV uses JSON handler for pure JSON output
 		options = &slog.HandlerOptions{
 			Level:     slog.LevelDebug,
-			AddSource: true,
+			AddSource: false, // We handle source manually
 		}
 	} else if strings.ToUpper(logLevel) == "ERROR" {
 		options = &slog.HandlerOptions{Level: slog.LevelError}
@@ -159,6 +181,12 @@ func Info(ctx context.Context, message string, args ...any) {
 		panic(err)
 	}
 	pluginCtx := AppendCurrentPluginAttributes(ctx)
+
+	// Add source information for the actual caller (skip 2: runtime.Caller, this function)
+	if source := getCallerSource(2); source != nil {
+		args = append(args, slog.Any("source", source))
+	}
+
 	logger.InfoContext(pluginCtx, message, args...)
 }
 
@@ -169,6 +197,12 @@ func Dev(ctx context.Context, message string, args ...any) {
 			panic(err)
 		}
 		pluginCtx := AppendCurrentPluginAttributes(ctx)
+
+		// Add source information for the actual caller (skip 2: runtime.Caller, this function)
+		if source := getCallerSource(2); source != nil {
+			args = append(args, slog.Any("source", source))
+		}
+
 		logger.DebugContext(pluginCtx, message, args...)
 	}
 }
@@ -179,6 +213,12 @@ func Debug(ctx context.Context, message string, args ...any) {
 		panic(err)
 	}
 	pluginCtx := AppendCurrentPluginAttributes(ctx)
+
+	// Add source information for the actual caller (skip 2: runtime.Caller, this function)
+	if source := getCallerSource(2); source != nil {
+		args = append(args, slog.Any("source", source))
+	}
+
 	logger.DebugContext(pluginCtx, message, args...)
 }
 
@@ -188,6 +228,12 @@ func Warn(ctx context.Context, message string, args ...any) {
 		panic(err)
 	}
 	pluginCtx := AppendCurrentPluginAttributes(ctx)
+
+	// Add source information for the actual caller (skip 2: runtime.Caller, this function)
+	if source := getCallerSource(2); source != nil {
+		args = append(args, slog.Any("source", source))
+	}
+
 	logger.WarnContext(pluginCtx, message, args...)
 }
 
@@ -197,5 +243,11 @@ func Error(ctx context.Context, message string, args ...any) {
 		panic(err)
 	}
 	pluginCtx := AppendCurrentPluginAttributes(ctx)
+
+	// Add source information for the actual caller (skip 2: runtime.Caller, this function)
+	if source := getCallerSource(2); source != nil {
+		args = append(args, slog.Any("source", source))
+	}
+
 	logger.ErrorContext(pluginCtx, message, args...)
 }

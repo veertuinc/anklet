@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"context"
 
@@ -15,20 +16,24 @@ import (
 type ContextKey string
 
 type Config struct {
-	Plugins                []Plugin `yaml:"plugins"`
-	Log                    Log      `yaml:"log"`
-	PidFileDir             string   `yaml:"pid_file_dir"`
-	LogFileDir             string   `yaml:"log_file_dir"`
-	WorkDir                string   `yaml:"work_dir"`
-	Metrics                Metrics  `yaml:"metrics"`
-	GlobalPrivateKey       string   `yaml:"global_private_key"`
-	PluginsPath            string   `yaml:"plugins_path"`
-	GlobalDatabaseURL      string   `yaml:"global_database_url"`
-	GlobalDatabasePort     int      `yaml:"global_database_port"`
-	GlobalDatabaseUser     string   `yaml:"global_database_user"`
-	GlobalDatabasePassword string   `yaml:"global_database_password"`
-	GlobalDatabaseDatabase int      `yaml:"global_database_database"`
-	GlobalReceiverSecret   string   `yaml:"global_receiver_secret"`
+	Plugins                          []Plugin `yaml:"plugins"`
+	Log                              Log      `yaml:"log"`
+	PidFileDir                       string   `yaml:"pid_file_dir"`
+	LogFileDir                       string   `yaml:"log_file_dir"`
+	WorkDir                          string   `yaml:"work_dir"`
+	Metrics                          Metrics  `yaml:"metrics"`
+	GlobalPrivateKey                 string   `yaml:"global_private_key"`
+	PluginsPath                      string   `yaml:"plugins_path"`
+	GlobalDatabaseURL                string   `yaml:"global_database_url"`
+	GlobalDatabasePort               int      `yaml:"global_database_port"`
+	GlobalDatabaseUser               string   `yaml:"global_database_user"`
+	GlobalDatabasePassword           string   `yaml:"global_database_password"`
+	GlobalDatabaseDatabase           int      `yaml:"global_database_database"`
+	GlobalDatabaseMaxRetries         int      `yaml:"global_database_max_retries"`
+	GlobalDatabaseRetryDelay         int      `yaml:"global_database_retry_delay"`
+	GlobalDatabaseRetryBackoffFactor float64  `yaml:"global_database_retry_backoff_factor"`
+	GlobalReceiverSecret             string   `yaml:"global_receiver_secret"`
+	GlobalTemplateDiskBuffer         float64  `yaml:"global_template_disk_buffer"` // Global disk buffer percentage (e.g., 10.0 for 10%)
 }
 
 type Log struct {
@@ -45,11 +50,14 @@ type Metrics struct {
 }
 
 type Database struct {
-	URL      string `yaml:"url"`
-	Port     int    `yaml:"port"`
-	User     string `yaml:"user"`
-	Password string `yaml:"password"`
-	Database int    `yaml:"database"`
+	URL                string  `yaml:"url"`
+	Port               int     `yaml:"port"`
+	User               string  `yaml:"user"`
+	Password           string  `yaml:"password"`
+	Database           int     `yaml:"database"`
+	MaxRetries         int     `yaml:"max_retries"`          // Maximum number of retry attempts (default: 3)
+	RetryDelay         int     `yaml:"retry_delay"`          // Initial retry delay in milliseconds (default: 1000)
+	RetryBackoffFactor float64 `yaml:"retry_backoff_factor"` // Backoff multiplier for retry delay (default: 2.0)
 }
 
 type Workflow struct {
@@ -78,6 +86,7 @@ type Plugin struct {
 	RunnerGroup                string   `yaml:"runner_group"`
 	RedeliverHours             int      `yaml:"redeliver_hours"`
 	RegistrationTimeoutSeconds int      `yaml:"registration_timeout_seconds"`
+	TemplateDiskBuffer         float64  `yaml:"template_disk_buffer"` // Plugin-specific disk buffer percentage (e.g., 10.0 for 10%)
 }
 
 func LoadConfig(configPath string) (Config, error) {
@@ -189,6 +198,15 @@ func LoadInEnvs(config Config) (Config, error) {
 		config.GlobalReceiverSecret = envGlobalReceiverSecret
 	}
 
+	envGlobalTemplateDiskBuffer := os.Getenv("ANKLET_GLOBAL_TEMPLATE_DISK_BUFFER")
+	if envGlobalTemplateDiskBuffer != "" {
+		buffer, err := strconv.ParseFloat(envGlobalTemplateDiskBuffer, 64)
+		if err != nil {
+			return Config{}, err
+		}
+		config.GlobalTemplateDiskBuffer = buffer
+	}
+
 	// pidFileDir := os.Getenv("ANKLET_PID_FILE_DIR")
 	// if pidFileDir != "" {
 	// 	config.PidFileDir = pidFileDir
@@ -208,6 +226,34 @@ func GetPluginFromContext(ctx context.Context) (Plugin, error) {
 	return plugin, nil
 }
 
+// GetEffectiveTemplateDiskBuffer returns the effective template disk buffer percentage
+// Uses plugin-specific value if set, otherwise falls back to global value, otherwise defaults to 10.0%
+func GetEffectiveTemplateDiskBuffer(ctx context.Context) (float64, error) {
+	plugin, err := GetPluginFromContext(ctx)
+	if err != nil {
+		return 0, err
+	}
+
+	// Use plugin-specific buffer if set
+	if plugin.TemplateDiskBuffer > 0 {
+		return plugin.TemplateDiskBuffer, nil
+	}
+
+	// Fall back to global config
+	config, err := GetLoadedConfigFromContext(ctx)
+	if err != nil {
+		return 0, err
+	}
+
+	// Use global buffer if set
+	if config.GlobalTemplateDiskBuffer > 0 {
+		return config.GlobalTemplateDiskBuffer, nil
+	}
+
+	// Default to 10% if nothing is configured
+	return 10.0, nil
+}
+
 type PluginGlobal struct {
 	PluginRunCount     atomic.Uint64
 	Preparing          atomic.Bool
@@ -215,11 +261,27 @@ type PluginGlobal struct {
 	Paused             atomic.Bool
 }
 
+// TemplateUsage tracks usage statistics for a template/tag combination
+type TemplateUsage struct {
+	Template   string    `json:"template"`
+	Tag        string    `json:"tag"`
+	ImageSize  uint64    `json:"image_size"` // Template actual disk usage
+	LastUsed   time.Time `json:"last_used"`
+	UsageCount uint64    `json:"usage_count"`
+	InUse      bool      `json:"in_use"`  // Currently being used by a running VM
+	Pulling    bool      `json:"pulling"` // Currently being pulled
+}
+
+// TemplateTracker manages template usage across all plugins
+type TemplateTracker struct {
+	Templates map[string]*TemplateUsage // key: template:tag
+	Mutex     *sync.RWMutex
+}
+
 type Globals struct {
 	RunPluginsOnce bool
 	// block the second plugin until the first plugin is done
 	ReturnAllToMainQueue atomic.Bool
-	PullLock             *sync.Mutex
 	PluginsPath          string
 	DebugEnabled         bool
 	// block other plugins from running until the currently running
@@ -229,7 +291,8 @@ type Globals struct {
 	QueueTargetIndex *int64
 	// We want each plugin to run at least once so that any VMs/jobs that were orphaned
 	// on this host get a chance to be cleaned or continue where they left off
-	Plugins map[string]map[string]*PluginGlobal
+	Plugins         map[string]map[string]*PluginGlobal
+	TemplateTracker *TemplateTracker // Track template usage for LRU cleanup
 }
 
 // GetPluginRunCount returns the current value of the shared plugin run counter
@@ -282,6 +345,153 @@ func (g *Globals) DecrementQueueTargetIndex() {
 
 func (g *Globals) ResetQueueTargetIndex() {
 	*g.QueueTargetIndex = 0
+}
+
+// NewTemplateTracker creates a new template tracker
+func NewTemplateTracker() *TemplateTracker {
+	return &TemplateTracker{
+		Templates: make(map[string]*TemplateUsage),
+		Mutex:     &sync.RWMutex{},
+	}
+}
+
+// GetTemplateKey returns the key for a template:tag combination
+func (tt *TemplateTracker) GetTemplateKey(template, tag string) string {
+	return fmt.Sprintf("%s:%s", template, tag)
+}
+
+// UpdateTemplateUsage updates the usage statistics for a template
+func (tt *TemplateTracker) UpdateTemplateUsage(template, tag string, sizeBytes uint64) {
+	tt.Mutex.Lock()
+	defer tt.Mutex.Unlock()
+
+	key := tt.GetTemplateKey(template, tag)
+	if usage, exists := tt.Templates[key]; exists {
+		usage.LastUsed = time.Now()
+		usage.UsageCount++
+		if sizeBytes > 0 {
+			usage.ImageSize = sizeBytes
+		}
+	} else {
+		tt.Templates[key] = &TemplateUsage{
+			Template:   template,
+			Tag:        tag,
+			ImageSize:  sizeBytes,
+			LastUsed:   time.Now(),
+			UsageCount: 1,
+			InUse:      false,
+			Pulling:    false,
+		}
+	}
+}
+
+// SetTemplateInUse marks a template as in use or not in use
+func (tt *TemplateTracker) SetTemplateInUse(template, tag string, inUse bool) {
+	tt.Mutex.Lock()
+	defer tt.Mutex.Unlock()
+
+	key := tt.GetTemplateKey(template, tag)
+	if usage, exists := tt.Templates[key]; exists {
+		usage.InUse = inUse
+	}
+}
+
+// SetTemplatePulling marks a template as being pulled or not
+func (tt *TemplateTracker) SetTemplatePulling(template, tag string, pulling bool) {
+	tt.Mutex.Lock()
+	defer tt.Mutex.Unlock()
+
+	key := tt.GetTemplateKey(template, tag)
+	if usage, exists := tt.Templates[key]; exists {
+		usage.Pulling = pulling
+	} else if pulling {
+		// Create entry for template being pulled
+		tt.Templates[key] = &TemplateUsage{
+			Template:   template,
+			Tag:        tag,
+			ImageSize:  0, // Will be updated after pull
+			LastUsed:   time.Now(),
+			UsageCount: 0,
+			InUse:      false,
+			Pulling:    true,
+		}
+	}
+}
+
+// GetLeastRecentlyUsedTemplates returns templates sorted by usage (LRU first)
+func (tt *TemplateTracker) GetLeastRecentlyUsedTemplates() []*TemplateUsage {
+	tt.Mutex.RLock()
+	defer tt.Mutex.RUnlock()
+
+	var templates []*TemplateUsage
+	for _, usage := range tt.Templates {
+		// Don't include templates that are currently in use or being pulled
+		if !usage.InUse && !usage.Pulling {
+			templates = append(templates, usage)
+		}
+	}
+
+	// Sort by usage count (ascending), then by last used time (ascending)
+	// This prioritizes templates that are used less frequently and haven't been used recently
+	for i := 0; i < len(templates)-1; i++ {
+		for j := i + 1; j < len(templates); j++ {
+			// First sort by usage count
+			if templates[i].UsageCount > templates[j].UsageCount {
+				templates[i], templates[j] = templates[j], templates[i]
+			} else if templates[i].UsageCount == templates[j].UsageCount {
+				// If usage count is the same, sort by last used time
+				if templates[i].LastUsed.After(templates[j].LastUsed) {
+					templates[i], templates[j] = templates[j], templates[i]
+				}
+			}
+		}
+	}
+
+	return templates
+}
+
+// GetTotalTemplateSize returns the total size of all templates
+func (tt *TemplateTracker) GetTotalTemplateSize() uint64 {
+	tt.Mutex.RLock()
+	defer tt.Mutex.RUnlock()
+
+	var totalSize uint64
+	for _, usage := range tt.Templates {
+		totalSize += usage.ImageSize
+	}
+	return totalSize
+}
+
+// RemoveTemplate removes a template from tracking
+func (tt *TemplateTracker) RemoveTemplate(template, tag string) {
+	tt.Mutex.Lock()
+	defer tt.Mutex.Unlock()
+
+	key := tt.GetTemplateKey(template, tag)
+	delete(tt.Templates, key)
+}
+
+// GetTemplateUsage returns the usage info for a specific template
+func (tt *TemplateTracker) GetTemplateUsage(template, tag string) (*TemplateUsage, bool) {
+	tt.Mutex.RLock()
+	defer tt.Mutex.RUnlock()
+
+	key := tt.GetTemplateKey(template, tag)
+	usage, exists := tt.Templates[key]
+	return usage, exists
+}
+
+// HasPullingTemplates returns true if any templates are currently being pulled
+func (tt *TemplateTracker) HasPullingTemplates() bool {
+	tt.Mutex.RLock()
+	defer tt.Mutex.RUnlock()
+
+	for _, usage := range tt.Templates {
+		if usage.Pulling {
+			return true
+		}
+	}
+	return false
 }
 
 func GetLoadedConfigFromContext(ctx context.Context) (*Config, error) {
