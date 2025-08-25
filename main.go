@@ -199,7 +199,6 @@ func main() {
 	parentCtx = context.WithValue(parentCtx, config.ContextKey("globals"), &config.Globals{
 		RunPluginsOnce:       runOnce == "true",
 		ReturnAllToMainQueue: atomic.Bool{},
-		PullLock:             &sync.Mutex{},
 		PluginsPath:          pluginsPath,
 		DebugEnabled:         logging.IsDebugEnabled(),
 		HostCPUCount:         hostCPUCount,

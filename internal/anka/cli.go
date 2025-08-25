@@ -718,11 +718,10 @@ func (cli *Cli) EnsureVMTemplateExists(
 			}
 		}
 
-		//TODO: move to using the TemplateTracker pulling
-		if !workerGlobals.PullLock.TryLock() {
+		// Check if any templates are currently being pulled
+		if workerGlobals.TemplateTracker.HasPullingTemplates() {
 			return nil, nil, fmt.Errorf("a pull is already running on this host")
 		}
-		defer workerGlobals.PullLock.Unlock()
 
 		pullJson, ensureSpaceError, err := cli.AnkaRegistryPull(workerCtx, pluginCtx, targetTemplate, targetTag)
 		if workerCtx.Err() != nil || pluginCtx.Err() != nil {
