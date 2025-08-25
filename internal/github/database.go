@@ -15,7 +15,7 @@ func UpdateJobInDB(pluginCtx context.Context, queue string, upToDateJob *QueueJo
 		return err
 	}
 	// Find the job in the database by ID and run_id within the plugin queue
-	jobList, err := databaseContainer.Client.LRange(pluginCtx, queue, 0, -1).Result()
+	jobList, err := databaseContainer.RetryLRange(pluginCtx, queue, 0, -1)
 	if err != nil {
 		return fmt.Errorf("error getting job list: %w", err)
 	}
@@ -36,7 +36,7 @@ func UpdateJobInDB(pluginCtx context.Context, queue string, upToDateJob *QueueJo
 			if err != nil {
 				return fmt.Errorf("error marshaling updated job: %w", err)
 			}
-			err = databaseContainer.Client.LSet(pluginCtx, queue, int64(i), updatedJobJSON).Err()
+			err = databaseContainer.RetryLSet(pluginCtx, queue, int64(i), updatedJobJSON)
 			if err != nil {
 				return fmt.Errorf("error updating job in database: %w", err)
 			}

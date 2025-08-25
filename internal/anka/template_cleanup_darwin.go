@@ -74,7 +74,7 @@ func (cli *Cli) EnsureSpaceForTemplateOnDarwin(
 
 	// If even deleting all LRU templates wouldn't free enough space, don't delete anything
 	if totalFreeable < spaceToFree {
-		logging.Warn(pluginCtx, "insufficient space even after deleting all LRU templates, returning job to queue",
+		logging.Warn(pluginCtx, "insufficient space even if we deleted all LRU templates, returning job to queue",
 			"spaceToFree", spaceToFree,
 			"totalFreeable", totalFreeable,
 			"lruTemplateCount", len(lruTemplates))

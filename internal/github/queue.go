@@ -18,7 +18,7 @@ func GetQueueSize(pluginCtx context.Context, queueName string) (int64, error) {
 	if err != nil {
 		return 0, fmt.Errorf("error getting database client from context: %s", err.Error())
 	}
-	return databaseContainer.Client.LLen(pluginCtx, queueName).Result()
+	return databaseContainer.RetryLLen(pluginCtx, queueName)
 }
 
 func GetJobJSONFromQueueByID(
@@ -31,7 +31,7 @@ func GetJobJSONFromQueueByID(
 		logging.Panic(pluginCtx, pluginCtx, "error getting database client from context: "+err.Error())
 	}
 	localCtx := context.Background() // avoids context cancellation preventing this from running
-	queued, err := databaseContainer.Client.LRange(localCtx, queue, 0, -1).Result()
+	queued, err := databaseContainer.RetryLRange(localCtx, queue, 0, -1)
 	if err != nil {
 		logging.Error(pluginCtx, "error getting list of queued jobs", "err", err)
 		return "", err
@@ -65,7 +65,7 @@ func GetJobFromQueue(
 		logging.Panic(pluginCtx, pluginCtx, "error getting database client from context: "+err.Error())
 	}
 	localCtx := context.Background() // avoids context cancellation preventing this from running
-	queuedJobJSON, err := databaseContainer.Client.LIndex(localCtx, queue, 0).Result()
+	queuedJobJSON, err := databaseContainer.RetryLIndex(localCtx, queue, 0)
 	if err != nil {
 		logging.Error(pluginCtx, "error getting list of queued jobs", "err", err)
 		return QueueJob{}, err
@@ -88,7 +88,7 @@ func DeleteFromQueue(ctx context.Context, jobID int64, queue string) error {
 	if err != nil {
 		return fmt.Errorf("error getting database client from context: %s", err.Error())
 	}
-	queued, err := databaseContainer.Client.LRange(innerContext, queue, 0, -1).Result()
+	queued, err := databaseContainer.RetryLRange(innerContext, queue, 0, -1)
 	if err != nil {
 		logging.Error(ctx, "error getting list of queued jobs", "err", err)
 		return err
@@ -107,7 +107,7 @@ func DeleteFromQueue(ctx context.Context, jobID int64, queue string) error {
 			continue
 		}
 		if *queueJob.WorkflowJob.ID == jobID {
-			success, err := databaseContainer.Client.LRem(innerContext, queue, 1, queueItem).Result()
+			success, err := databaseContainer.RetryLRem(innerContext, queue, 1, queueItem)
 			if err != nil {
 				logging.Error(ctx, "error removing job from queue", "err", err)
 				return err
@@ -131,7 +131,7 @@ func QueueHasJobs(
 	if err != nil {
 		return false, fmt.Errorf("error getting database client from context: %s", err.Error())
 	}
-	queueSize, err := databaseContainer.Client.LLen(pluginCtx, queueName).Result()
+	queueSize, err := databaseContainer.RetryLLen(pluginCtx, queueName)
 	if err != nil {
 		return false, fmt.Errorf("error getting queue size: %s", err.Error())
 	}
@@ -150,7 +150,7 @@ func PopJobOffQueue(
 	// we use Range here + Rem instead of Pop so we can use QueueTargetIndex.
 	// QueueTargetIndex is the index we want to start at, allowing us to push
 	// past the jobs we can't run due to host limits but are still in the main queue.
-	queuedJobsString, err := databaseContainer.Client.LRange(pluginCtx, queueName, queueTargetIndex, -1).Result()
+	queuedJobsString, err := databaseContainer.RetryLRange(pluginCtx, queueName, queueTargetIndex, -1)
 	if err == redis.Nil {
 		return "", nil
 	}
@@ -162,7 +162,7 @@ func PopJobOffQueue(
 	}
 	targetElement := queuedJobsString[0]
 	// we use LRem to target removal of the element. If something else got the element already, we just return nothing and retry
-	success, err := databaseContainer.Client.LRem(pluginCtx, queueName, 1, targetElement).Result()
+	success, err := databaseContainer.RetryLRem(pluginCtx, queueName, 1, targetElement)
 	if err != nil {
 		return "", fmt.Errorf("error removing queued job: %s", err.Error())
 	}
@@ -182,7 +182,7 @@ func GetJobFromQueueByKeyAndValue(
 	if err != nil {
 		return "", fmt.Errorf("error getting database client from context: %s", err.Error())
 	}
-	queuedJobsString, err := databaseContainer.Client.LRange(pluginCtx, queueName, 0, -1).Result()
+	queuedJobsString, err := databaseContainer.RetryLRange(pluginCtx, queueName, 0, -1)
 	if err != nil {
 		return "", fmt.Errorf("error getting queued jobs: %s", err.Error())
 	}

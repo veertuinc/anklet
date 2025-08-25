@@ -102,7 +102,7 @@ func Run(
 	}
 
 	// clean up in_progress queue if it exists
-	err = databaseContainer.Client.Del(pluginCtx, "anklet/jobs/github/in_progress/"+pluginConfig.Owner).Err()
+	_, err = databaseContainer.RetryDel(pluginCtx, "anklet/jobs/github/in_progress/"+pluginConfig.Owner)
 	if err != nil {
 		return pluginCtx, fmt.Errorf("error deleting in_progress queue: %s", err.Error())
 	}
@@ -190,9 +190,9 @@ func Run(
 							logging.Error(pluginCtx, "error converting job payload to JSON", "error", err)
 							return
 						}
-						push := databaseContainer.Client.RPush(pluginCtx, "anklet/jobs/github/queued/"+pluginConfig.Owner, wrappedPayloadJSON)
-						if push.Err() != nil {
-							logging.Error(pluginCtx, "error pushing job to queue", "error", push.Err())
+						_, pushErr := databaseContainer.RetryRPush(pluginCtx, "anklet/jobs/github/queued/"+pluginConfig.Owner, wrappedPayloadJSON)
+						if pushErr != nil {
+							logging.Error(pluginCtx, "error pushing job to queue", "error", pushErr)
 							return
 						}
 						logging.Info(pluginCtx, "job pushed to queued queue")
@@ -217,9 +217,9 @@ func Run(
 							logging.Error(pluginCtx, "error converting job payload to JSON", "error", err)
 							return
 						}
-						push := databaseContainer.Client.RPush(pluginCtx, "anklet/jobs/github/in_progress/"+pluginConfig.Owner, wrappedPayloadJSON)
-						if push.Err() != nil {
-							logging.Error(pluginCtx, "error pushing job to queue", "error", push.Err())
+						_, pushErr := databaseContainer.RetryRPush(pluginCtx, "anklet/jobs/github/in_progress/"+pluginConfig.Owner, wrappedPayloadJSON)
+						if pushErr != nil {
+							logging.Error(pluginCtx, "error pushing job to queue", "error", pushErr)
 							return
 						}
 						logging.Info(pluginCtx, "job pushed to in_progress queue")
@@ -229,7 +229,7 @@ func Run(
 				if exists_in_array_partial(simplifiedWorkflowJobEvent.WorkflowJob.Labels, []string{"anka-template"}) {
 					queues := []string{}
 					// get all keys from database for the main queue and service queues as well as completed
-					queuedKeys, err := databaseContainer.Client.Keys(pluginCtx, "anklet/jobs/github/queued/"+pluginConfig.Owner+"*").Result()
+					queuedKeys, err := databaseContainer.RetryKeys(pluginCtx, "anklet/jobs/github/queued/"+pluginConfig.Owner+"*")
 					if err != nil {
 						logging.Error(pluginCtx, "error getting list of queued keys (completed)", "err", err)
 						return
@@ -272,9 +272,9 @@ func Run(
 								logging.Error(pluginCtx, "error converting job payload to JSON", "error", err)
 								return
 							}
-							push := databaseContainer.Client.RPush(pluginCtx, "anklet/jobs/github/completed/"+pluginConfig.Owner, wrappedPayloadJSON)
-							if push.Err() != nil {
-								logging.Error(pluginCtx, "error pushing job to queue", "error", push.Err())
+							_, pushErr := databaseContainer.RetryRPush(pluginCtx, "anklet/jobs/github/completed/"+pluginConfig.Owner, wrappedPayloadJSON)
+							if pushErr != nil {
+								logging.Error(pluginCtx, "error pushing job to queue", "error", pushErr)
 								return
 							}
 							logging.Info(pluginCtx, "job pushed to completed queue")
@@ -332,7 +332,7 @@ func Run(
 		}
 	}()
 
-	// var allHooks []map[string]interface{}
+	// var allHooks []map[string]any
 
 	/// OLD STUFF
 
@@ -515,27 +515,27 @@ func Run(
 
 	// if len(allHooks) > 0 {
 	// get all keys from database for the main queue and service queues as well as completed
-	queuedKeys, err := databaseContainer.Client.Keys(pluginCtx, "anklet/jobs/github/queued/"+pluginConfig.Owner+"*").Result()
+	queuedKeys, err := databaseContainer.RetryKeys(pluginCtx, "anklet/jobs/github/queued/"+pluginConfig.Owner+"*")
 	if queuedKeys == nil && err != nil {
 		return pluginCtx, fmt.Errorf("error getting list of queued keys: %s %s", err.Error(), "anklet/jobs/github/queued/"+pluginConfig.Owner+"*")
 	}
 	var allQueuedJobs = make(map[string][]string)
 	for _, key := range queuedKeys {
-		queuedJobs, err := databaseContainer.Client.LRange(pluginCtx, key, 0, -1).Result()
+		queuedJobs, err := databaseContainer.RetryLRange(pluginCtx, key, 0, -1)
 		if err != nil {
 			// logger.ErrorContext(pluginCtx, "error getting list of queued jobs for key: "+key, "err", err)
 			return pluginCtx, fmt.Errorf("error getting list of queued jobs for key: %s", err.Error())
 		}
 		allQueuedJobs[key] = queuedJobs
 	}
-	completedKeys, err := databaseContainer.Client.Keys(pluginCtx, "anklet/jobs/github/completed"+pluginConfig.Owner+"*").Result()
+	completedKeys, err := databaseContainer.RetryKeys(pluginCtx, "anklet/jobs/github/completed"+pluginConfig.Owner+"*")
 	if err != nil {
 		// logger.ErrorContext(pluginCtx, "error getting list of keys", "err", err)
 		return pluginCtx, fmt.Errorf("error getting list of completed keys: %s", err.Error())
 	}
 	var allCompletedJobs = make(map[string][]string)
 	for _, key := range completedKeys {
-		completedJobs, err := databaseContainer.Client.LRange(pluginCtx, key, 0, -1).Result()
+		completedJobs, err := databaseContainer.RetryLRange(pluginCtx, key, 0, -1)
 		if err != nil {
 			// logger.ErrorContext(pluginCtx, "error getting list of queued jobs for key: "+key, "err", err)
 			return pluginCtx, fmt.Errorf("error getting list of queued jobs for key: %s", err.Error())
@@ -653,7 +653,7 @@ MainLoop:
 
 		// if in completed, but has no queued; remove from completed db
 		if inCompleted && !inQueued {
-			_, err = databaseContainer.Client.LRem(pluginCtx, inCompletedListKey, 1, allCompletedJobs[inCompletedListKey][inCompletedIndex]).Result()
+			_, err = databaseContainer.RetryLRem(pluginCtx, inCompletedListKey, 1, allCompletedJobs[inCompletedListKey][inCompletedIndex])
 			if err != nil {
 				// logger.ErrorContext(pluginCtx, "error removing completedJob from anklet/jobs/github/completed/"+pluginConfig.Owner, "err", err, "completedJob", allCompletedJobs[inCompletedListKey][inCompletedIndex])
 				return pluginCtx, fmt.Errorf("error removing completedJob from anklet/jobs/github/completed/"+pluginConfig.Owner+": %s", err.Error())
@@ -736,14 +736,14 @@ MainLoop:
 		// err doesn't matter here and it will always throw "job scheduled on GitHub side; try again later"
 		logging.Info(pluginCtx, "hook redelivered",
 			"redelivery", redelivery,
-			"hookDelivery", map[string]interface{}{
+			"hookDelivery", map[string]any{
 				"guid":       *hookDelivery.GUID,
 				"action":     *hookDelivery.Action,
 				"statusCode": *hookDelivery.StatusCode,
 				"redelivery": *hookDelivery.Redelivery,
 			},
-			"job", map[string]interface{}{
-				"workflowJob": map[string]interface{}{
+			"job", map[string]any{
+				"workflowJob": map[string]any{
 					"id": *workflowJob.ID,
 				},
 			},

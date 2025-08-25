@@ -62,7 +62,7 @@ func NewCLI(pluginCtx context.Context) (*Cli, error) {
 	if err != nil || version.Status != "OK" {
 		return nil, err
 	}
-	if body, ok := version.Body.(map[string]interface{}); ok {
+	if body, ok := version.Body.(map[string]any); ok {
 		cli.Version = body["version"].(string)
 	}
 
@@ -71,7 +71,7 @@ func NewCLI(pluginCtx context.Context) (*Cli, error) {
 		return nil, err
 	}
 
-	if body, ok := license.Body.(map[string]interface{}); ok {
+	if body, ok := license.Body.(map[string]any); ok {
 		cli.License.Status = body["status"].(string)
 		cli.License.LicenseType = body["license_type"].(string)
 		cli.License.Product = body["product"].(string)
@@ -273,42 +273,22 @@ func (cli *Cli) AnkaRegistryPull(
 	pluginCtx context.Context,
 	template string,
 	tag string,
-) (*AnkaJson, error) {
+) (*AnkaJson, error, error) { // pullJson, ensureSpaceError, genericError
 	if workerCtx.Err() != nil || pluginCtx.Err() != nil {
-		return nil, fmt.Errorf("context canceled before AnkaRegistryPull")
+		return nil, nil, fmt.Errorf("context canceled before AnkaRegistryPull")
 	}
 
 	logging.Debug(pluginCtx, "pulling template to host")
 
 	metricsData, err := metrics.GetMetricsDataFromContext(workerCtx)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	workerGlobals, err := config.GetWorkerGlobalsFromContext(pluginCtx)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-
-	defer func() {
-		// Clear pulling status
-		workerGlobals.TemplateTracker.SetTemplatePulling(template, tag, false)
-
-		err := metricsData.SetStatus(pluginCtx, "running")
-		if err != nil {
-			logging.Error(pluginCtx, "error setting metrics status", "error", err)
-			panic(err)
-		}
-	}()
-
-	err = metricsData.SetStatus(pluginCtx, "pulling")
-	if err != nil {
-		logging.Error(pluginCtx, "error setting metrics status", "error", err)
-		return nil, err
-	}
-
-	// Mark template as being pulled
-	workerGlobals.TemplateTracker.SetTemplatePulling(template, tag, true)
 
 	// Get template size from registry before pulling
 	templateSizeBytes, err := cli.getRegistryTemplateSize(pluginCtx, template, tag)
@@ -322,9 +302,27 @@ func (cli *Cli) AnkaRegistryPull(
 		err = cli.EnsureSpaceForTemplateOnDarwin(workerCtx, pluginCtx, template, tag, templateSizeBytes)
 		if err != nil {
 			logging.Error(pluginCtx, "unable to ensure space for template", "error", err)
-			return nil, err
+			return nil, err, nil // ensureSpaceError
 		}
 	}
+
+	defer func() {
+		// Clear pulling status
+		workerGlobals.TemplateTracker.SetTemplatePulling(template, tag, false)
+		err := metricsData.SetStatus(pluginCtx, "running")
+		if err != nil {
+			logging.Error(pluginCtx, "error setting metrics status", "error", err)
+		}
+	}()
+
+	err = metricsData.SetStatus(pluginCtx, "pulling")
+	if err != nil {
+		logging.Error(pluginCtx, "error setting metrics status", "error", err)
+		return nil, nil, err
+	}
+
+	// Mark template as being pulled
+	workerGlobals.TemplateTracker.SetTemplatePulling(template, tag, true)
 
 	var args []string
 	if tag != "(using latest)" {
@@ -334,13 +332,13 @@ func (cli *Cli) AnkaRegistryPull(
 	}
 	pullJson, err := cli.AnkaExecuteRegistryCommand(pluginCtx, args...)
 	if workerCtx.Err() != nil || pluginCtx.Err() != nil {
-		return nil, fmt.Errorf("context canceled while pulling template")
+		return nil, nil, fmt.Errorf("context canceled while pulling template")
 	}
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if pullJson.Status != "OK" {
-		return nil, fmt.Errorf("error pulling template from registry: %s", pullJson.Message)
+		return nil, nil, fmt.Errorf("error pulling template from registry: %s", pullJson.Message)
 	}
 
 	// Get actual template size after pull if we didn't have it before
@@ -357,7 +355,7 @@ func (cli *Cli) AnkaRegistryPull(
 
 	logging.Info(pluginCtx, "successfully pulled template", "template", template, "tag", tag, "sizeBytes", templateSizeBytes)
 
-	return pullJson, nil
+	return pullJson, nil, nil
 }
 
 // AnkaGetTemplateSize gets the disk size of a template from the host
@@ -657,14 +655,19 @@ func HostHasVmCapacity(pluginCtx context.Context) bool {
 	return true
 }
 
-func (cli *Cli) EnsureVMTemplateExists(workerCtx context.Context, pluginCtx context.Context, targetTemplate string, targetTag string) (error, error) {
+func (cli *Cli) EnsureVMTemplateExists(
+	workerCtx context.Context,
+	pluginCtx context.Context,
+	targetTemplate string,
+	targetTag string,
+) (error, error, error) { // noTemplateTagExistsInRegistryError, ensureSpaceError, genericError
 	ankaCLI, err := GetAnkaCLIFromContext(pluginCtx)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	workerGlobals, err := config.GetWorkerGlobalsFromContext(pluginCtx)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	pullTemplate := false
 	list, err := ankaCLI.AnkaList(pluginCtx, targetTemplate)
@@ -672,7 +675,7 @@ func (cli *Cli) EnsureVMTemplateExists(workerCtx context.Context, pluginCtx cont
 		list, innerErr := ankaCLI.AnkaList(pluginCtx)
 		if innerErr != nil {
 			logging.Error(pluginCtx, "error executing anka list", "err", innerErr)
-			return nil, innerErr
+			return nil, nil, innerErr
 		}
 		logging.Debug(pluginCtx, "list", "stdout", list.Body)
 	}
@@ -684,7 +687,7 @@ func (cli *Cli) EnsureVMTemplateExists(workerCtx context.Context, pluginCtx cont
 				pullTemplate = true
 			} else {
 				logging.Error(pluginCtx, "error executing anka list", "err", list.Message)
-				return nil, fmt.Errorf("error executing anka list: %s", list.Message)
+				return nil, nil, fmt.Errorf("error executing anka list: %s", list.Message)
 			}
 		}
 		if list.Status == "OK" {
@@ -694,11 +697,11 @@ func (cli *Cli) EnsureVMTemplateExists(workerCtx context.Context, pluginCtx cont
 				if !ok {
 					logging.Info(pluginCtx, "list", "body", list.Body)
 					logging.Error(pluginCtx, "unable to parse bodySlice[0] to map[string]any")
-					return nil, fmt.Errorf("unable to parse bodySlice[0] to map[string]any")
+					return nil, nil, fmt.Errorf("unable to parse bodySlice[0] to map[string]any")
 				}
 				if status, ok := body["status"].(string); ok {
 					if status == "failed" {
-						return nil, fmt.Errorf("vm template is not running and instead %s", status)
+						return nil, nil, fmt.Errorf("vm template is not running and instead %s", status)
 					}
 				}
 				if version, ok := body["version"].(string); ok {
@@ -712,7 +715,7 @@ func (cli *Cli) EnsureVMTemplateExists(workerCtx context.Context, pluginCtx cont
 					}
 				}
 			} else {
-				return nil, fmt.Errorf("unable to parse list.Body to []interface{}")
+				return nil, nil, fmt.Errorf("unable to parse list.Body to []any")
 			}
 		}
 	} else {
@@ -720,20 +723,23 @@ func (cli *Cli) EnsureVMTemplateExists(workerCtx context.Context, pluginCtx cont
 	}
 	if pullTemplate {
 		if !workerGlobals.PullLock.TryLock() {
-			return nil, fmt.Errorf("a pull is already running on this host")
+			return nil, nil, fmt.Errorf("a pull is already running on this host")
 		}
 		defer workerGlobals.PullLock.Unlock()
-		pullJson, err := cli.AnkaRegistryPull(workerCtx, pluginCtx, targetTemplate, targetTag)
+		pullJson, ensureSpaceError, err := cli.AnkaRegistryPull(workerCtx, pluginCtx, targetTemplate, targetTag)
 		if workerCtx.Err() != nil || pluginCtx.Err() != nil {
 			logging.Error(pluginCtx, "context canceled while pulling template")
-			return nil, nil
+			return nil, nil, nil
+		}
+		if ensureSpaceError != nil {
+			return nil, ensureSpaceError, nil
 		}
 		if pullJson == nil || pullJson.Code == 3 { // registry doesn't have template (or tag)
-			return err, nil
+			return err, nil, nil // noTemplateTagExistsInRegistryError
 		}
 		if err != nil {
 			logging.Error(pluginCtx, "error executing anka registry pull", "err", err)
-			return nil, err
+			return nil, nil, err
 		}
 	} else {
 		// Template already exists locally, update usage tracking
@@ -748,5 +754,5 @@ func (cli *Cli) EnsureVMTemplateExists(workerCtx context.Context, pluginCtx cont
 
 		logging.Debug(pluginCtx, "using existing template", "template", targetTemplate, "tag", targetTag, "sizeBytes", templateSizeBytes)
 	}
-	return nil, nil
+	return nil, nil, nil
 }
