@@ -282,7 +282,6 @@ type Globals struct {
 	RunPluginsOnce bool
 	// block the second plugin until the first plugin is done
 	ReturnAllToMainQueue atomic.Bool
-	PullLock             *sync.Mutex
 	PluginsPath          string
 	DebugEnabled         bool
 	// block other plugins from running until the currently running
@@ -480,6 +479,19 @@ func (tt *TemplateTracker) GetTemplateUsage(template, tag string) (*TemplateUsag
 	key := tt.GetTemplateKey(template, tag)
 	usage, exists := tt.Templates[key]
 	return usage, exists
+}
+
+// HasPullingTemplates returns true if any templates are currently being pulled
+func (tt *TemplateTracker) HasPullingTemplates() bool {
+	tt.Mutex.RLock()
+	defer tt.Mutex.RUnlock()
+
+	for _, usage := range tt.Templates {
+		if usage.Pulling {
+			return true
+		}
+	}
+	return false
 }
 
 func GetLoadedConfigFromContext(ctx context.Context) (*Config, error) {
