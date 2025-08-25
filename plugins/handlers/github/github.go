@@ -126,7 +126,7 @@ func watchJobStatus(
 	jobStatusCheckIntervalSeconds := 10
 	firstLog := true
 	for {
-		logging.Debug(pluginCtx, "watchJobStatus loop")
+		// logging.Debug(pluginCtx, "watchJobStatus loop")
 		// Check for shutdown signal more frequently
 		if workerCtx.Err() != nil || pluginCtx.Err() != nil {
 			logging.Warn(pluginCtx, "context canceled while watching for job completion")
@@ -139,7 +139,7 @@ func watchJobStatus(
 			return pluginCtx, nil
 		default:
 			time.Sleep(time.Duration(jobStatusCheckIntervalSeconds) * time.Second)
-			queuedJobJSON, err := databaseContainer.Client.LIndex(pluginCtx, pluginQueueName, 0).Result()
+			queuedJobJSON, err := databaseContainer.RetryLIndex(pluginCtx, pluginQueueName, 0)
 			if err != nil {
 				logging.Error(pluginCtx, "error searching in queue", "error", err)
 				return pluginCtx, err
@@ -381,7 +381,7 @@ func checkForCompletedJobs(
 	checkForCompletedJobsContext := context.Background() // needed so we can finalize database changes without orphaning or losing jobs
 
 	for {
-		logging.Debug(pluginCtx, "checkForCompletedJobs loop")
+		// logging.Debug(pluginCtx, "checkForCompletedJobs loop")
 		var updateDB = false
 		// BE VERY CAREFUL when you use return here. You could orphan the job if you're not careful.
 		pluginGlobals.IncrementCheckForCompletedJobsRunCount()
@@ -447,9 +447,9 @@ func checkForCompletedJobs(
 		}
 
 		// get the job ID
-		existingJobString, err := databaseContainer.Client.LIndex(pluginCtx, pluginQueueName, 0).Result()
+		existingJobString, err := databaseContainer.RetryLIndex(pluginCtx, pluginQueueName, 0)
 		if err == redis.Nil || existingJobString == "" {
-			logging.Debug(pluginCtx, "checkForCompletedJobs -> no job found in pluginQueue")
+			// logging.Debug(pluginCtx, "checkForCompletedJobs -> no job found in pluginQueue")
 		} else {
 			// logging.Debug(pluginCtx, "checkForCompletedJobs -> job found in pluginQueue")
 			queuedJob, err, typeErr := database.Unwrap[internalGithub.QueueJob](existingJobString)
@@ -532,7 +532,7 @@ func checkForCompletedJobs(
 			if mainCompletedQueueJobJSON != "" {
 				logging.Debug(pluginCtx, "checkForCompletedJobs -> job is in mainCompletedQueue")
 				// remove the completed job we found
-				success, err := databaseContainer.Client.LRem(checkForCompletedJobsContext, mainCompletedQueueName, 1, mainCompletedQueueJobJSON).Result()
+				success, err := databaseContainer.RetryLRem(checkForCompletedJobsContext, mainCompletedQueueName, 1, mainCompletedQueueJobJSON)
 				if err != nil {
 					logging.Error(pluginCtx,
 						"error removing completedJob from "+mainCompletedQueueName,
@@ -565,7 +565,7 @@ func checkForCompletedJobs(
 				queuedJob.WorkflowJob.Conclusion = completedQueuedJob.WorkflowJob.Conclusion
 				// add a task for the completed job so we know the clean up
 				logging.Debug(pluginCtx, "checkForCompletedJobs -> adding completed job to pluginCompletedQueue")
-				_, err = databaseContainer.Client.LPush(checkForCompletedJobsContext, pluginCompletedQueueName, mainCompletedQueueJobJSON).Result()
+				_, err = databaseContainer.RetryLPush(checkForCompletedJobsContext, pluginCompletedQueueName, mainCompletedQueueJobJSON)
 				if err != nil {
 					logging.Error(pluginCtx, "error inserting completed job into list", "err", err)
 					return
@@ -603,7 +603,7 @@ func checkForCompletedJobs(
 						logging.Error(pluginCtx, "error marshalling queued job", "err", err)
 						return
 					}
-					_, err = databaseContainer.Client.LPush(pluginCtx, pluginCompletedQueueName, queuedJobJSON).Result()
+					_, err = databaseContainer.RetryLPush(pluginCtx, pluginCompletedQueueName, queuedJobJSON)
 					if err != nil {
 						logging.Error(pluginCtx, "error inserting completed job into list", "err", err)
 						return
@@ -720,7 +720,7 @@ func cleanup(
 	}
 
 	// get the original job with the latest status and check if it's running
-	originalJobJSON, err := databaseContainer.Client.LIndex(cleanupContext, pluginQueueName, 0).Result()
+	originalJobJSON, err := databaseContainer.RetryLIndex(cleanupContext, pluginQueueName, 0)
 	if err != nil && err != redis.Nil {
 		logging.Error(pluginCtx, "error getting job from the list", "err", err)
 		return
@@ -762,7 +762,7 @@ func cleanup(
 		var cleaningJobJSON string
 
 		// get the cleaning job from the cleaning list
-		cleaningJobJSON, err = databaseContainer.Client.LIndex(cleanupContext, pluginQueueName+"/cleaning", 0).Result()
+		cleaningJobJSON, err = databaseContainer.RetryLIndex(cleanupContext, pluginQueueName+"/cleaning", 0)
 		if err != nil && err != redis.Nil {
 			logging.Error(pluginCtx, "error getting job from the list", "err", err)
 			return
@@ -772,11 +772,11 @@ func cleanup(
 				return
 			}
 			// if nothing in cleaning already, pop the job from the list and push it to the cleaning list
-			cleaningJobJSON, err = databaseContainer.Client.RPopLPush(
+			cleaningJobJSON, err = databaseContainer.RetryRPopLPush(
 				cleanupContext,
 				pluginQueueName,
 				pluginQueueName+"/cleaning",
-			).Result()
+			)
 			if err == redis.Nil {
 				logging.Debug(pluginCtx, "cleanup | no job to clean up from "+pluginQueueName)
 				return // nothing to clean up
@@ -819,7 +819,11 @@ func cleanup(
 			if err != nil {
 				logging.Error(pluginCtx, "error deleting vm", "err", err)
 			}
-			databaseContainer.Client.Del(cleanupContext, pluginQueueName+"/cleaning")
+			_, err = databaseContainer.RetryDel(cleanupContext, pluginQueueName+"/cleaning")
+			if err != nil {
+				logging.Error(pluginCtx, "error deleting job from cleaning queue", "err", err)
+				return
+			}
 			continue // required to keep processing tasks in the db list
 		case "WorkflowJobPayload": // MUST COME LAST
 			logging.Debug(pluginCtx, "cleanup | WorkflowJobPayload | queuedJob", "queuedJob", queuedJob)
@@ -840,7 +844,7 @@ func cleanup(
 					logging.Error(pluginCtx, "error searching in queue", "error", err)
 				}
 				if mainCompletedQueueJobJSON != "" {
-					success, err := databaseContainer.Client.LRem(cleanupContext, mainCompletedQueueName, 1, mainCompletedQueueJobJSON).Result()
+					success, err := databaseContainer.RetryLRem(cleanupContext, mainCompletedQueueName, 1, mainCompletedQueueJobJSON)
 					if err != nil {
 						logging.Error(pluginCtx,
 							"error removing completedJob from "+mainCompletedQueueName,
@@ -859,8 +863,16 @@ func cleanup(
 						return
 					}
 				}
-				databaseContainer.Client.Del(cleanupContext, pluginCompletedQueueName)
-				databaseContainer.Client.Del(cleanupContext, pluginQueueName+"/cleaning")
+				_, err = databaseContainer.RetryDel(cleanupContext, pluginCompletedQueueName)
+				if err != nil {
+					logging.Error(pluginCtx, "error deleting job from completed queue", "err", err)
+					return
+				}
+				_, err = databaseContainer.RetryDel(cleanupContext, pluginQueueName+"/cleaning")
+				if err != nil {
+					logging.Error(pluginCtx, "error deleting job from cleaning queue", "err", err)
+					return
+				}
 				break
 			}
 			// return it to the queue if the job isn't completed yet
@@ -869,13 +881,17 @@ func cleanup(
 			case <-pluginGlobals.PausedCancellationJobChannel:
 				// logging.Debug(pluginCtx, "cleanup | WorkflowJobPayload | PausedCancellationJobChannel")
 				// if the job was paused, we need to remove it
-				databaseContainer.Client.Del(cleanupContext, pluginQueueName+"/cleaning")
+				_, err = databaseContainer.RetryDel(cleanupContext, pluginQueueName+"/cleaning")
+				if err != nil {
+					logging.Error(pluginCtx, "error deleting job from cleaning queue", "err", err)
+					return
+				}
 				return
 			case reason := <-pluginGlobals.ReturnToMainQueue:
 				logging.Warn(pluginCtx, "pushing job from "+pluginQueueName+"/cleaning back to "+mainQueueName, "reason", reason)
 				// do not use RPopLPush due to hash tag issue
 				// remove from cleaning queue so other hosts won't try to pick it up anymore.
-				cleaningJobJSON, err = databaseContainer.Client.RPop(cleanupContext, pluginQueueName+"/cleaning").Result()
+				cleaningJobJSON, err = databaseContainer.RetryRPop(cleanupContext, pluginQueueName+"/cleaning")
 				if err != nil {
 					logging.Error(pluginCtx, "error removing job from cleaning queue", "err", err)
 					return
@@ -898,26 +914,38 @@ func cleanup(
 					return
 				}
 				// push to the target queue
-				_, err = databaseContainer.Client.LPush(cleanupContext, mainQueueName, cleaningJobJSON).Result()
+				_, err = databaseContainer.RetryLPush(cleanupContext, mainQueueName, cleaningJobJSON)
 				if err != nil {
 					logging.Error(pluginCtx, "error pushing job back to queued", "err", err)
 					return
 				}
-				databaseContainer.Client.Del(cleanupContext, pluginQueueName+"/cleaning")
+				_, err = databaseContainer.RetryDel(cleanupContext, pluginQueueName+"/cleaning")
+				if err != nil {
+					logging.Error(pluginCtx, "error deleting job from cleaning queue", "err", err)
+					return
+				}
 			default:
 				if queuedJob.WorkflowJob.Status != nil &&
 					(*queuedJob.WorkflowJob.Status == "completed" || *queuedJob.WorkflowJob.Status == "failed") { // don't send it back to the queue if the job is completed
-					databaseContainer.Client.Del(cleanupContext, pluginQueueName+"/cleaning")
+					_, err = databaseContainer.RetryDel(cleanupContext, pluginQueueName+"/cleaning")
+					if err != nil {
+						logging.Error(pluginCtx, "error deleting job from cleaning queue", "err", err)
+						return
+					}
 					return
 				}
 
 				logging.Warn(pluginCtx, "pushing job back to "+pluginQueueName, "queuedJob", queuedJob)
-				_, err := databaseContainer.Client.RPopLPush(cleanupContext, pluginQueueName+"/cleaning", pluginQueueName).Result()
+				_, err := databaseContainer.RetryRPopLPush(cleanupContext, pluginQueueName+"/cleaning", pluginQueueName)
 				if err != nil {
 					logging.Error(pluginCtx, "error pushing job back to queued", "err", err)
 					return
 				}
-				databaseContainer.Client.Del(cleanupContext, pluginQueueName+"/cleaning")
+				_, err = databaseContainer.RetryDel(cleanupContext, pluginQueueName+"/cleaning")
+				if err != nil {
+					logging.Error(pluginCtx, "error deleting job from cleaning queue", "err", err)
+					return
+				}
 			}
 		default:
 			logging.Error(pluginCtx, "unknown job type", "job", queuedJob)
@@ -1118,7 +1146,6 @@ func Run(
 		pausedQueueName,
 		true,
 	)
-	logging.Debug(pluginCtx, "after first cleanup")
 	select {
 	case runningJob := <-pluginGlobals.JobChannel:
 		// fmt.Println("after first cleanup status", runningJob.WorkflowJob.Status)
@@ -1159,7 +1186,7 @@ func Run(
 
 	// allow picking up where we left off
 	// always get -1 so we get the eldest job in the queue
-	queuedJobString, err = databaseContainer.Client.LIndex(pluginCtx, pluginQueueName, -1).Result()
+	queuedJobString, err = databaseContainer.RetryLIndex(pluginCtx, pluginQueueName, -1)
 	if err != nil && err != redis.Nil {
 		// logging.Error(pluginCtx, "error getting last object from anklet/jobs/github/queued/"+pluginConfig.Owner+"/"+pluginConfig.Name, "err", err)
 		return pluginCtx, fmt.Errorf("error getting last object from %s", pluginQueueName)
@@ -1187,7 +1214,7 @@ func Run(
 
 			// fmt.Println(pluginConfig.Name, "checking for paused jobs")
 			// Check the length of the paused queue
-			pausedQueueLength, err := databaseContainer.Client.LLen(pluginCtx, pausedQueueName).Result()
+			pausedQueueLength, err := databaseContainer.RetryLLen(pluginCtx, pausedQueueName)
 			if err != nil {
 				return pluginCtx, fmt.Errorf("error getting paused queue length: %s", err.Error())
 			}
@@ -1218,7 +1245,7 @@ func Run(
 					}
 
 					// Job is still active, put it back in paused queue
-					err := databaseContainer.Client.LPush(pluginCtx, pausedQueueName, pausedQueuedJobString).Err()
+					_, err := databaseContainer.RetryLPush(pluginCtx, pausedQueueName, pausedQueuedJobString)
 					if err != nil {
 						logging.Error(pluginCtx, "error pushing job to paused queue", "err", err)
 					}
@@ -1280,7 +1307,11 @@ func Run(
 			}
 			if originalHostJob == "" {
 				// bad/orphaned paused job, remove it from the paused queue
-				databaseContainer.Client.LRem(pluginCtx, pausedQueueName, 1, pausedQueuedJobString)
+				_, err = databaseContainer.RetryLRem(pluginCtx, pausedQueueName, 1, pausedQueuedJobString)
+				if err != nil {
+					logging.Error(pluginCtx, "error removing job from paused queue", "err", err)
+					return pluginCtx, fmt.Errorf("error removing job from paused queue: %s", err.Error())
+				}
 				logging.Error(pluginCtx, "problem getting job from paused host's queue (empty string); removing item from paused queue")
 				pluginGlobals.JobChannel <- internalGithub.QueueJob{Action: "finish"}
 				pausedQueueTargetIndex++
@@ -1300,7 +1331,11 @@ func Run(
 				return pluginCtx, nil
 			}
 			// remove it from the old host queue
-			databaseContainer.Client.LRem(pluginCtx, "anklet/jobs/github/queued/"+pluginConfig.Owner+"/{"+pausedQueuedJob.PausedOn+"}", 1, originalHostJob)
+			_, err = databaseContainer.RetryLRem(pluginCtx, "anklet/jobs/github/queued/"+pluginConfig.Owner+"/{"+pausedQueuedJob.PausedOn+"}", 1, originalHostJob)
+			if err != nil {
+				logging.Error(pluginCtx, "error removing job from old host's queue", "err", err)
+				return pluginCtx, fmt.Errorf("error removing job from old host's queue: %s", err.Error())
+			}
 			queuedJobString = originalHostJob
 			pausedQueuedJobString = "" // don't push back to the paused queue
 			break
@@ -1326,9 +1361,10 @@ func Run(
 			}
 
 			if shouldPutBack {
-				err := databaseContainer.Client.LPush(pluginCtx, pausedQueueName, pausedQueuedJobString).Err()
+				_, err := databaseContainer.RetryLPush(pluginCtx, pausedQueueName, pausedQueuedJobString)
 				if err != nil {
 					logging.Error(pluginCtx, "error pushing job to paused queue", "err", err)
+					return pluginCtx, fmt.Errorf("error pushing job to paused queue: %s", err.Error())
 				}
 				logging.Debug(pluginCtx, "pushed job back to paused queue", "pausedQueuedJobString", pausedQueuedJobString)
 			}
@@ -1338,7 +1374,7 @@ func Run(
 		// If not paused job to get, get a job from the main queue
 		if queuedJobString == "" {
 			// check if the queue length is less than the index and then reset the index if so
-			mainQueueLength, err := databaseContainer.Client.LLen(pluginCtx, mainQueueName).Result()
+			mainQueueLength, err := databaseContainer.RetryLLen(pluginCtx, mainQueueName)
 			if err != nil {
 				return pluginCtx, fmt.Errorf("error getting main queue length: %s", err.Error())
 			}
@@ -1365,7 +1401,11 @@ func Run(
 			}
 		}
 
-		databaseContainer.Client.RPush(pluginCtx, pluginQueueName, queuedJobString)
+		_, err = databaseContainer.RetryRPush(pluginCtx, pluginQueueName, queuedJobString)
+		if err != nil {
+			logging.Error(pluginCtx, "error pushing job to plugin queue", "err", err)
+			return pluginCtx, fmt.Errorf("error pushing job to plugin queue: %s", err.Error())
+		}
 
 		// queuedJobString, err = databaseContainer.Client.LIndex(pluginCtx, "anklet/jobs/github/queued/"+pluginConfig.Owner, globals.QueueIndex).Result()
 		// if err == nil {
@@ -1640,7 +1680,7 @@ func Run(
 				return pluginCtx, nil
 			}
 			if pausedQueuedJobJSON == "" {
-				success, err := databaseContainer.Client.RPush(pluginCtx, pausedQueueName, queuedJobJSON).Result()
+				success, err := databaseContainer.RetryRPush(pluginCtx, pausedQueueName, queuedJobJSON)
 				if err != nil {
 					logging.Error(pluginCtx, "error pushing job to paused queue", "err", err)
 					pluginGlobals.RetryChannel <- "error_pushing_job_to_paused_queue"
@@ -1728,31 +1768,36 @@ func Run(
 
 	// See if VM Template existing already
 	if !pluginConfig.SkipPull {
-		noTemplateTagExistsError, templateExistsError := ankaCLI.EnsureVMTemplateExists(workerCtx, pluginCtx, ankaTemplate, ankaTemplateTag)
+		noTemplateTagExistsInRegistryError, ensureSpaceError, genericError := ankaCLI.EnsureVMTemplateExists(workerCtx, pluginCtx, ankaTemplate, ankaTemplateTag)
 		if workerCtx.Err() != nil || pluginCtx.Err() != nil {
 			logging.Error(pluginCtx, "context canceled while ensuring vm template exists")
 			pluginGlobals.RetryChannel <- "context_canceled"
 			return pluginCtx, nil
 		}
-		if templateExistsError != nil {
+		// handle when a pull is already running on this host, Anka CLI errors, or anything else generic and minor
+		if genericError != nil {
 			// DO NOT RETURN AN ERROR TO MAIN. It will cause the other job on this node to be cancelled.
-			logging.Warn(pluginCtx, "problem ensuring vm template exists on host", "err", templateExistsError)
-			// Check if this is a space-related error that won't resolve on retry
-			if strings.Contains(templateExistsError.Error(), "insufficient space on host even after cleanup") {
-				logging.Info(pluginCtx, "incrementing queue target index due to insufficient disk space")
-				workerGlobals.IncrementQueueTargetIndex() // prevent trying to run this job again on this host
-			}
+			logging.Warn(pluginCtx, "problem ensuring vm template exists on host", "err", genericError)
+			workerGlobals.IncrementQueueTargetIndex()                                   // prevent trying to run this job again on this host
 			pluginGlobals.RetryChannel <- "problem_ensuring_vm_template_exists_on_host" // return to queue so another node can pick it up
 			return pluginCtx, nil
 		}
-		if noTemplateTagExistsError != nil {
-			logging.Error(pluginCtx, "error ensuring vm template exists on host", "err", noTemplateTagExistsError)
+		// if the template doesn't exist in the registry, we can't ever run the VM (use submitted wrong template or tag)
+		if noTemplateTagExistsInRegistryError != nil {
+			logging.Error(pluginCtx, "error ensuring vm template exists on host", "err", noTemplateTagExistsInRegistryError)
 			queuedJob.Action = "cancel"
 			err = internalGithub.UpdateJobInDB(pluginCtx, pluginQueueName, &queuedJob)
 			if err != nil {
 				logging.Error(pluginCtx, "error updating job in db", "err", err)
 			}
 			pluginGlobals.JobChannel <- queuedJob
+			return pluginCtx, nil
+		}
+		// handle when there is insufficient space on the host
+		if ensureSpaceError != nil {
+			logging.Error(pluginCtx, "insufficient space on host", "err", ensureSpaceError)
+			workerGlobals.IncrementQueueTargetIndex() // prevent trying to run this job again on this host
+			pluginGlobals.RetryChannel <- "error_no_space_on_host_for_template"
 			return pluginCtx, nil
 		}
 	}
@@ -1833,7 +1878,7 @@ func Run(
 
 	pluginCtx = logging.AppendCtx(pluginCtx, slog.Any("vm", queuedJob.AnkaVM))
 
-	dbErr := databaseContainer.Client.RPush(pluginCtx, pluginQueueName, wrappedVmJSON).Err()
+	_, dbErr := databaseContainer.RetryRPush(pluginCtx, pluginQueueName, wrappedVmJSON)
 	if dbErr != nil {
 		// logging.Error(pluginCtx, "error pushing vm data to database", "err", dbErr)
 		pluginGlobals.RetryChannel <- "error_pushing_vm_data_to_database"

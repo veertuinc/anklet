@@ -174,7 +174,28 @@ func executeGitHubClientFunctionWithRetry[T any](
 	if err != nil {
 		// Check if this is a 404 error that we should retry
 		if is404Error(err) {
-			if retryAttempt < 10 { // Retry up to 10 times as requested
+			if retryAttempt < 4 { // Retry up to 4 times as requested
+				// Before retrying, check if the client is still authenticated
+				// This helps distinguish between auth issues and GitHub service issues
+				githubClient, clientErr := GetGitHubClientFromContext(pluginCtx)
+				if clientErr != nil {
+					logging.Error(pluginCtx, "failed to get GitHub client for authentication validation", "error", clientErr)
+				} else {
+					authErr := validateGitHubClientAuthentication(pluginCtx, githubClient)
+					if authErr != nil {
+						logging.Error(pluginCtx,
+							"GitHub API 404 error appears to be due to authentication failure",
+							"authError", authErr.Error(),
+							"originalError", err.Error(),
+							"attempt", retryAttempt+1,
+						)
+						// Don't retry if authentication has failed - return the original error
+						return pluginCtx, nil, nil, fmt.Errorf("GitHub API 404 error with authentication failure: %v (original: %v)", authErr, err)
+					} else {
+						logging.Debug(pluginCtx, "GitHub client authentication validated successfully during 404 retry")
+					}
+				}
+
 				// Calculate exponential backoff with jitter
 				// Base delay starts at 30 seconds, doubles each time
 				baseDelay := time.Duration(30) * time.Second
@@ -187,9 +208,9 @@ func executeGitHubClientFunctionWithRetry[T any](
 				}
 
 				logging.Warn(pluginCtx,
-					"GitHub API returned 404, retrying with exponential backoff",
+					"GitHub API returned 404, authentication validated, retrying with exponential backoff",
 					"attempt", retryAttempt+1,
-					"maxAttempts", 10,
+					"maxAttempts", 4,
 					"backoffDelay", backoffDelay.String(),
 					"error", err.Error(),
 				)
@@ -209,7 +230,7 @@ func executeGitHubClientFunctionWithRetry[T any](
 					return pluginCtx, nil, nil, workerCtx.Err()
 				}
 			} else {
-				logging.Error(pluginCtx, "GitHub API 404 error: maximum retry attempts exceeded",
+				logging.Error(pluginCtx, "GitHub API 404 error: maximum retry attempts exceeded (4)",
 					"attempts", retryAttempt,
 					"error", err.Error())
 			}
@@ -235,4 +256,33 @@ func is404Error(err error) bool {
 	errorStr := err.Error()
 	return strings.Contains(errorStr, "404 Not Found") ||
 		strings.Contains(errorStr, "404") && strings.Contains(errorStr, "Not Found")
+}
+
+// validateGitHubClientAuthentication checks if the GitHub client is still authenticated
+// by making a simple API call to /user endpoint
+func validateGitHubClientAuthentication(ctx context.Context, client *github.Client) error {
+	if client == nil {
+		return fmt.Errorf("github client is nil")
+	}
+
+	// Use a short timeout for the authentication check to avoid long waits
+	authCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	// Try to get the authenticated user - this will fail if auth is invalid
+	_, response, err := client.Users.Get(authCtx, "")
+	if err != nil {
+		// Check if it's an authentication error (401/403) vs other errors
+		if response != nil {
+			switch response.StatusCode {
+			case 401:
+				return fmt.Errorf("authentication failed: token is invalid or expired")
+			case 403:
+				return fmt.Errorf("authentication failed: insufficient permissions or rate limited")
+			}
+		}
+		return fmt.Errorf("authentication check failed: %v", err)
+	}
+
+	return nil
 }

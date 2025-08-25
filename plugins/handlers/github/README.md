@@ -35,6 +35,7 @@ plugins:
     runner_group: macOS # requires Enterprise github
     # sleep_interval: 5 # Optional; defaults to 1 second.
     # registration_timeout_seconds: 60 # Optional; defaults to 60 seconds.
+    # template_disk_buffer: 10.0 # Optional; defaults to 10.0%. How much disk space to leave free on the host for templates.
     #database:
     #  enabled: true
     #  url: localhost
@@ -42,6 +43,9 @@ plugins:
     #  user: ""
     #  password: ""
     #  database: 0
+    #  max_retries: 5 # when a database operation fails due to a recoverable error, how many times to retry it before giving up
+    #  retry_delay: 1000 # how long to wait between retries
+    #  retry_backoff_factor: 2.0 # how much to multiply the retry delay by each time
 ```
 
 - Your PAT or Github App must have **Actions** and **Administration** Read & Write permissions.

@@ -16,21 +16,24 @@ import (
 type ContextKey string
 
 type Config struct {
-	Plugins                  []Plugin `yaml:"plugins"`
-	Log                      Log      `yaml:"log"`
-	PidFileDir               string   `yaml:"pid_file_dir"`
-	LogFileDir               string   `yaml:"log_file_dir"`
-	WorkDir                  string   `yaml:"work_dir"`
-	Metrics                  Metrics  `yaml:"metrics"`
-	GlobalPrivateKey         string   `yaml:"global_private_key"`
-	PluginsPath              string   `yaml:"plugins_path"`
-	GlobalDatabaseURL        string   `yaml:"global_database_url"`
-	GlobalDatabasePort       int      `yaml:"global_database_port"`
-	GlobalDatabaseUser       string   `yaml:"global_database_user"`
-	GlobalDatabasePassword   string   `yaml:"global_database_password"`
-	GlobalDatabaseDatabase   int      `yaml:"global_database_database"`
-	GlobalReceiverSecret     string   `yaml:"global_receiver_secret"`
-	GlobalTemplateDiskBuffer float64  `yaml:"global_template_disk_buffer"` // Global disk buffer percentage (e.g., 10.0 for 10%)
+	Plugins                          []Plugin `yaml:"plugins"`
+	Log                              Log      `yaml:"log"`
+	PidFileDir                       string   `yaml:"pid_file_dir"`
+	LogFileDir                       string   `yaml:"log_file_dir"`
+	WorkDir                          string   `yaml:"work_dir"`
+	Metrics                          Metrics  `yaml:"metrics"`
+	GlobalPrivateKey                 string   `yaml:"global_private_key"`
+	PluginsPath                      string   `yaml:"plugins_path"`
+	GlobalDatabaseURL                string   `yaml:"global_database_url"`
+	GlobalDatabasePort               int      `yaml:"global_database_port"`
+	GlobalDatabaseUser               string   `yaml:"global_database_user"`
+	GlobalDatabasePassword           string   `yaml:"global_database_password"`
+	GlobalDatabaseDatabase           int      `yaml:"global_database_database"`
+	GlobalDatabaseMaxRetries         int      `yaml:"global_database_max_retries"`
+	GlobalDatabaseRetryDelay         int      `yaml:"global_database_retry_delay"`
+	GlobalDatabaseRetryBackoffFactor float64  `yaml:"global_database_retry_backoff_factor"`
+	GlobalReceiverSecret             string   `yaml:"global_receiver_secret"`
+	GlobalTemplateDiskBuffer         float64  `yaml:"global_template_disk_buffer"` // Global disk buffer percentage (e.g., 10.0 for 10%)
 }
 
 type Log struct {
@@ -47,11 +50,14 @@ type Metrics struct {
 }
 
 type Database struct {
-	URL      string `yaml:"url"`
-	Port     int    `yaml:"port"`
-	User     string `yaml:"user"`
-	Password string `yaml:"password"`
-	Database int    `yaml:"database"`
+	URL                string  `yaml:"url"`
+	Port               int     `yaml:"port"`
+	User               string  `yaml:"user"`
+	Password           string  `yaml:"password"`
+	Database           int     `yaml:"database"`
+	MaxRetries         int     `yaml:"max_retries"`          // Maximum number of retry attempts (default: 3)
+	RetryDelay         int     `yaml:"retry_delay"`          // Initial retry delay in milliseconds (default: 1000)
+	RetryBackoffFactor float64 `yaml:"retry_backoff_factor"` // Backoff multiplier for retry delay (default: 2.0)
 }
 
 type Workflow struct {
