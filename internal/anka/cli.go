@@ -237,28 +237,16 @@ func (cli *Cli) AnkaExecutePullCommand(pluginCtx context.Context, args ...string
 	return cli.ExecuteParseJson(pluginCtx, cmdArgs...)
 }
 
-// AnkaGetTemplateSize gets the disk size of a template from the host
+// AnkaGetTemplateSize gets the image size of a template from the host
 func (cli *Cli) AnkaGetTemplateSize(pluginCtx context.Context, template, tag string) (uint64, error) {
 	// First try to get it from anka list which includes size information
-	list, err := cli.AnkaList(pluginCtx, template)
+	show, err := cli.AnkaShow(pluginCtx, template)
 	if err != nil {
 		return 0, err
 	}
 
-	if list.Status == "OK" && list.Body != nil {
-		if bodySlice, ok := list.Body.([]any); ok && len(bodySlice) > 0 {
-			if body, ok := bodySlice[0].(map[string]any); ok {
-				// Check if the tag matches what we're looking for
-				if version, ok := body["version"].(string); ok {
-					if tag == "(using latest)" || version == tag {
-						// Try to get size from the body - prioritize image_size (actual usage)
-						if imageSize, ok := body["image_size"].(float64); ok {
-							return uint64(imageSize), nil
-						}
-					}
-				}
-			}
-		}
+	if show.ImageSize > 0 {
+		return show.ImageSize, nil
 	}
 	return 0, fmt.Errorf("unable to determine template size")
 }
@@ -318,21 +306,21 @@ func (cli *Cli) AnkaRegistryPull(
 	pluginCtx context.Context,
 	template string,
 	tag string,
-) (*AnkaJson, error, error) { // pullJson, ensureSpaceError, genericError
+) (*AnkaJson, error) {
 	if workerCtx.Err() != nil || pluginCtx.Err() != nil {
-		return nil, nil, fmt.Errorf("context canceled before AnkaRegistryPull")
+		return nil, fmt.Errorf("context canceled before AnkaRegistryPull")
 	}
 
 	logging.Debug(pluginCtx, "pulling template to host")
 
 	metricsData, err := metrics.GetMetricsDataFromContext(workerCtx)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	workerGlobals, err := config.GetWorkerGlobalsFromContext(pluginCtx)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	defer func() {
@@ -347,7 +335,7 @@ func (cli *Cli) AnkaRegistryPull(
 	err = metricsData.SetStatus(pluginCtx, "pulling")
 	if err != nil {
 		logging.Error(pluginCtx, "error setting metrics status", "error", err)
-		return nil, nil, err
+		return nil, err
 	}
 
 	// Mark template as being pulled
@@ -361,19 +349,19 @@ func (cli *Cli) AnkaRegistryPull(
 	}
 	pullJson, err := cli.AnkaExecuteRegistryCommand(pluginCtx, args...)
 	if workerCtx.Err() != nil || pluginCtx.Err() != nil {
-		return nil, nil, fmt.Errorf("context canceled while pulling template")
+		return nil, fmt.Errorf("context canceled while pulling template")
 	}
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	if pullJson.Status != "OK" {
-		return nil, nil, fmt.Errorf("error pulling template from registry: %s", pullJson.Message)
+		return nil, fmt.Errorf("error pulling template from registry: %s", pullJson.Message)
 	}
 
 	templateSizeBytes, err := cli.AnkaGetTemplateSize(pluginCtx, template, tag)
 	if err != nil {
 		logging.Warn(pluginCtx, "unable to get template size after pull", "error", err)
-		return nil, nil, err
+		return nil, err
 	}
 
 	// Update template usage tracking
@@ -383,7 +371,7 @@ func (cli *Cli) AnkaRegistryPull(
 
 	logging.Info(pluginCtx, "successfully pulled template", "template", template, "tag", tag, "sizeBytes", templateSizeBytes)
 
-	return pullJson, nil, nil
+	return pullJson, nil
 }
 
 // AnkaDeleteTemplate deletes a template from the host
@@ -617,10 +605,6 @@ func (cli *Cli) EnsureVMTemplateExists(
 	targetTemplate string,
 	targetTag string,
 ) (error, error, error) { // noTemplateTagExistsInRegistryError, ensureSpaceError, genericError
-	ankaCLI, err := GetAnkaCLIFromContext(pluginCtx)
-	if err != nil {
-		return nil, nil, err
-	}
 	workerGlobals, err := config.GetWorkerGlobalsFromContext(pluginCtx)
 	if err != nil {
 		return nil, nil, err
@@ -629,9 +613,9 @@ func (cli *Cli) EnsureVMTemplateExists(
 	pullTemplate := false
 
 	// we need to do Anka List here because Anklet is allowed to work with non-Registry setups
-	list, err := ankaCLI.AnkaList(pluginCtx, targetTemplate)
+	list, err := cli.AnkaList(pluginCtx, targetTemplate)
 	if err != nil {
-		list, innerErr := ankaCLI.AnkaList(pluginCtx)
+		list, innerErr := cli.AnkaList(pluginCtx)
 		if innerErr != nil {
 			logging.Error(pluginCtx, "error executing anka list", "err", innerErr)
 			return nil, nil, innerErr
@@ -700,6 +684,7 @@ func (cli *Cli) EnsureVMTemplateExists(
 		if !ok {
 			return nil, nil, fmt.Errorf("unable to parse pull check output")
 		}
+		logging.Debug(pluginCtx, "pull check output", "pullJson", pullJson)
 		if len(body) > 0 { // check that it's not empty {"status":"OK","code":0,"body":{},"message":"6c14r: available locally"}
 			pullCheckOutput := &AnkaPullCheckOutput{}
 			if body, ok := pullJson.Body.(map[string]any); ok {
@@ -715,6 +700,8 @@ func (cli *Cli) EnsureVMTemplateExists(
 			bufferedAvailable := pullCheckOutput.Available - bufferSize
 			if bufferedAvailable <= downloadSize {
 				return nil, nil, fmt.Errorf("not enough space on host to pull template | available (buffered by %.0f%%): %d, download size: %d", pluginConfig.TemplateDiskBuffer, bufferedAvailable, downloadSize)
+			} else {
+				logging.Debug(pluginCtx, "enough space on host to pull template", "available", bufferedAvailable, "downloadSize", downloadSize)
 			}
 		}
 
@@ -723,16 +710,13 @@ func (cli *Cli) EnsureVMTemplateExists(
 			return nil, nil, fmt.Errorf("a pull is already running on this host")
 		}
 
-		pullJson, ensureSpaceError, err := cli.AnkaRegistryPull(workerCtx, pluginCtx, targetTemplate, targetTag)
+		pullJson, err = cli.AnkaRegistryPull(workerCtx, pluginCtx, targetTemplate, targetTag)
 		if workerCtx.Err() != nil || pluginCtx.Err() != nil {
 			logging.Error(pluginCtx, "context canceled while pulling template")
 			return nil, nil, nil
 		}
-		if ensureSpaceError != nil {
-			return nil, ensureSpaceError, nil
-		}
 		if pullJson == nil || pullJson.Code == 3 { // registry doesn't have template (or tag)
-			return err, nil, nil // noTemplateTagExistsInRegistryError
+			return fmt.Errorf("no template tag exists in registry"), nil, nil
 		}
 		if err != nil {
 			logging.Error(pluginCtx, "error executing anka registry pull", "err", err)
@@ -745,10 +729,8 @@ func (cli *Cli) EnsureVMTemplateExists(
 			logging.Warn(pluginCtx, "unable to get template size for existing template", "error", err)
 			templateSizeBytes = 0
 		}
-
 		// Update template usage since we're using an existing template
 		workerGlobals.TemplateTracker.UpdateTemplateUsage(targetTemplate, targetTag, templateSizeBytes)
-
 		logging.Debug(pluginCtx, "using existing template", "template", targetTemplate, "tag", targetTag, "sizeBytes", templateSizeBytes)
 	}
 	return nil, nil, nil
