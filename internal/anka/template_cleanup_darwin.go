@@ -73,7 +73,7 @@ func (cli *Cli) EnsureSpaceForTemplateOnDarwin(
 
 			// If even deleting all LRU templates wouldn't free enough space, don't delete anything
 			if totalFreeable <= bytesToFree {
-				return fmt.Errorf("insufficient space on host even after cleanup (need %d, can free %d, lruTemplateCount %d)", bytesToFree, totalFreeable, len(lruTemplates)), nil
+				return fmt.Errorf("insufficient space on host even if we cleaned up all templates (need %d, can free %d, lruTemplateCount %d)", bytesToFree, totalFreeable, len(lruTemplates)), nil
 			}
 
 			// Now proceed with actual deletion since we know it's possible to free enough space
@@ -88,8 +88,6 @@ func (cli *Cli) EnsureSpaceForTemplateOnDarwin(
 					"size", templateUsage.ImageSize,
 					"lastUsed", templateUsage.LastUsed,
 					"usageCount", templateUsage.UsageCount)
-
-				panic("test")
 
 				err := cli.AnkaDeleteTemplate(pluginCtx, templateUsage.Template, templateUsage.Tag)
 				if err != nil {
