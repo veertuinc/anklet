@@ -415,7 +415,6 @@ func (cli *Cli) AnkaDeleteTemplate(pluginCtx context.Context, templateUUID strin
 	// Remove from template tracker
 	workerGlobals.TemplateTracker.RemoveTemplate(templateUUID)
 
-	logging.Debug(pluginCtx, "TemplateTracker state after delete", "tracker", workerGlobals.TemplateTracker)
 	logging.Info(pluginCtx, "successfully deleted template", "templateUUID", templateUUID)
 	return nil
 }
