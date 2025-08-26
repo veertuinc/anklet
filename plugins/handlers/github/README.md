@@ -152,7 +152,7 @@ Outside of the mainCompletedQueue getting an item, you can interrupt it several 
 4. `<-pluginGlobals.RetryChannel` - This will send the job back to the mainQueue so other hosts can get a chance to run it.
 5. `<-pluginGlobals.PausedCancellationJobChannel` - This cleans up the job immediately on this host, since another host has picked it up. We could technically just use `finish` here as the Action, but it will allow us more control over logic that only happens when the paused job is removed from this host.
 
-#### `watchForJobCompletion`
+#### `watchJobStatus`
 
 This function loops and waits for the job to be in a completed status in the specific plugin's queue.
 
