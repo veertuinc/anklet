@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"github.com/veertuinc/anklet/internal/config"
+	"github.com/veertuinc/anklet/internal/host"
 	"github.com/veertuinc/anklet/internal/logging"
 )
 
@@ -78,6 +79,16 @@ func (cli *Cli) EnsureSpaceForTemplateOnDarwin(
 	}
 
 	if pullCheckOutput.Size > 0 { // check that it's not empty {"status":"OK","code":0,"body":{},"message":"6c14r: available locally"}
+
+		// if the template is just too big for the host, fail
+		hostDiskSizeBytes, err := host.GetHostDiskSizeBytes(pluginCtx)
+		if err != nil {
+			return nil, err
+		}
+		if pullCheckOutput.Size > hostDiskSizeBytes {
+			return fmt.Errorf("template is too big for the host (need %d, available %d)", pullCheckOutput.Size, hostDiskSizeBytes), nil
+		}
+
 		if bufferedAvailable <= downloadSize {
 			// if not enough space, try to free up space by deleting the LRU templates
 			bytesToFree := downloadSize - bufferedAvailable
