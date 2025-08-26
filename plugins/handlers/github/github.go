@@ -99,7 +99,7 @@ import (
 // 	return true
 // }
 
-func watchForJobCompletion(
+func watchJobStatus(
 	workerCtx context.Context,
 	pluginCtx context.Context,
 	pluginQueueName string,
@@ -1080,7 +1080,7 @@ func Run(
 		if *jobFromJobChannel.WorkflowJob.Status == "in_progress" { // TODO: make this the same as the loop later on
 			workerGlobals.Plugins[pluginConfig.Plugin][pluginConfig.Name].Preparing.Store(false)
 			logging.Info(pluginCtx, "watching for job completion", "jobFromJobChannel", jobFromJobChannel)
-			pluginCtx, err = watchForJobCompletion(
+			pluginCtx, err = watchJobStatus(
 				workerCtx,
 				pluginCtx,
 				pluginQueueName,
@@ -1445,6 +1445,7 @@ func Run(
 	}
 	// if the job has attempts > 0, we need to check the status from the API to see if the job is still even running
 	// Github can mark a job completed, but it's not sending the webhook event for completed and it can sit like this for hours
+	// TODO: find a way to test this
 	if queuedJob.Attempts > 0 {
 		if queuedJob.Attempts > 5 {
 			logging.Warn(pluginCtx, "job has attempts > 5, cancelling it")
@@ -1465,13 +1466,18 @@ func Run(
 			return pluginCtx, nil
 		}
 		if queuedJob.WorkflowJob.Status != nil && *queuedJob.WorkflowJob.Status == "completed" {
+			queuedJob.Action = "finish"
+			err = internalGithub.UpdateJobInDB(pluginCtx, pluginQueueName, &queuedJob)
+			if err != nil {
+				logging.Error(pluginCtx, "error updating job in db", "err", err)
+			}
 			pluginGlobals.JobChannel <- queuedJob
 			return pluginCtx, nil
 		}
 		if queuedJob.WorkflowJob.Status != nil && *queuedJob.WorkflowJob.Status == "in_progress" {
 			logging.Info(pluginCtx, "job is in progress, so we'll wait for it to finish")
 			workerGlobals.Plugins[pluginConfig.Plugin][pluginConfig.Name].Preparing.Store(false)
-			pluginCtx, err = watchForJobCompletion(
+			pluginCtx, err = watchJobStatus(
 				workerCtx,
 				pluginCtx,
 				pluginQueueName,
@@ -1958,7 +1964,7 @@ func Run(
 	}
 
 	// Watch for job completion
-	pluginCtx, err = watchForJobCompletion(
+	pluginCtx, err = watchJobStatus(
 		workerCtx,
 		pluginCtx,
 		pluginQueueName,
