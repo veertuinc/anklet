@@ -89,7 +89,7 @@ func (cli *Cli) EnsureSpaceForTemplateOnDarwin(
 					"lastUsed", templateUsage.LastUsed,
 					"usageCount", templateUsage.UsageCount)
 
-				err := cli.AnkaDeleteTemplate(pluginCtx, templateUsage.Template, templateUsage.Tag)
+				err := cli.AnkaDeleteTemplate(pluginCtx, templateUsage.Template)
 				if err != nil {
 					logging.Error(pluginCtx, "failed to delete LRU template", "error", err)
 					continue

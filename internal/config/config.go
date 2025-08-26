@@ -356,8 +356,8 @@ func NewTemplateTracker() *TemplateTracker {
 }
 
 // GetTemplateKey returns the key for a template:tag combination
-func (tt *TemplateTracker) GetTemplateKey(template, tag string) string {
-	return fmt.Sprintf("%s:%s", template, tag)
+func (tt *TemplateTracker) GetTemplateKey(template string) string {
+	return template
 }
 
 // UpdateTemplateUsage updates the usage statistics for a template
@@ -365,7 +365,7 @@ func (tt *TemplateTracker) UpdateTemplateUsage(template, tag string, sizeBytes u
 	tt.Mutex.Lock()
 	defer tt.Mutex.Unlock()
 
-	key := tt.GetTemplateKey(template, tag)
+	key := tt.GetTemplateKey(template)
 	if usage, exists := tt.Templates[key]; exists {
 		usage.LastUsed = time.Now()
 		usage.UsageCount++
@@ -390,7 +390,7 @@ func (tt *TemplateTracker) SetTemplateInUse(template, tag string, inUse bool) {
 	tt.Mutex.Lock()
 	defer tt.Mutex.Unlock()
 
-	key := tt.GetTemplateKey(template, tag)
+	key := tt.GetTemplateKey(template)
 	if usage, exists := tt.Templates[key]; exists {
 		usage.InUse = inUse
 	}
@@ -401,7 +401,7 @@ func (tt *TemplateTracker) SetTemplatePulling(template, tag string, pulling bool
 	tt.Mutex.Lock()
 	defer tt.Mutex.Unlock()
 
-	key := tt.GetTemplateKey(template, tag)
+	key := tt.GetTemplateKey(template)
 	if usage, exists := tt.Templates[key]; exists {
 		usage.Pulling = pulling
 	} else if pulling {
@@ -463,11 +463,11 @@ func (tt *TemplateTracker) GetTotalTemplateSize() uint64 {
 }
 
 // RemoveTemplate removes a template from tracking
-func (tt *TemplateTracker) RemoveTemplate(template, tag string) {
+func (tt *TemplateTracker) RemoveTemplate(template string) {
 	tt.Mutex.Lock()
 	defer tt.Mutex.Unlock()
 
-	key := tt.GetTemplateKey(template, tag)
+	key := tt.GetTemplateKey(template)
 	delete(tt.Templates, key)
 }
 
@@ -476,7 +476,7 @@ func (tt *TemplateTracker) GetTemplateUsage(template, tag string) (*TemplateUsag
 	tt.Mutex.RLock()
 	defer tt.Mutex.RUnlock()
 
-	key := tt.GetTemplateKey(template, tag)
+	key := tt.GetTemplateKey(template)
 	usage, exists := tt.Templates[key]
 	return usage, exists
 }

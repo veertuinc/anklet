@@ -375,20 +375,15 @@ func (cli *Cli) AnkaRegistryPull(
 }
 
 // AnkaDeleteTemplate deletes a template from the host
-func (cli *Cli) AnkaDeleteTemplate(pluginCtx context.Context, template, tag string) error {
+func (cli *Cli) AnkaDeleteTemplate(pluginCtx context.Context, template string) error {
+	// we don't use tag here because the deletion of a tag keeps the template still around
 	workerGlobals, err := config.GetWorkerGlobalsFromContext(pluginCtx)
 	if err != nil {
 		logging.Warn(pluginCtx, "unable to get worker globals to update template tracker", "error", err)
 		return err
 	}
 	logging.Info(pluginCtx, "deleting template from host", "template", template)
-	// var args []string
-	// can't delete tags properly yet: https://veertu.atlassian.net/browse/ANKA-7433
-	// if tag != "(using latest)" {
-	// 	args = []string{"anka", "-j", "delete", "--yes", template, "--tag", tag}
-	// } else {
 	args := []string{"anka", "-j", "delete", "--yes", template}
-	// }
 
 	deleteOutput, err := cli.ExecuteParseJson(pluginCtx, args...)
 	if err != nil {
@@ -401,7 +396,7 @@ func (cli *Cli) AnkaDeleteTemplate(pluginCtx context.Context, template, tag stri
 	}
 
 	// Remove from template tracker
-	workerGlobals.TemplateTracker.RemoveTemplate(template, tag)
+	workerGlobals.TemplateTracker.RemoveTemplate(template)
 
 	logging.Info(pluginCtx, "successfully deleted template", "template", template)
 	return nil
@@ -572,7 +567,7 @@ func (cli *Cli) DiscoverAndPopulateExistingTemplates(ctx context.Context, templa
 
 					// Add to template tracker with initial usage data
 					templateTracker.Mutex.Lock()
-					key := templateTracker.GetTemplateKey(templateName, templateTag)
+					key := templateTracker.GetTemplateKey(templateName)
 					templateTracker.Templates[key] = &config.TemplateUsage{
 						Template:   templateName,
 						Tag:        templateTag,
