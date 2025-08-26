@@ -376,13 +376,19 @@ func (cli *Cli) AnkaRegistryPull(
 
 // AnkaDeleteTemplate deletes a template from the host
 func (cli *Cli) AnkaDeleteTemplate(pluginCtx context.Context, template, tag string) error {
-	logging.Info(pluginCtx, "deleting template from host", "template", template, "tag", tag)
-	var args []string
-	if tag != "(using latest)" {
-		args = []string{"anka", "-j", "delete", "--yes", template, "--tag", tag}
-	} else {
-		args = []string{"anka", "-j", "delete", "--yes", template}
+	workerGlobals, err := config.GetWorkerGlobalsFromContext(pluginCtx)
+	if err != nil {
+		logging.Warn(pluginCtx, "unable to get worker globals to update template tracker", "error", err)
+		return err
 	}
+	logging.Info(pluginCtx, "deleting template from host", "template", template)
+	// var args []string
+	// can't delete tags properly yet: https://veertu.atlassian.net/browse/ANKA-7433
+	// if tag != "(using latest)" {
+	// 	args = []string{"anka", "-j", "delete", "--yes", template, "--tag", tag}
+	// } else {
+	args := []string{"anka", "-j", "delete", "--yes", template}
+	// }
 
 	deleteOutput, err := cli.ExecuteParseJson(pluginCtx, args...)
 	if err != nil {
@@ -395,14 +401,9 @@ func (cli *Cli) AnkaDeleteTemplate(pluginCtx context.Context, template, tag stri
 	}
 
 	// Remove from template tracker
-	workerGlobals, err := config.GetWorkerGlobalsFromContext(pluginCtx)
-	if err != nil {
-		logging.Warn(pluginCtx, "unable to get worker globals to update template tracker", "error", err)
-	} else {
-		workerGlobals.TemplateTracker.RemoveTemplate(template, tag)
-	}
+	workerGlobals.TemplateTracker.RemoveTemplate(template, tag)
 
-	logging.Info(pluginCtx, "successfully deleted template", "template", template, "tag", tag)
+	logging.Info(pluginCtx, "successfully deleted template", "template", template)
 	return nil
 }
 
