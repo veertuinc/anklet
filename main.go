@@ -509,6 +509,18 @@ func worker(
 					}
 					pluginCtx = context.WithValue(pluginCtx, config.ContextKey("ankacli"), ankaCLI)
 					logging.Dev(pluginCtx, "loaded the anka CLI")
+
+					// Discover and populate existing templates in the TemplateTracker
+					// This only needs to be done once per system, so we check if templates are already populated
+					if len(workerGlobals.TemplateTracker.Templates) == 0 {
+						logging.Dev(pluginCtx, "discovering existing templates on system")
+						err = ankaCLI.DiscoverAndPopulateExistingTemplates(pluginCtx, workerGlobals.TemplateTracker)
+						if err != nil {
+							logging.Warn(pluginCtx, "failed to discover existing templates", "error", err)
+							// Don't fail the plugin startup for this, just log the warning
+						}
+					}
+					logging.Debug(pluginCtx, "populated existing templates in TemplateTracker", "templates", workerGlobals.TemplateTracker.Templates)
 				}
 
 				var databaseURL = loadedConfig.GlobalDatabaseURL

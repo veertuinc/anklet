@@ -523,6 +523,78 @@ func (cli *Cli) AnkaList(pluginCtx context.Context, args ...string) (*AnkaJson, 
 	return output, nil
 }
 
+// DiscoverAndPopulateExistingTemplates discovers all existing templates on the system
+// and populates the TemplateTracker with their information
+func (cli *Cli) DiscoverAndPopulateExistingTemplates(ctx context.Context, templateTracker *config.TemplateTracker) error {
+	logging.Info(ctx, "discovering existing templates on system")
+
+	// Get list of all templates
+	listOutput, err := cli.AnkaList(ctx)
+	if err != nil {
+		logging.Warn(ctx, "unable to list existing templates", "error", err)
+		return err
+	}
+
+	if listOutput.Status != "OK" {
+		logging.Warn(ctx, "anka list returned error status", "status", listOutput.Status, "message", listOutput.Message)
+		return fmt.Errorf("anka list failed: %s", listOutput.Message)
+	}
+
+	// Parse the template list
+	templateCount := 0
+	if bodySlice, ok := listOutput.Body.([]any); ok {
+		for _, templateData := range bodySlice {
+			if templateMap, ok := templateData.(map[string]any); ok {
+				templateName := ""
+				templateTag := ""
+
+				// Extract template name
+				if name, ok := templateMap["name"].(string); ok {
+					templateName = name
+				}
+
+				// Extract template tag/version
+				if version, ok := templateMap["version"].(string); ok {
+					templateTag = version
+				} else {
+					templateTag = "latest" // Default tag if none specified
+				}
+
+				if templateName != "" {
+					// Get template size
+					templateSize, err := cli.AnkaGetTemplateSize(ctx, templateName, templateTag)
+					if err != nil {
+						logging.Warn(ctx, "unable to get template size during discovery",
+							"template", templateName, "tag", templateTag, "error", err)
+						templateSize = 0 // Continue with 0 size rather than failing
+					}
+
+					// Add to template tracker with initial usage data
+					templateTracker.Mutex.Lock()
+					key := templateTracker.GetTemplateKey(templateName, templateTag)
+					templateTracker.Templates[key] = &config.TemplateUsage{
+						Template:   templateName,
+						Tag:        templateTag,
+						ImageSize:  templateSize,
+						LastUsed:   time.Now(), // Mark as recently discovered
+						UsageCount: 0,          // No usage yet, just discovered
+						InUse:      false,
+						Pulling:    false,
+					}
+					templateTracker.Mutex.Unlock()
+
+					templateCount++
+					logging.Debug(ctx, "discovered existing template",
+						"template", templateName, "tag", templateTag, "size", templateSize)
+				}
+			}
+		}
+	}
+
+	logging.Info(ctx, "template discovery complete", "templatesFound", templateCount, "templates", templateTracker.Templates)
+	return nil
+}
+
 func (cli *Cli) AnkaCopyOutOfVM(pluginCtx context.Context, vmName string, objectToCopyOut string, hostLevelDestination string) error {
 	copyOutput, err := cli.ExecuteParseJson(pluginCtx, "anka", "-j", "cp", "-a", fmt.Sprintf("%s:%s", vmName, objectToCopyOut), hostLevelDestination)
 	if err != nil {
@@ -666,51 +738,21 @@ func (cli *Cli) EnsureVMTemplateExists(
 	}
 	if pullTemplate {
 
-		pluginConfig, err := config.GetPluginFromContext(pluginCtx)
-		if err != nil {
-			return nil, nil, err
-		}
-
-		// check if the template is already on the host and if it will even fit
-		pullJson, err := cli.AnkaExecutePullCommand(pluginCtx, targetTemplate, "--tag", targetTag, "--check-download-size")
-		if err != nil {
-			return nil, nil, err
-		}
-		if pullJson.Status != "OK" {
-			return nil, nil, fmt.Errorf("error checking template size: %+v", pullJson)
-		}
-
-		body, ok := pullJson.Body.(map[string]any)
-		if !ok {
-			return nil, nil, fmt.Errorf("unable to parse pull check output")
-		}
-		logging.Debug(pluginCtx, "pull check output", "pullJson", pullJson)
-		if len(body) > 0 { // check that it's not empty {"status":"OK","code":0,"body":{},"message":"6c14r: available locally"}
-			pullCheckOutput := &AnkaPullCheckOutput{}
-			if body, ok := pullJson.Body.(map[string]any); ok {
-				pullCheckOutput.Size = uint64(body["size"].(float64))
-				pullCheckOutput.Cached = uint64(body["cached"].(float64))
-				pullCheckOutput.Available = uint64(body["available"].(float64))
-			} else {
-				return nil, nil, fmt.Errorf("unable to parse pull check output")
-			}
-			downloadSize := pullCheckOutput.Size - pullCheckOutput.Cached
-			// Calculate the minimum available space required, considering the buffer as a percentage
-			bufferSize := uint64(float64(pullCheckOutput.Available) * (pluginConfig.TemplateDiskBuffer / 100.0))
-			bufferedAvailable := pullCheckOutput.Available - bufferSize
-			if bufferedAvailable <= downloadSize {
-				return nil, nil, fmt.Errorf("not enough space on host to pull template | available (buffered by %.0f%%): %d, download size: %d", pluginConfig.TemplateDiskBuffer, bufferedAvailable, downloadSize)
-			} else {
-				logging.Debug(pluginCtx, "enough space on host to pull template", "available", bufferedAvailable, "downloadSize", downloadSize)
-			}
-		}
-
 		// Check if any templates are currently being pulled
 		if workerGlobals.TemplateTracker.HasPullingTemplates() {
 			return nil, nil, fmt.Errorf("a pull is already running on this host")
 		}
 
-		pullJson, err = cli.AnkaRegistryPull(workerCtx, pluginCtx, targetTemplate, targetTag)
+		// ensure space for template
+		ensureSpaceError, genericError := cli.EnsureSpaceForTemplateOnDarwin(workerCtx, pluginCtx, targetTemplate, targetTag)
+		if ensureSpaceError != nil {
+			return nil, ensureSpaceError, nil
+		}
+		if genericError != nil {
+			return nil, nil, genericError
+		}
+
+		pullJson, err := cli.AnkaRegistryPull(workerCtx, pluginCtx, targetTemplate, targetTag)
 		if workerCtx.Err() != nil || pluginCtx.Err() != nil {
 			logging.Error(pluginCtx, "context canceled while pulling template")
 			return nil, nil, nil

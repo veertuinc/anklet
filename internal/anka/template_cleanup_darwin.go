@@ -7,7 +7,6 @@ import (
 	"fmt"
 
 	"github.com/veertuinc/anklet/internal/config"
-	"github.com/veertuinc/anklet/internal/host"
 	"github.com/veertuinc/anklet/internal/logging"
 )
 
@@ -16,102 +15,103 @@ func (cli *Cli) EnsureSpaceForTemplateOnDarwin(
 	workerCtx context.Context,
 	pluginCtx context.Context,
 	template, tag string,
-	requiredSizeBytes uint64,
-) error {
+) (error, error) { // ensureSpaceError, genericError
+	var bytesFreed uint64
 	workerGlobals, err := config.GetWorkerGlobalsFromContext(pluginCtx)
 	if err != nil {
-		return err
+		return nil, err
 	}
-
-	// Get current disk usage (only available on Darwin/macOS)
-	hostDiskUsed, err := host.GetHostDiskUsedBytes(pluginCtx)
+	pluginConfig, err := config.GetPluginFromContext(pluginCtx)
 	if err != nil {
-		logging.Warn(pluginCtx, "unable to get host disk usage, skipping space check", "error", err)
-		return nil // Continue without space check if we can't get disk info
+		return nil, err
 	}
-
-	hostDiskTotal, err := host.GetHostDiskTotalBytes(pluginCtx)
+	pullJson, err := cli.AnkaExecutePullCommand(pluginCtx, template, "--tag", tag, "--check-download-size")
 	if err != nil {
-		logging.Warn(pluginCtx, "unable to get host disk total, skipping space check", "error", err)
-		return nil // Continue without space check if we can't get disk info
+		return nil, err
 	}
-
-	availableSpace := hostDiskTotal - hostDiskUsed
-
-	// Get the configured disk buffer percentage
-	bufferPercentage, err := config.GetEffectiveTemplateDiskBuffer(pluginCtx)
-	if err != nil {
-		return fmt.Errorf("unable to get effective template disk buffer: %w", err)
+	if pullJson.Status != "OK" {
+		return nil, fmt.Errorf("error checking template size: %+v", pullJson)
 	}
-
-	// Check if we have enough space (leave configured buffer)
-	bufferBytes := uint64(float64(hostDiskTotal) * (bufferPercentage / 100.0))
-	requiredSpaceWithBuffer := requiredSizeBytes + bufferBytes
-
-	if availableSpace >= requiredSpaceWithBuffer {
-		logging.Debug(pluginCtx, "sufficient space available for template",
-			"availableSpace", availableSpace,
-			"requiredSpace", requiredSpaceWithBuffer,
-			"bufferPercentage", bufferPercentage)
-		return nil
+	body, ok := pullJson.Body.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("unable to parse pull check output")
 	}
-
-	logging.Info(pluginCtx, "insufficient space for template, cleaning up LRU templates",
-		"availableSpace", availableSpace,
-		"requiredSpace", requiredSpaceWithBuffer,
-		"bufferPercentage", bufferPercentage,
-		"needToFree", requiredSpaceWithBuffer-availableSpace)
-
-	// Get LRU templates for cleanup
-	lruTemplates := workerGlobals.TemplateTracker.GetLeastRecentlyUsedTemplates()
-	spaceToFree := requiredSpaceWithBuffer - availableSpace
-
-	// First, calculate total space that could potentially be freed
-	var totalFreeable uint64
-	for _, templateUsage := range lruTemplates {
-		totalFreeable += templateUsage.ImageSize
-	}
-
-	// If even deleting all LRU templates wouldn't free enough space, don't delete anything
-	if totalFreeable < spaceToFree {
-		logging.Warn(pluginCtx, "insufficient space even if we deleted all LRU templates, returning job to queue",
-			"spaceToFree", spaceToFree,
-			"totalFreeable", totalFreeable,
-			"lruTemplateCount", len(lruTemplates))
-		return fmt.Errorf("insufficient space on host even after cleanup (need %d, can free %d)", spaceToFree, totalFreeable)
-	}
-
-	// Now proceed with actual deletion since we know it's possible to free enough space
-	var freedSpace uint64
-	for _, templateUsage := range lruTemplates {
-		if freedSpace >= spaceToFree {
-			break
+	logging.Debug(pluginCtx, "pull check output", "pullJson", pullJson)
+	if len(body) > 0 { // check that it's not empty {"status":"OK","code":0,"body":{},"message":"6c14r: available locally"}
+		pullCheckOutput := &AnkaPullCheckOutput{}
+		if body, ok := pullJson.Body.(map[string]any); ok {
+			pullCheckOutput.Size = uint64(body["size"].(float64))
+			pullCheckOutput.Cached = uint64(body["cached"].(float64))
+			pullCheckOutput.Available = uint64(body["available"].(float64))
+		} else {
+			return nil, fmt.Errorf("unable to parse pull check output")
 		}
 
-		logging.Info(pluginCtx, "deleting LRU template to free space",
-			"template", templateUsage.Template,
-			"tag", templateUsage.Tag,
-			"size", templateUsage.ImageSize,
-			"lastUsed", templateUsage.LastUsed,
-			"usageCount", templateUsage.UsageCount)
+		downloadSize := pullCheckOutput.Size - pullCheckOutput.Cached
+		// Calculate the minimum available space required, considering the buffer as a percentage
+		bufferSize := uint64(float64(pullCheckOutput.Available) * (pluginConfig.TemplateDiskBuffer / 100.0))
+		bufferedAvailable := pullCheckOutput.Available - bufferSize
 
-		panic("test")
+		if bufferedAvailable <= downloadSize {
+			// if not enough space, try to free up space by deleting the LRU templates
+			bytesToFree := downloadSize - bufferedAvailable
 
-		err := cli.AnkaDeleteTemplate(pluginCtx, templateUsage.Template, templateUsage.Tag)
-		if err != nil {
-			logging.Error(pluginCtx, "failed to delete LRU template", "error", err)
-			continue
+			logging.Warn(pluginCtx, "insufficient space for template, cleaning up LRU templates",
+				"bufferedAvailable", bufferedAvailable,
+				"downloadSize", downloadSize,
+				"bytesToFree", bytesToFree,
+			)
+
+			// First, calculate total space that could potentially be freed
+			lruTemplates := workerGlobals.TemplateTracker.GetLeastRecentlyUsedTemplates()
+			var totalFreeable uint64
+			for _, templateUsage := range lruTemplates {
+				totalFreeable += templateUsage.ImageSize
+			}
+
+			logging.Debug(pluginCtx, "lru templates", "lruTemplates", lruTemplates, "totalFreeable", totalFreeable, "bytesToFree", bytesToFree)
+
+			// If even deleting all LRU templates wouldn't free enough space, don't delete anything
+			if totalFreeable <= bytesToFree {
+				return fmt.Errorf("insufficient space on host even after cleanup (need %d, can free %d, lruTemplateCount %d)", bytesToFree, totalFreeable, len(lruTemplates)), nil
+			}
+
+			// Now proceed with actual deletion since we know it's possible to free enough space
+			for _, templateUsage := range lruTemplates {
+				if bytesFreed >= bytesToFree {
+					break
+				}
+
+				logging.Info(pluginCtx, "deleting LRU template to free space",
+					"template", templateUsage.Template,
+					"tag", templateUsage.Tag,
+					"size", templateUsage.ImageSize,
+					"lastUsed", templateUsage.LastUsed,
+					"usageCount", templateUsage.UsageCount)
+
+				panic("test")
+
+				err := cli.AnkaDeleteTemplate(pluginCtx, templateUsage.Template, templateUsage.Tag)
+				if err != nil {
+					logging.Error(pluginCtx, "failed to delete LRU template", "error", err)
+					continue
+				}
+
+				// Template tracker is automatically updated by AnkaDeleteTemplate
+				bytesFreed += templateUsage.ImageSize
+			}
+
+			logging.Info(pluginCtx, "successfully freed space for template", "bytesFreed", bytesFreed)
+
+			// This should not happen since we pre-calculated; but safety check
+			if bytesFreed < bytesToFree {
+				return fmt.Errorf("unexpected: unable to free enough space for template (freed %d, needed %d)", bytesFreed, bytesToFree), nil
+			}
+
+		} else {
+			logging.Debug(pluginCtx, "enough space on host to pull template", "available", bufferedAvailable, "downloadSize", downloadSize)
 		}
-
-		// Template tracker is automatically updated by AnkaDeleteTemplate
-		freedSpace += templateUsage.ImageSize
 	}
 
-	// This should not happen since we pre-calculated, but safety check
-	if freedSpace < spaceToFree {
-		return fmt.Errorf("unexpected: unable to free enough space for template (freed %d, needed %d)", freedSpace, spaceToFree)
-	}
-
-	logging.Info(pluginCtx, "successfully freed space for template", "freedSpace", freedSpace)
-	return nil
+	return nil, nil
 }
