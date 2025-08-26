@@ -99,13 +99,15 @@ import (
 // 	return true
 // }
 
+// watchJobStatus is the main loop that watches for job completion
+// It checks the plugin's queue for the job and then examines the status of the job, handling appropriately
 func watchJobStatus(
 	workerCtx context.Context,
 	pluginCtx context.Context,
 	pluginQueueName string,
 	mainInProgressQueueName string,
 ) (context.Context, error) {
-	logging.Debug(pluginCtx, "starting watchForJobCompletion")
+	logging.Debug(pluginCtx, "starting watchJobStatus")
 	pluginGlobals, err := internalGithub.GetPluginGlobalsFromContext(pluginCtx)
 	if err != nil {
 		return pluginCtx, err
@@ -124,6 +126,7 @@ func watchJobStatus(
 	jobStatusCheckIntervalSeconds := 10
 	firstLog := true
 	for {
+		logging.Debug(pluginCtx, "watchJobStatus loop")
 		// Check for shutdown signal more frequently
 		if workerCtx.Err() != nil || pluginCtx.Err() != nil {
 			logging.Warn(pluginCtx, "context canceled while watching for job completion")
@@ -352,6 +355,7 @@ func checkForCompletedJobs(
 	mainCompletedQueueName string,
 	mainInProgressQueueName string,
 ) {
+	logging.Debug(pluginCtx, "starting checkForCompletedJobs")
 	randomInt := rand.Intn(100)
 	pluginCtx = logging.AppendCtx(pluginCtx, slog.Int("check_id", randomInt))
 	workerGlobals, err := config.GetWorkerGlobalsFromContext(pluginCtx)
@@ -377,6 +381,7 @@ func checkForCompletedJobs(
 	checkForCompletedJobsContext := context.Background() // needed so we can finalize database changes without orphaning or losing jobs
 
 	for {
+		logging.Debug(pluginCtx, "checkForCompletedJobs loop")
 		var updateDB = false
 		// BE VERY CAREFUL when you use return here. You could orphan the job if you're not careful.
 		pluginGlobals.IncrementCheckForCompletedJobsRunCount()
@@ -419,7 +424,7 @@ func checkForCompletedJobs(
 				pluginGlobals.JobChannel <- internalGithub.QueueJob{Action: "finish"}
 			}
 		case job := <-pluginGlobals.JobChannel:
-			// logging.Debug(pluginCtx, "checkForCompletedJobs -> job channel job", "job", job)
+			logging.Debug(pluginCtx, "checkForCompletedJobs -> job channel job", "job", job)
 			if job.Action == "finish" {
 				return
 			}
@@ -1113,6 +1118,7 @@ func Run(
 		pausedQueueName,
 		true,
 	)
+	logging.Debug(pluginCtx, "after first cleanup")
 	select {
 	case runningJob := <-pluginGlobals.JobChannel:
 		// fmt.Println("after first cleanup status", runningJob.WorkflowJob.Status)
