@@ -263,18 +263,19 @@ type PluginGlobal struct {
 
 // TemplateUsage tracks usage statistics for a template/tag combination
 type TemplateUsage struct {
-	Template   string    `json:"template"`
-	Tag        string    `json:"tag"`
-	ImageSize  uint64    `json:"image_size"` // Template actual disk usage
-	LastUsed   time.Time `json:"last_used"`
-	UsageCount uint64    `json:"usage_count"`
-	InUse      bool      `json:"in_use"`  // Currently being used by a running VM
-	Pulling    bool      `json:"pulling"` // Currently being pulled
+	UUID         string    `json:"uuid"`
+	Name         string    `json:"name"`
+	Tag          string    `json:"tag"`
+	ImageSize    uint64    `json:"image_size"` // Template actual disk usage
+	LastAccessed time.Time `json:"last_accessed"`
+	UsageCount   uint64    `json:"usage_count"`
+	InUse        bool      `json:"in_use"`  // Currently being used by a running VM
+	Pulling      bool      `json:"pulling"` // Currently being pulled
 }
 
 // TemplateTracker manages template usage across all plugins
 type TemplateTracker struct {
-	Templates map[string]*TemplateUsage // key: template:tag
+	Templates map[string]*TemplateUsage // key: templateUUID
 	Mutex     *sync.RWMutex
 }
 
@@ -355,65 +356,76 @@ func NewTemplateTracker() *TemplateTracker {
 	}
 }
 
-// GetTemplateKey returns the key for a template:tag combination
-func (tt *TemplateTracker) GetTemplateKey(template string) string {
-	return template
+// GetTemplateKey returns the key for a template UUID
+func (tt *TemplateTracker) GetTemplateKey(templateUUID string) string {
+	return templateUUID
 }
 
 // UpdateTemplateUsage updates the usage statistics for a template
-func (tt *TemplateTracker) UpdateTemplateUsage(template, tag string, sizeBytes uint64) {
+func (tt *TemplateTracker) UpdateTemplateUsage(
+	templateUUID, templateName, templateTag string,
+	sizeBytes uint64,
+	lastAccessed time.Time,
+) {
 	tt.Mutex.Lock()
 	defer tt.Mutex.Unlock()
 
-	key := tt.GetTemplateKey(template)
+	key := tt.GetTemplateKey(templateUUID)
 	if usage, exists := tt.Templates[key]; exists {
-		usage.LastUsed = time.Now()
+		usage.UUID = templateUUID
+		usage.LastAccessed = lastAccessed
 		usage.UsageCount++
 		if sizeBytes > 0 {
 			usage.ImageSize = sizeBytes
 		}
 	} else {
 		tt.Templates[key] = &TemplateUsage{
-			Template:   template,
-			Tag:        tag,
-			ImageSize:  sizeBytes,
-			LastUsed:   time.Now(),
-			UsageCount: 1,
-			InUse:      false,
-			Pulling:    false,
+			UUID:         templateUUID,
+			Name:         templateName,
+			Tag:          templateTag,
+			ImageSize:    sizeBytes,
+			LastAccessed: lastAccessed,
+			UsageCount:   1,
+			InUse:        false,
+			Pulling:      false,
 		}
 	}
 }
 
 // SetTemplateInUse marks a template as in use or not in use
-func (tt *TemplateTracker) SetTemplateInUse(template, tag string, inUse bool) {
+func (tt *TemplateTracker) SetTemplateInUse(templateUUID, templateName, templateTag string, inUse bool) {
 	tt.Mutex.Lock()
 	defer tt.Mutex.Unlock()
 
-	key := tt.GetTemplateKey(template)
+	key := tt.GetTemplateKey(templateUUID)
 	if usage, exists := tt.Templates[key]; exists {
 		usage.InUse = inUse
 	}
 }
 
 // SetTemplatePulling marks a template as being pulled or not
-func (tt *TemplateTracker) SetTemplatePulling(template, tag string, pulling bool) {
+func (tt *TemplateTracker) SetTemplatePulling(
+	templateUUID, templateName, templateTag string,
+	pulling bool,
+	lastAccessed time.Time,
+) {
 	tt.Mutex.Lock()
 	defer tt.Mutex.Unlock()
 
-	key := tt.GetTemplateKey(template)
+	key := tt.GetTemplateKey(templateUUID)
 	if usage, exists := tt.Templates[key]; exists {
 		usage.Pulling = pulling
 	} else if pulling {
 		// Create entry for template being pulled
 		tt.Templates[key] = &TemplateUsage{
-			Template:   template,
-			Tag:        tag,
-			ImageSize:  0, // Will be updated after pull
-			LastUsed:   time.Now(),
-			UsageCount: 0,
-			InUse:      false,
-			Pulling:    true,
+			UUID:         templateUUID,
+			Name:         templateName,
+			Tag:          templateTag,
+			ImageSize:    0, // Will be updated after pull
+			LastAccessed: lastAccessed,
+			UsageCount:   0,
+			InUse:        false,
+			Pulling:      true,
 		}
 	}
 }
@@ -440,7 +452,7 @@ func (tt *TemplateTracker) GetLeastRecentlyUsedTemplates() []*TemplateUsage {
 				templates[i], templates[j] = templates[j], templates[i]
 			} else if templates[i].UsageCount == templates[j].UsageCount {
 				// If usage count is the same, sort by last used time
-				if templates[i].LastUsed.After(templates[j].LastUsed) {
+				if templates[i].LastAccessed.After(templates[j].LastAccessed) {
 					templates[i], templates[j] = templates[j], templates[i]
 				}
 			}
@@ -463,20 +475,20 @@ func (tt *TemplateTracker) GetTotalTemplateSize() uint64 {
 }
 
 // RemoveTemplate removes a template from tracking
-func (tt *TemplateTracker) RemoveTemplate(template string) {
+func (tt *TemplateTracker) RemoveTemplate(templateUUID string) {
 	tt.Mutex.Lock()
 	defer tt.Mutex.Unlock()
 
-	key := tt.GetTemplateKey(template)
+	key := tt.GetTemplateKey(templateUUID)
 	delete(tt.Templates, key)
 }
 
 // GetTemplateUsage returns the usage info for a specific template
-func (tt *TemplateTracker) GetTemplateUsage(template, tag string) (*TemplateUsage, bool) {
+func (tt *TemplateTracker) GetTemplateUsage(templateUUID string) (*TemplateUsage, bool) {
 	tt.Mutex.RLock()
 	defer tt.Mutex.RUnlock()
 
-	key := tt.GetTemplateKey(template)
+	key := tt.GetTemplateKey(templateUUID)
 	usage, exists := tt.Templates[key]
 	return usage, exists
 }

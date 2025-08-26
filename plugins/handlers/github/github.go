@@ -1539,8 +1539,8 @@ func Run(
 	}
 
 	// get anka template
-	ankaTemplate := extractLabelValue(queuedJob.WorkflowJob.Labels, "anka-template:")
-	if ankaTemplate == "" {
+	ankaTemplateUUID := extractLabelValue(queuedJob.WorkflowJob.Labels, "anka-template:")
+	if ankaTemplateUUID == "" {
 		logging.Warn(pluginCtx, "warning: unable to find Anka Template specified in labels, cancelling job")
 		// TODO: turn this block into a function, then use it throughout the plugin
 		queuedJob.Action = "cancel"
@@ -1552,7 +1552,7 @@ func Run(
 		pluginGlobals.JobChannel <- queuedJob
 		return pluginCtx, nil
 	}
-	pluginCtx = logging.AppendCtx(pluginCtx, slog.String("ankaTemplate", ankaTemplate))
+	pluginCtx = logging.AppendCtx(pluginCtx, slog.String("ankaTemplateUUID", ankaTemplateUUID))
 	ankaTemplateTag := extractLabelValue(queuedJob.WorkflowJob.Labels, "anka-template-tag:")
 	if ankaTemplateTag == "" {
 		ankaTemplateTag = "(using latest)"
@@ -1589,7 +1589,7 @@ func Run(
 			return pluginCtx, nil
 		}
 		if isRegistryRunning {
-			ankaRegistryVMInfo, err := internalAnka.GetAnkaRegistryVmInfo(workerCtx, pluginCtx, ankaTemplate, ankaTemplateTag)
+			ankaRegistryVMInfo, err := internalAnka.GetAnkaRegistryVmInfo(workerCtx, pluginCtx, ankaTemplateUUID, ankaTemplateTag)
 			if err != nil {
 				if strings.Contains(err.Error(), "not found") {
 					logging.Warn(pluginCtx, err.Error())
@@ -1611,7 +1611,7 @@ func Run(
 			queuedJob.AnkaVM = *ankaRegistryVMInfo
 		} else {
 			logging.Error(pluginCtx, "anka registry is not running, checking if template is already pulled")
-			ankaShowOutput, err := ankaCLI.AnkaShow(pluginCtx, ankaTemplate)
+			ankaShowOutput, err := ankaCLI.AnkaShow(pluginCtx, ankaTemplateUUID)
 			if err != nil { // doesn't exist locally
 				logging.Error(pluginCtx, "template doesn't exist locally", "err", err)
 				workerGlobals.IncrementQueueTargetIndex() // prevent trying to run this job again
@@ -1625,7 +1625,7 @@ func Run(
 				return pluginCtx, nil
 			}
 			// Determine CPU and MEM from the template and tag
-			templateInfo, err := internalAnka.GetAnkaVmInfo(pluginCtx, ankaTemplate)
+			templateInfo, err := internalAnka.GetAnkaVmInfo(pluginCtx, ankaTemplateUUID)
 			if err != nil {
 				logging.Error(pluginCtx, "error getting vm info", "err", err)
 				pluginGlobals.RetryChannel <- "anka_template_info_error"
@@ -1768,7 +1768,7 @@ func Run(
 
 	// See if VM Template existing already
 	if !pluginConfig.SkipPull {
-		noTemplateTagExistsInRegistryError, ensureSpaceError, genericError := ankaCLI.EnsureVMTemplateExists(workerCtx, pluginCtx, ankaTemplate, ankaTemplateTag)
+		noTemplateTagExistsInRegistryError, ensureSpaceError, genericError := ankaCLI.EnsureVMTemplateExists(workerCtx, pluginCtx, ankaTemplateUUID, ankaTemplateTag)
 		if workerCtx.Err() != nil || pluginCtx.Err() != nil {
 			logging.Error(pluginCtx, "context canceled while ensuring vm template exists")
 			pluginGlobals.RetryChannel <- "context_canceled"
@@ -1841,7 +1841,7 @@ func Run(
 	}
 
 	// Obtain Anka VM (and name)
-	vm, err := ankaCLI.ObtainAnkaVM(workerCtx, pluginCtx, ankaTemplate)
+	vm, err := ankaCLI.ObtainAnkaVM(workerCtx, pluginCtx, ankaTemplateUUID)
 	if vm != nil {
 		queuedJob.AnkaVM.Name = vm.Name
 	}
