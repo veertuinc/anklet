@@ -157,8 +157,17 @@ func (cli *Cli) ExecuteParseJson(pluginCtx context.Context, args ...string) (*An
 		return nil, fmt.Errorf("no valid JSON output found in command response")
 	}
 
+	// Debug logging to help troubleshoot JSON parsing issues
+	logging.Debug(pluginCtx, "parsing JSON from command output",
+		"lastLine", string(lastLine),
+		"allOutput", string(out))
+
 	ankaJson, err := cli.ParseAnkaJson(pluginCtx, lastLine)
 	if err != nil {
+		logging.Error(pluginCtx, "failed to parse JSON",
+			"error", err,
+			"lastLine", string(lastLine),
+			"allLines", len(lines))
 		return nil, err
 	}
 	if exitCode != 0 {

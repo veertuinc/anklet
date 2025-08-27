@@ -5,7 +5,6 @@ package anka
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"github.com/veertuinc/anklet/internal/config"
 	"github.com/veertuinc/anklet/internal/host"
@@ -46,7 +45,9 @@ func (cli *Cli) EnsureSpaceForTemplate(
 		if tag != "(using latest)" {
 			args = append(args, "--tag", tag)
 		}
-		pullJson, err := cli.AnkaExecutePullCommand(pluginCtx, templateUUID, strings.Join(args, " "))
+		// Prepare the arguments correctly for AnkaExecutePullCommand
+		pullArgs := append([]string{templateUUID}, args...)
+		pullJson, err := cli.AnkaExecutePullCommand(pluginCtx, pullArgs...)
 		if err != nil {
 			return nil, 0, 0, err
 		}
