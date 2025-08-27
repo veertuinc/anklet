@@ -558,7 +558,7 @@ func checkForCompletedJobs(
 				queuedJob.WorkflowJob.Status = completedQueuedJob.WorkflowJob.Status
 				queuedJob.WorkflowJob.Conclusion = completedQueuedJob.WorkflowJob.Conclusion
 				// add a task for the completed job so we know the clean up
-				logging.Debug(pluginCtx, "checkForCompletedJobs -> adding completed job to pluginCompletedQueue")
+				logging.Info(pluginCtx, "checkForCompletedJobs -> found completed job in mainCompletedQueue, adding to pluginCompletedQueue", "completedQueuedJob", completedQueuedJob)
 				_, err = databaseContainer.Client.LPush(checkForCompletedJobsContext, pluginCompletedQueueName, mainCompletedQueueJobJSON).Result()
 				if err != nil {
 					logging.Error(pluginCtx, "error inserting completed job into list", "err", err)
@@ -572,8 +572,9 @@ func checkForCompletedJobs(
 				if workerGlobals.Plugins[pluginConfig.Plugin][pluginConfig.Name].PluginRunCount.Load()%2 == 0 {
 					workerGlobals.ResetQueueTargetIndex() // make sure we reset the index so we don't leave any jobs behind at the lower indexes
 				}
-
+				logging.Info(pluginCtx, "checkForCompletedJobs -> debug 1")
 				pluginGlobals.JobChannel <- queuedJob
+				logging.Info(pluginCtx, "checkForCompletedJobs -> debug 2")
 				updateDB = true
 			}
 
