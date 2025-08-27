@@ -1925,7 +1925,12 @@ func Run(
 		logging.Error(pluginCtx, "error updating job in db", "err", err)
 	}
 	// needed to clean up registered runners
-	defer removeSelfHostedRunner(workerCtx, pluginCtx, pluginQueueName)
+	defer func() {
+		err := removeSelfHostedRunner(workerCtx, pluginCtx, pluginQueueName)
+		if err != nil {
+			logging.Error(pluginCtx, "error removing self hosted runner", "err", err)
+		}
+	}()
 	// Start runner
 	select {
 	case <-pluginGlobals.JobChannel:
@@ -1984,7 +1989,7 @@ func removeSelfHostedRunner(
 	workerCtx context.Context,
 	pluginCtx context.Context,
 	pluginQueueName string,
-) {
+) error {
 	var err error
 	var runnersList *github.Runners
 	var response *github.Response
@@ -2000,6 +2005,7 @@ func removeSelfHostedRunner(
 	queuedJob, err := internalGithub.GetJobFromQueue(pluginCtx, pluginQueueName)
 	if err != nil {
 		logging.Error(pluginCtx, "error getting job from queue", "err", err)
+		return err
 	}
 
 	// we don't use cancelled here since the registration will auto unregister after the job finishes
@@ -2019,7 +2025,7 @@ func removeSelfHostedRunner(
 		}
 		if err != nil {
 			logging.Error(pluginCtx, "error executing githubClient.Actions.ListRunners", "err", err, "response", response)
-			return
+			return err
 		}
 		if len(runnersList.Runners) == 0 {
 			logging.Debug(pluginCtx, "no runners found to delete (not an error)")
@@ -2041,7 +2047,7 @@ func removeSelfHostedRunner(
 						err := sendCancelWorkflowRun(workerCtx, pluginCtx, queuedJob)
 						if err != nil {
 							logging.Error(pluginCtx, "error sending cancel workflow run", "err", err)
-							return
+							return err
 						}
 					}
 					if pluginConfig.Repo != "" {
@@ -2057,7 +2063,7 @@ func removeSelfHostedRunner(
 					}
 					if err != nil {
 						logging.Error(pluginCtx, "error executing githubClient.Actions.RemoveRunner", "err", err)
-						return
+						return err
 					} else {
 						logging.Info(pluginCtx, "successfully removed runner")
 					}
@@ -2069,4 +2075,5 @@ func removeSelfHostedRunner(
 			// }
 		}
 	}
+	return nil
 }
