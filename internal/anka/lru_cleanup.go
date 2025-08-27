@@ -48,6 +48,7 @@ func (cli *Cli) EnsureSpaceForTemplate(
 		}
 		pullJson, err := cli.AnkaExecutePullCommand(pluginCtx, templateUUID, strings.Join(args, " "))
 		if err != nil {
+			logging.Error(pluginCtx, "error checking template size", "pullJson", pullJson, "err", err)
 			return nil, 0, 0, err
 		}
 		if pullJson.Status != "OK" {
