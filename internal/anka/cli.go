@@ -784,7 +784,7 @@ func (cli *Cli) EnsureVMTemplateExists(
 		}
 
 		// ensure space for template
-		ensureSpaceError, genericError := cli.EnsureSpaceForTemplateOnDarwin(workerCtx, pluginCtx, targetTemplateUUID, targetTemplateTag)
+		ensureSpaceError, genericError := cli.EnsureSpaceForTemplate(workerCtx, pluginCtx, targetTemplateUUID, targetTemplateTag)
 		if ensureSpaceError != nil {
 			return nil, ensureSpaceError, nil
 		}

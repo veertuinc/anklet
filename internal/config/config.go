@@ -506,6 +506,16 @@ func (tt *TemplateTracker) HasPullingTemplates() bool {
 	return false
 }
 
+// Contains checks if a template with the given UUID exists in the tracker
+func (tt *TemplateTracker) Contains(templateUUID string) bool {
+	tt.Mutex.RLock()
+	defer tt.Mutex.RUnlock()
+
+	key := tt.GetTemplateKey(templateUUID)
+	_, exists := tt.Templates[key]
+	return exists
+}
+
 func GetLoadedConfigFromContext(ctx context.Context) (*Config, error) {
 	config, ok := ctx.Value(ContextKey("config")).(*Config)
 	if !ok {

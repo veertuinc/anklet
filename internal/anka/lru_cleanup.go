@@ -11,8 +11,8 @@ import (
 	"github.com/veertuinc/anklet/internal/logging"
 )
 
-// EnsureSpaceForTemplateOnDarwin ensures there's enough space for a new template by cleaning up LRU templates if needed
-func (cli *Cli) EnsureSpaceForTemplateOnDarwin(
+// EnsureSpaceForTemplate ensures there's enough space for a new template by cleaning up LRU templates if needed
+func (cli *Cli) EnsureSpaceForTemplate(
 	workerCtx context.Context,
 	pluginCtx context.Context,
 	templateUUID, tag string,
@@ -26,8 +26,17 @@ func (cli *Cli) EnsureSpaceForTemplateOnDarwin(
 		return nil, err
 	}
 
-	var originalBufferedAvailable uint64
-	var originalBufferSize uint64
+	var totalDiskSize uint64
+	var bufferSize uint64
+
+	// Get total disk size once at the beginning
+	totalDiskSize, err = host.GetHostDiskTotalBytes(pluginCtx)
+	if err != nil {
+		return nil, err
+	}
+
+	// Calculate buffer size based on total disk size and template_disk_buffer percentage
+	bufferSize = uint64(float64(totalDiskSize) * (pluginConfig.TemplateDiskBuffer / 100.0))
 
 	// Helper function to check download size and available space
 	checkSpace := func() (*AnkaPullCheckOutput, uint64, uint64, error) {
@@ -49,31 +58,27 @@ func (cli *Cli) EnsureSpaceForTemplateOnDarwin(
 
 		downloadSize := pullCheckOutput.Size - pullCheckOutput.Cached
 
-		var bufferedAvailable uint64
-		if originalBufferedAvailable == 0 {
-			// First time - calculate buffer based on original available space
-			originalBufferSize = uint64(float64(pullCheckOutput.Available) * (pluginConfig.TemplateDiskBuffer / 100.0))
-			originalBufferedAvailable = pullCheckOutput.Available - originalBufferSize
-			bufferedAvailable = originalBufferedAvailable
+		// Calculate how much space we can actually use (available space minus required buffer)
+		var usableSpace uint64
+		if pullCheckOutput.Available > bufferSize {
+			usableSpace = pullCheckOutput.Available - bufferSize
 		} else {
-			// Subsequent calls - use original buffer threshold, just add freed space
-			bufferedAvailable = originalBufferedAvailable + (pullCheckOutput.Available - (originalBufferedAvailable + originalBufferSize))
+			// if the available space is less than the buffer size, we can't use any of it
+			usableSpace = 0
 		}
 
 		logging.Debug(pluginCtx, "pull check output", "pullCheckOutput", map[string]any{
-			"pullCheckOutput.Size":      pullCheckOutput.Size,
-			"pullCheckOutput.Cached":    pullCheckOutput.Cached,
-			"pullCheckOutput.Available": pullCheckOutput.Available,
-			"downloadSize":              downloadSize,
-			"originalBufferSize":        originalBufferSize,
-			"originalBufferedAvailable": originalBufferedAvailable,
-			"bufferedAvailable":         bufferedAvailable,
+			"downloadSize":    downloadSize,
+			"pullCheckOutput": pullCheckOutput,
+			"totalDiskSize":   totalDiskSize,
+			"bufferSize":      bufferSize,
+			"usableSpace":     usableSpace,
 		})
 
-		return pullCheckOutput, downloadSize, bufferedAvailable, nil
+		return pullCheckOutput, downloadSize, usableSpace, nil
 	}
 
-	pullCheckOutput, downloadSize, bufferedAvailable, err := checkSpace()
+	pullCheckOutput, downloadSize, usableSpace, err := checkSpace()
 	if err != nil {
 		return nil, err
 	}
@@ -81,31 +86,47 @@ func (cli *Cli) EnsureSpaceForTemplateOnDarwin(
 	if pullCheckOutput.Size > 0 { // check that it's not empty {"status":"OK","code":0,"body":{},"message":"6c14r: available locally"}
 
 		// if the template is just too big for the host, fail
-		hostDiskSizeBytes, err := host.GetHostDiskSizeBytes(pluginCtx)
-		if err != nil {
-			return nil, err
-		}
-		if pullCheckOutput.Size > hostDiskSizeBytes {
-			return fmt.Errorf("template is too big for the host (need %d, available %d)", pullCheckOutput.Size, hostDiskSizeBytes), nil
+		if pullCheckOutput.Size >= totalDiskSize {
+			return fmt.Errorf("template is too big for the host (need %d, totalDiskSize %d)", pullCheckOutput.Size, totalDiskSize), nil
 		}
 
-		if bufferedAvailable <= downloadSize {
-			// if not enough space, try to free up space by deleting the LRU templates
-			bytesToFree := downloadSize - bufferedAvailable
+		// determine if we have enough space to pull the template
+		if usableSpace < downloadSize {
+
+			// try to free up space by deleting the LRU templates
+			bytesToFree := downloadSize - usableSpace
 
 			logging.Warn(pluginCtx, "insufficient space for template, cleaning up LRU templates",
-				"bufferedAvailable", bufferedAvailable,
+				"usableSpace", usableSpace,
 				"downloadSize", downloadSize,
 				"bytesToFree", bytesToFree,
 			)
 
+			// Check if the buffer configuration is too restrictive
+			// If available space is less than bufferSize, then the buffer requirement
+			// is impossible to satisfy regardless of template cleanup
+			if pullCheckOutput.Available < bufferSize {
+				bufferPercentage := (float64(bufferSize) / float64(totalDiskSize)) * 100.0
+				return fmt.Errorf("template_disk_buffer (%.3f%%) is too restrictive for current disk usage - available space (%d) is less than required buffer (%d)",
+					bufferPercentage, pullCheckOutput.Available, bufferSize), nil
+			}
+
 			// Get LRU templates to delete
 			lruTemplates := workerGlobals.TemplateTracker.GetLeastRecentlyUsedTemplates()
 
-			if len(lruTemplates) == 0 {
-				return fmt.Errorf("insufficient space on host and no templates available for cleanup (need %d, available %d)", bytesToFree, bufferedAvailable), nil
+			// Remove the template being pulled from the count of LRU templates available for cleanup
+			countOfLruTemplates := len(lruTemplates)
+			// TODO: later on, we need to support checking the delta between the current
+			// template's tag and the incoming, and if using --shrink for pull would clear up
+			// enough space, we can proceed with the pull. Anka doesn't support this yet though as we don't clean up the old tag first.
+			if workerGlobals.TemplateTracker.Contains(templateUUID) {
+				countOfLruTemplates--
+			}
+			if countOfLruTemplates <= 0 {
+				return fmt.Errorf("insufficient space on host and no templates available for cleanup (need %d, available %d)", bytesToFree, usableSpace), nil
 			}
 
+			// If even deleting all LRU templates wouldn't free enough space, don't delete anything
 			var totalFreeable uint64
 			for _, lruTemplate := range lruTemplates {
 				// Skip deleting the template if it matches the one being pulled
@@ -114,14 +135,11 @@ func (cli *Cli) EnsureSpaceForTemplateOnDarwin(
 				}
 				totalFreeable += lruTemplate.ImageSize
 			}
-
 			logging.Debug(pluginCtx, "lru templates", "lruTemplates", lruTemplates, "totalFreeable", totalFreeable, "bytesToFree", bytesToFree)
-
-			// If even deleting all LRU templates wouldn't free enough space, don't delete anything
-			afterFreeingBytes := (originalBufferedAvailable + totalFreeable)
-			logging.Debug(pluginCtx, "adjusted available space", "afterFreeingBytes", afterFreeingBytes, "downloadSize", downloadSize)
-			if afterFreeingBytes <= bytesToFree {
-				return fmt.Errorf("insufficient space on host even if we cleaned up all templates (need %d, can free %d, lruTemplateCount %d)", bytesToFree, totalFreeable, len(lruTemplates)), nil
+			afterFreeingUsableSpace := usableSpace + totalFreeable
+			logging.Debug(pluginCtx, "adjusted usable space after freeing", "afterFreeingUsableSpace", afterFreeingUsableSpace, "downloadSize", downloadSize)
+			if afterFreeingUsableSpace < downloadSize {
+				return fmt.Errorf("insufficient space on host even if we cleaned up all templates (need %d, can free %d, lruTemplateCount %d)", downloadSize, totalFreeable, len(lruTemplates)), nil
 			}
 
 			// Delete templates one by one and re-check space after each deletion
@@ -149,10 +167,8 @@ func (cli *Cli) EnsureSpaceForTemplateOnDarwin(
 				}
 				templatesDeleted++
 
-				// Template tracker is automatically updated by AnkaDeleteTemplate
-
 				// Re-check available space after deletion
-				_, newDownloadSize, newBufferedAvailable, err := checkSpace()
+				_, newDownloadSize, newUsableSpace, err := checkSpace()
 				if err != nil {
 					logging.Error(pluginCtx, "failed to re-check space after template deletion", "error", err)
 					continue
@@ -160,32 +176,32 @@ func (cli *Cli) EnsureSpaceForTemplateOnDarwin(
 
 				logging.Debug(pluginCtx, "space after template deletion",
 					"templatesDeleted", templatesDeleted,
-					"newBufferedAvailable", newBufferedAvailable,
+					"newUsableSpace", newUsableSpace,
 					"newDownloadSize", newDownloadSize)
 
 				// Check if we now have enough space
-				if newBufferedAvailable > newDownloadSize {
+				if newUsableSpace >= newDownloadSize {
 					logging.Info(pluginCtx, "successfully freed enough space for template",
 						"templatesDeleted", templatesDeleted,
-						"bufferedAvailable", newBufferedAvailable,
+						"usableSpace", newUsableSpace,
 						"downloadSize", newDownloadSize)
 					break
 				}
 			}
 
 			// Final check to ensure we have enough space
-			_, finalDownloadSize, finalBufferedAvailable, err := checkSpace()
+			_, finalDownloadSize, finalUsableSpace, err := checkSpace()
 			if err != nil {
 				return nil, err
 			}
 
 			// this should not happen, but just in case
-			if finalBufferedAvailable <= finalDownloadSize {
-				return fmt.Errorf("insufficient space on host even after cleaning up %d templates (need %d, available %d)", templatesDeleted, finalDownloadSize-finalBufferedAvailable, finalBufferedAvailable), nil
+			if finalUsableSpace < finalDownloadSize {
+				return fmt.Errorf("insufficient space on host even after cleaning up %d templates (need %d, available %d)", templatesDeleted, finalDownloadSize, finalUsableSpace), nil
 			}
 
 		} else {
-			logging.Debug(pluginCtx, "enough space on host to pull template", "available", bufferedAvailable, "downloadSize", downloadSize)
+			logging.Debug(pluginCtx, "enough space on host to pull template", "usableSpace", usableSpace, "downloadSize", downloadSize)
 		}
 	}
 
