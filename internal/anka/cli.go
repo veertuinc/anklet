@@ -142,7 +142,21 @@ func (cli *Cli) ExecuteParseJson(pluginCtx context.Context, args ...string) (*An
 	out, exitCode, _ := cli.Execute(pluginCtx, args...)
 	// registry pull can output muliple json objects, per line, so we need to only get the last line
 	lines := bytes.Split(out, []byte("\n"))
-	lastLine := lines[len(lines)-1]
+
+	// Find the last non-empty line to avoid parsing empty lines as JSON
+	var lastLine []byte
+	for i := len(lines) - 1; i >= 0; i-- {
+		if len(bytes.TrimSpace(lines[i])) > 0 {
+			lastLine = lines[i]
+			break
+		}
+	}
+
+	// If no non-empty line found, return an error
+	if len(lastLine) == 0 {
+		return nil, fmt.Errorf("no valid JSON output found in command response")
+	}
+
 	ankaJson, err := cli.ParseAnkaJson(pluginCtx, lastLine)
 	if err != nil {
 		return nil, err
