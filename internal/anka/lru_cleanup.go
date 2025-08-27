@@ -5,6 +5,7 @@ package anka
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/veertuinc/anklet/internal/config"
 	"github.com/veertuinc/anklet/internal/host"
@@ -40,7 +41,12 @@ func (cli *Cli) EnsureSpaceForTemplate(
 
 	// Helper function to check download size and available space
 	checkSpace := func() (*AnkaPullCheckOutput, uint64, uint64, error) {
-		pullJson, err := cli.AnkaExecutePullCommand(pluginCtx, templateUUID, "--tag", tag, "--check-download-size")
+		var args []string
+		args = append(args, "--check-download-size")
+		if tag != "(using latest)" {
+			args = append(args, "--tag", tag)
+		}
+		pullJson, err := cli.AnkaExecutePullCommand(pluginCtx, templateUUID, strings.Join(args, " "))
 		if err != nil {
 			return nil, 0, 0, err
 		}
