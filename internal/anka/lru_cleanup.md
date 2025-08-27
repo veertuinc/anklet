@@ -12,7 +12,9 @@ We need to be able to clean up templates that are Least Recently Used (LRU) if t
             - Set your `template_disk_buffer` to a percentage so the `afterFreeingUsableSpace` is slightly lower than the `downloadSize`, but also have no other templates on the host to clean up
     - even if we cleaned up all templates, we still don't have enough space
         - Testing
-            - 8c14r job
-            - only template/tag is anka -j registry pull --shrink 84266873-da90-4e0d-903b-ed0233471f9f --tag 6c14r
+            - 6c14r-31gb job
+            - two templates
+                - anka -j registry pull --shrink 84266873-da90-4e0d-903b-ed0233471f9f --tag 6c14r
+                - anka -j registry pull --shrink anklet-2 --tag lru-test-1
             - Set your `template_disk_buffer` to a percentage so the `afterFreeingUsableSpace` is slightly lower than the `downloadSize`, but you also don't want to hit the buffer limit
 - if we have the same template, but a different tag, we should calculate the non-cached size of the different tag with what's incoming and if it's enough, just pull with --shrink (default) (PENDING: https://veertu.atlassian.net/browse/ANKA-7434)
