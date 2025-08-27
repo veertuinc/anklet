@@ -1985,6 +1985,8 @@ func Run(
 		logging.Error(pluginCtx, "error updating job in db", "err", err)
 	}
 	// needed to clean up registered runners
+	// DO NOT handle any other type of cleanup here.
+	// If the removeSelfHostedRunner function errors, it's likely something major that needs to be addressed manually, so we're going to shut down anklet/worker.
 	defer removeSelfHostedRunner(workerCtx, pluginCtx, pluginQueueName)
 	// Start runner
 	select {
