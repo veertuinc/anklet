@@ -1295,6 +1295,8 @@ func Run(
 
 			logging.Info(pluginCtx, "paused job found to run", "pausedQueuedJob", pausedQueuedJob)
 
+			pluginCtx = logging.AppendCtx(pluginCtx, slog.String("wasPausedOn", pausedQueuedJob.PausedOn))
+
 			// pull the workflow job from the currently paused host's queue and put it in the current queue instead
 			originalHostJob, err := internalGithub.GetJobFromQueueByKeyAndValue(
 				pluginCtx,
