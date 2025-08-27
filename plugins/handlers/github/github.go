@@ -578,8 +578,9 @@ func checkForCompletedJobs(
 				if workerGlobals.Plugins[pluginConfig.Plugin][pluginConfig.Name].PluginRunCount.Load()%2 == 0 {
 					workerGlobals.ResetQueueTargetIndex() // make sure we reset the index so we don't leave any jobs behind at the lower indexes
 				}
-
+				logging.Info(pluginCtx, "checkForCompletedJobs -> debug 1")
 				pluginGlobals.JobChannel <- queuedJob
+				logging.Info(pluginCtx, "checkForCompletedJobs -> debug 2")
 				updateDB = true
 			}
 
