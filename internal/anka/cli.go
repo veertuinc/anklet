@@ -35,9 +35,18 @@ type Cli struct {
 }
 
 type AnkaShowOutput struct {
-	CPU      int    `json:"cpu_cores"`
-	MEMBytes uint64 `json:"ram_size"`
-	Tag      string `json:"tag"`
+	Name       string    `json:"name"`
+	CPU        int       `json:"cpu_cores"`
+	MEMBytes   uint64    `json:"ram_size"`
+	Tag        string    `json:"tag"`
+	ImageSize  uint64    `json:"image_size"`  // Template actual disk usage
+	AccessDate time.Time `json:"access_date"` // Last access date from anka show
+}
+
+type AnkaPullCheckOutput struct {
+	Size      uint64 `json:"size"`
+	Cached    uint64 `json:"cached"`
+	Available uint64 `json:"available"`
 }
 
 func GetAnkaCLIFromContext(pluginCtx context.Context) (*Cli, error) {
@@ -60,7 +69,7 @@ func NewCLI(pluginCtx context.Context) (*Cli, error) {
 	if err != nil || version.Status != "OK" {
 		return nil, err
 	}
-	if body, ok := version.Body.(map[string]interface{}); ok {
+	if body, ok := version.Body.(map[string]any); ok {
 		cli.Version = body["version"].(string)
 	}
 
@@ -69,7 +78,7 @@ func NewCLI(pluginCtx context.Context) (*Cli, error) {
 		return nil, err
 	}
 
-	if body, ok := license.Body.(map[string]interface{}); ok {
+	if body, ok := license.Body.(map[string]any); ok {
 		cli.License.Status = body["status"].(string)
 		cli.License.LicenseType = body["license_type"].(string)
 		cli.License.Product = body["product"].(string)
@@ -133,9 +142,32 @@ func (cli *Cli) ExecuteParseJson(pluginCtx context.Context, args ...string) (*An
 	out, exitCode, _ := cli.Execute(pluginCtx, args...)
 	// registry pull can output muliple json objects, per line, so we need to only get the last line
 	lines := bytes.Split(out, []byte("\n"))
-	lastLine := lines[len(lines)-1]
+
+	// Find the last non-empty line to avoid parsing empty lines as JSON
+	var lastLine []byte
+	for i := len(lines) - 1; i >= 0; i-- {
+		if len(bytes.TrimSpace(lines[i])) > 0 {
+			lastLine = lines[i]
+			break
+		}
+	}
+
+	// If no non-empty line found, return an error
+	if len(lastLine) == 0 {
+		return nil, fmt.Errorf("no valid JSON output found in command response")
+	}
+
+	// Debug logging to help troubleshoot JSON parsing issues
+	logging.Debug(pluginCtx, "parsing JSON from command output",
+		"lastLine", string(lastLine),
+		"allOutput", string(out))
+
 	ankaJson, err := cli.ParseAnkaJson(pluginCtx, lastLine)
 	if err != nil {
+		logging.Error(pluginCtx, "failed to parse JSON",
+			"error", err,
+			"lastLine", string(lastLine),
+			"allLines", len(lines))
 		return nil, err
 	}
 	if exitCode != 0 {
@@ -182,10 +214,27 @@ func (cli *Cli) AnkaShow(pluginCtx context.Context, vmName string) (*AnkaShowOut
 	if err != nil {
 		return nil, err
 	}
-	output := &AnkaShowOutput{
-		CPU:      int(ankaJson.Body.(map[string]any)["cpu_cores"].(float64)),
-		MEMBytes: uint64(ankaJson.Body.(map[string]any)["ram_size"].(float64)),
+
+	output := &AnkaShowOutput{}
+	// Get CPU information from anka show output
+	if cpu, ok := ankaJson.Body.(map[string]any)["cpu_cores"]; ok {
+		output.CPU = int(cpu.(float64))
 	}
+	// Get memory information from anka show output
+	if mem, ok := ankaJson.Body.(map[string]any)["ram_size"]; ok {
+		output.MEMBytes = uint64(mem.(float64))
+	}
+	// Get image size information from anka show output - image_size is actual usage, not logical disk_size
+	if imageSize, ok := ankaJson.Body.(map[string]any)["image_size"].(float64); ok {
+		output.ImageSize = uint64(imageSize)
+	}
+	// Get access date information from anka show output
+	if accessDate, ok := ankaJson.Body.(map[string]any)["access_date"].(string); ok {
+		if parsedDate, err := time.Parse(time.RFC3339, accessDate); err == nil {
+			output.AccessDate = parsedDate
+		}
+	}
+
 	tagBody := ankaTagJson.Body
 	if tagArr, isArray := tagBody.([]any); isArray {
 		// Handle case where body is an array
@@ -203,6 +252,34 @@ func (cli *Cli) AnkaShow(pluginCtx context.Context, vmName string) (*AnkaShowOut
 		output.Tag = "(using latest)"
 	}
 	return output, nil
+}
+
+func (cli *Cli) AnkaExecutePullCommand(pluginCtx context.Context, args ...string) (*AnkaJson, error) {
+	ctxPlugin, err := config.GetPluginFromContext(pluginCtx)
+	if err != nil {
+		return nil, err
+	}
+	var registryExtra []string
+	if ctxPlugin.RegistryURL != "" {
+		registryExtra = []string{ctxPlugin.RegistryURL}
+	}
+	cmdArgs := append([]string{"anka", "-j", "pull"}, args...)
+	cmdArgs = append(cmdArgs, registryExtra...)
+	return cli.ExecuteParseJson(pluginCtx, cmdArgs...)
+}
+
+// AnkaGetTemplateSize gets the image size of a template from the host
+func (cli *Cli) AnkaGetTemplateSize(pluginCtx context.Context, template, tag string) (uint64, error) {
+	// First try to get it from anka list which includes size information
+	show, err := cli.AnkaShow(pluginCtx, template)
+	if err != nil {
+		return 0, err
+	}
+
+	if show.ImageSize > 0 {
+		return show.ImageSize, nil
+	}
+	return 0, fmt.Errorf("unable to determine template size")
 }
 
 func (cli *Cli) AnkaExecuteRegistryCommand(pluginCtx context.Context, args ...string) (*AnkaJson, error) {
@@ -241,17 +318,34 @@ func (cli *Cli) AnkaRegistryShowTemplate(
 	if showJson.Status != "OK" {
 		return nil, fmt.Errorf("error showing template from registry: %s", showJson.Message)
 	}
-	return &AnkaShowOutput{
-		CPU:      int(showJson.Body.(map[string]any)["cpu_cores"].(float64)),
-		MEMBytes: uint64(showJson.Body.(map[string]any)["ram_size"].(float64)),
-	}, nil
+
+	output := &AnkaShowOutput{}
+
+	if name, ok := showJson.Body.(map[string]any)["name"].(string); ok {
+		output.Name = name
+	}
+
+	if cpu, ok := showJson.Body.(map[string]any)["cpu_cores"].(float64); ok {
+		output.CPU = int(cpu)
+	}
+	if mem, ok := showJson.Body.(map[string]any)["ram_size"].(float64); ok {
+		output.MEMBytes = uint64(mem)
+	}
+
+	// Try to get size information if available - prioritize image_size (actual usage)
+	if imageSize, ok := showJson.Body.(map[string]any)["image_size"].(float64); ok {
+		output.ImageSize = uint64(imageSize)
+	}
+
+	return output, nil
 }
 
 func (cli *Cli) AnkaRegistryPull(
 	workerCtx context.Context,
 	pluginCtx context.Context,
-	template string,
-	tag string,
+	templateUUID string,
+	templateName string,
+	templateTag string,
 ) (*AnkaJson, error) {
 	if workerCtx.Err() != nil || pluginCtx.Err() != nil {
 		return nil, fmt.Errorf("context canceled before AnkaRegistryPull")
@@ -264,11 +358,17 @@ func (cli *Cli) AnkaRegistryPull(
 		return nil, err
 	}
 
+	workerGlobals, err := config.GetWorkerGlobalsFromContext(pluginCtx)
+	if err != nil {
+		return nil, err
+	}
+
 	defer func() {
+		// Clear pulling status
+		workerGlobals.TemplateTracker.SetTemplatePulling(templateUUID, templateName, templateTag, false, time.Now())
 		err := metricsData.SetStatus(pluginCtx, "running")
 		if err != nil {
 			logging.Error(pluginCtx, "error setting metrics status", "error", err)
-			panic(err)
 		}
 	}()
 
@@ -278,11 +378,14 @@ func (cli *Cli) AnkaRegistryPull(
 		return nil, err
 	}
 
+	// Mark template as being pulled
+	workerGlobals.TemplateTracker.SetTemplatePulling(templateUUID, templateName, templateTag, true, time.Now())
+
 	var args []string
-	if tag != "(using latest)" {
-		args = append(args, "pull", "--shrink", template, "--tag", tag)
+	if templateTag != "(using latest)" {
+		args = append(args, "pull", "--shrink", templateUUID, "--tag", templateTag)
 	} else {
-		args = append(args, "pull", "--shrink", template)
+		args = append(args, "pull", "--shrink", templateUUID)
 	}
 	pullJson, err := cli.AnkaExecuteRegistryCommand(pluginCtx, args...)
 	if workerCtx.Err() != nil || pluginCtx.Err() != nil {
@@ -295,7 +398,48 @@ func (cli *Cli) AnkaRegistryPull(
 		return nil, fmt.Errorf("error pulling template from registry: %s", pullJson.Message)
 	}
 
+	templateSizeBytes, err := cli.AnkaGetTemplateSize(pluginCtx, templateUUID, templateTag)
+	if err != nil {
+		logging.Warn(pluginCtx, "unable to get template size after pull", "error", err)
+		return nil, err
+	}
+
+	// Update template usage tracking - use current time since we just pulled it
+	workerGlobals.TemplateTracker.UpdateTemplateUsage(templateUUID, templateName, templateTag, templateSizeBytes, time.Now())
+
+	logging.Debug(pluginCtx, "TemplateTracker state", "tracker", workerGlobals.TemplateTracker)
+
+	logging.Info(pluginCtx, "successfully pulled template", "templateUUID", templateUUID, "templateName", templateName, "templateTag", templateTag, "sizeBytes", templateSizeBytes)
+
 	return pullJson, nil
+}
+
+// AnkaDeleteTemplate deletes a template from the host
+func (cli *Cli) AnkaDeleteTemplate(pluginCtx context.Context, templateUUID string) error {
+	// we don't use tag here because the deletion of a tag keeps the template still around
+	workerGlobals, err := config.GetWorkerGlobalsFromContext(pluginCtx)
+	if err != nil {
+		logging.Warn(pluginCtx, "unable to get worker globals to update template tracker", "error", err)
+		return err
+	}
+	logging.Info(pluginCtx, "deleting template from host", "templateUUID", templateUUID)
+	args := []string{"anka", "-j", "delete", "--yes", templateUUID}
+
+	deleteOutput, err := cli.ExecuteParseJson(pluginCtx, args...)
+	if err != nil {
+		logging.Error(pluginCtx, "error executing anka delete template", "err", err)
+		return err
+	}
+
+	if deleteOutput.Status != "OK" {
+		return fmt.Errorf("error deleting template: %s", deleteOutput.Message)
+	}
+
+	// Remove from template tracker
+	workerGlobals.TemplateTracker.RemoveTemplate(templateUUID)
+
+	logging.Info(pluginCtx, "successfully deleted template", "templateUUID", templateUUID)
+	return nil
 }
 
 func (cli *Cli) AnkaDelete(workerCtx context.Context, pluginCtx context.Context, vmName string) error {
@@ -415,6 +559,93 @@ func (cli *Cli) AnkaList(pluginCtx context.Context, args ...string) (*AnkaJson, 
 	return output, nil
 }
 
+// DiscoverAndPopulateExistingTemplates discovers all existing templates on the system
+// and populates the TemplateTracker with their information
+func (cli *Cli) DiscoverAndPopulateExistingTemplates(
+	ctx context.Context,
+	templateTracker *config.TemplateTracker,
+) error {
+	logging.Info(ctx, "discovering existing templates on system")
+
+	// Get list of all templates
+	listOutput, err := cli.AnkaList(ctx)
+	if err != nil {
+		logging.Warn(ctx, "unable to list existing templates", "error", err)
+		return err
+	}
+
+	if listOutput.Status != "OK" {
+		logging.Warn(ctx, "anka list returned error status", "status", listOutput.Status, "message", listOutput.Message)
+		return fmt.Errorf("anka list failed: %s", listOutput.Message)
+	}
+
+	// Parse the template list
+	templateCount := 0
+	if bodySlice, ok := listOutput.Body.([]any); ok {
+		for _, templateData := range bodySlice {
+			if templateMap, ok := templateData.(map[string]any); ok {
+				templateUUID := ""
+				if uuid, ok := templateMap["uuid"].(string); ok {
+					templateUUID = uuid
+				}
+
+				templateName := ""
+				if name, ok := templateMap["name"].(string); ok {
+					templateName = name
+				}
+
+				templateTag := ""
+				if version, ok := templateMap["version"].(string); ok {
+					templateTag = version
+				} else {
+					templateTag = "latest" // Default tag if none specified
+				}
+
+				var accessDate time.Time
+				ankaShowOutput, err := cli.AnkaShow(ctx, templateUUID)
+				if err != nil {
+					logging.Warn(ctx, "unable to get template access date during discovery", "error", err)
+					accessDate = time.Now() // fallback to current time
+				} else {
+					accessDate = ankaShowOutput.AccessDate
+				}
+
+				if templateName != "" || templateUUID != "" {
+					// Get template size
+					templateSize, err := cli.AnkaGetTemplateSize(ctx, templateUUID, templateTag)
+					if err != nil {
+						logging.Warn(ctx, "unable to get template size during discovery",
+							"templateUUID", templateUUID, "tag", templateTag, "error", err)
+						templateSize = 0 // Continue with 0 size rather than failing
+					}
+
+					// Add to template tracker with initial usage data
+					templateTracker.Mutex.Lock()
+					key := templateTracker.GetTemplateKey(templateUUID)
+					templateTracker.Templates[key] = &config.TemplateUsage{
+						UUID:         templateUUID,
+						Name:         templateName,
+						Tag:          templateTag,
+						ImageSize:    templateSize,
+						LastAccessed: accessDate, // Mark as recently discovered
+						UsageCount:   0,          // No usage yet, just discovered
+						InUse:        false,
+						Pulling:      false,
+					}
+					templateTracker.Mutex.Unlock()
+
+					templateCount++
+					logging.Debug(ctx, "discovered existing template",
+						"templateUUID", templateUUID, "tag", templateTag, "size", templateSize)
+				}
+			}
+		}
+	}
+
+	logging.Info(ctx, "template discovery complete", "templatesFound", templateCount, "templates", templateTracker.Templates)
+	return nil
+}
+
 func (cli *Cli) AnkaCopyOutOfVM(pluginCtx context.Context, vmName string, objectToCopyOut string, hostLevelDestination string) error {
 	copyOutput, err := cli.ExecuteParseJson(pluginCtx, "anka", "-j", "cp", "-a", fmt.Sprintf("%s:%s", vmName, objectToCopyOut), hostLevelDestination)
 	if err != nil {
@@ -491,34 +722,39 @@ func HostHasVmCapacity(pluginCtx context.Context) bool {
 	return true
 }
 
-func (cli *Cli) EnsureVMTemplateExists(workerCtx context.Context, pluginCtx context.Context, targetTemplate string, targetTag string) (error, error) {
-	ankaCLI, err := GetAnkaCLIFromContext(pluginCtx)
-	if err != nil {
-		return nil, err
-	}
+func (cli *Cli) EnsureVMTemplateExists(
+	workerCtx context.Context,
+	pluginCtx context.Context,
+	targetTemplateUUID string,
+	targetTemplateTag string,
+) (error, error, error) { // noTemplateTagExistsInRegistryError, ensureSpaceError, genericError
 	workerGlobals, err := config.GetWorkerGlobalsFromContext(pluginCtx)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
+
 	pullTemplate := false
-	list, err := ankaCLI.AnkaList(pluginCtx, targetTemplate)
+	targetTemplateName := ""
+
+	// we need to do Anka List here because Anklet is allowed to work with non-Registry setups
+	list, err := cli.AnkaList(pluginCtx, targetTemplateUUID)
 	if err != nil {
-		list, innerErr := ankaCLI.AnkaList(pluginCtx)
+		list, innerErr := cli.AnkaList(pluginCtx)
 		if innerErr != nil {
 			logging.Error(pluginCtx, "error executing anka list", "err", innerErr)
-			return nil, innerErr
+			return nil, nil, innerErr
 		}
 		logging.Debug(pluginCtx, "list", "stdout", list.Body)
 	}
-	logging.Info(pluginCtx, "ensuring vm template exists on host", "targetTemplate", targetTemplate, "targetTag", targetTag)
+	logging.Info(pluginCtx, "ensuring vm template exists on host", "targetTemplateUUID", targetTemplateUUID, "targetTemplateName", targetTemplateName, "targetTemplateTag", targetTemplateTag)
 	logging.Debug(pluginCtx, "list output", "json", list)
 	if list != nil {
 		if list.Status == "ERROR" {
-			if list.Message == fmt.Sprintf("%s: not found", targetTemplate) {
+			if list.Message == fmt.Sprintf("%s: not found", targetTemplateUUID) {
 				pullTemplate = true
 			} else {
 				logging.Error(pluginCtx, "error executing anka list", "err", list.Message)
-				return nil, fmt.Errorf("error executing anka list: %s", list.Message)
+				return nil, nil, fmt.Errorf("error executing anka list: %s", list.Message)
 			}
 		}
 		if list.Status == "OK" {
@@ -528,16 +764,16 @@ func (cli *Cli) EnsureVMTemplateExists(workerCtx context.Context, pluginCtx cont
 				if !ok {
 					logging.Info(pluginCtx, "list", "body", list.Body)
 					logging.Error(pluginCtx, "unable to parse bodySlice[0] to map[string]any")
-					return nil, fmt.Errorf("unable to parse bodySlice[0] to map[string]any")
+					return nil, nil, fmt.Errorf("unable to parse bodySlice[0] to map[string]any")
 				}
 				if status, ok := body["status"].(string); ok {
 					if status == "failed" {
-						return nil, fmt.Errorf("vm template is not running and instead %s", status)
+						return nil, nil, fmt.Errorf("vm template is not running and instead %s", status)
 					}
 				}
 				if version, ok := body["version"].(string); ok {
-					if targetTag != "(using latest)" {
-						if version != targetTag {
+					if targetTemplateTag != "(using latest)" {
+						if version != targetTemplateTag {
 							pullTemplate = true
 						}
 					} else {
@@ -545,30 +781,77 @@ func (cli *Cli) EnsureVMTemplateExists(workerCtx context.Context, pluginCtx cont
 						pullTemplate = true
 					}
 				}
+				if templateName, ok := body["name"].(string); ok {
+					targetTemplateName = templateName
+				}
 			} else {
-				return nil, fmt.Errorf("unable to parse list.Body to []interface{}")
+				return nil, nil, fmt.Errorf("unable to parse list.Body to []any")
 			}
 		}
 	} else {
 		pullTemplate = true
+		ankaRegistryShowTemplate, err := cli.AnkaRegistryShowTemplate(workerCtx, pluginCtx, targetTemplateUUID, targetTemplateTag)
+		if err != nil {
+			logging.Error(pluginCtx, "error executing anka registry show template", "err", err)
+			return nil, nil, err
+		}
+		if ankaRegistryShowTemplate != nil {
+			targetTemplateName = ankaRegistryShowTemplate.Name
+		}
 	}
 	if pullTemplate {
-		if !workerGlobals.PullLock.TryLock() {
-			return nil, fmt.Errorf("a pull is already running on this host")
+
+		// Check if any templates are currently being pulled
+		if workerGlobals.TemplateTracker.HasPullingTemplates() {
+			return nil, nil, fmt.Errorf("a pull is already running on this host")
 		}
-		defer workerGlobals.PullLock.Unlock()
-		pullJson, err := cli.AnkaRegistryPull(workerCtx, pluginCtx, targetTemplate, targetTag)
+
+		// ensure space for template
+		ensureSpaceError, genericError := cli.EnsureSpaceForTemplate(workerCtx, pluginCtx, targetTemplateUUID, targetTemplateTag)
+		if ensureSpaceError != nil {
+			return nil, ensureSpaceError, nil
+		}
+		if genericError != nil {
+			return nil, nil, genericError
+		}
+
+		pullJson, err := cli.AnkaRegistryPull(workerCtx, pluginCtx, targetTemplateUUID, targetTemplateName, targetTemplateTag)
 		if workerCtx.Err() != nil || pluginCtx.Err() != nil {
 			logging.Error(pluginCtx, "context canceled while pulling template")
-			return nil, nil
+			return nil, nil, nil
 		}
 		if pullJson == nil || pullJson.Code == 3 { // registry doesn't have template (or tag)
-			return err, nil
+			return fmt.Errorf("no template tag exists in registry"), nil, nil
 		}
 		if err != nil {
 			logging.Error(pluginCtx, "error executing anka registry pull", "err", err)
-			return nil, err
+			return nil, nil, err
 		}
+	} else {
+		// Template already exists locally, update usage tracking
+		templateSizeBytes, err := cli.AnkaGetTemplateSize(pluginCtx, targetTemplateUUID, targetTemplateTag)
+		if err != nil {
+			logging.Warn(pluginCtx, "unable to get template size for existing template", "error", err)
+			templateSizeBytes = 0
+		}
+		// Get the actual access date from anka show
+		ankaShowOutput, err := cli.AnkaShow(pluginCtx, targetTemplateUUID)
+		var accessDate time.Time
+		if err != nil {
+			logging.Warn(pluginCtx, "unable to get access date for existing template", "error", err)
+			accessDate = time.Now() // fallback to current time
+		} else {
+			accessDate = ankaShowOutput.AccessDate
+		}
+		// Update template usage since we're using an existing template
+		workerGlobals.TemplateTracker.UpdateTemplateUsage(
+			targetTemplateUUID,
+			targetTemplateName,
+			targetTemplateTag,
+			templateSizeBytes,
+			accessDate,
+		)
+		logging.Debug(pluginCtx, "using existing template", "templateUUID", targetTemplateUUID, "tag", targetTemplateTag, "sizeBytes", templateSizeBytes, "accessDate", accessDate)
 	}
-	return nil, nil
+	return nil, nil, nil
 }
