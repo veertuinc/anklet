@@ -226,34 +226,6 @@ func GetPluginFromContext(ctx context.Context) (Plugin, error) {
 	return plugin, nil
 }
 
-// GetEffectiveTemplateDiskBuffer returns the effective template disk buffer percentage
-// Uses plugin-specific value if set, otherwise falls back to global value, otherwise defaults to 10.0%
-func GetEffectiveTemplateDiskBuffer(ctx context.Context) (float64, error) {
-	plugin, err := GetPluginFromContext(ctx)
-	if err != nil {
-		return 0, err
-	}
-
-	// Use plugin-specific buffer if set
-	if plugin.TemplateDiskBuffer > 0 {
-		return plugin.TemplateDiskBuffer, nil
-	}
-
-	// Fall back to global config
-	config, err := GetLoadedConfigFromContext(ctx)
-	if err != nil {
-		return 0, err
-	}
-
-	// Use global buffer if set
-	if config.GlobalTemplateDiskBuffer > 0 {
-		return config.GlobalTemplateDiskBuffer, nil
-	}
-
-	// Default to 10% if nothing is configured
-	return 10.0, nil
-}
-
 type PluginGlobal struct {
 	PluginRunCount     atomic.Uint64
 	Preparing          atomic.Bool

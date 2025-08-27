@@ -137,7 +137,7 @@ func main() {
 		loadedConfig.WorkDir = "./"
 	}
 
-	// Handle setting defaults for receiver plugins
+	// Handle setting defaults
 	for index, plugin := range loadedConfig.Plugins {
 		if strings.Contains(plugin.Plugin, "_receiver") {
 			if plugin.RedeliverHours == 0 {
@@ -145,6 +145,11 @@ func main() {
 			}
 			if loadedConfig.GlobalReceiverSecret != "" {
 				loadedConfig.Plugins[index].Secret = loadedConfig.GlobalReceiverSecret
+			}
+		} else { // handlers and others
+			// Set default TemplateDiskBuffer if not specified
+			if plugin.TemplateDiskBuffer == 0 {
+				loadedConfig.Plugins[index].TemplateDiskBuffer = 10.0
 			}
 		}
 	}

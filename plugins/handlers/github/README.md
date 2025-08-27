@@ -46,6 +46,7 @@ plugins:
     #  max_retries: 5 # when a database operation fails due to a recoverable error, how many times to retry it before giving up
     #  retry_delay: 1000 # how long to wait between retries
     #  retry_backoff_factor: 2.0 # how much to multiply the retry delay by each time
+    # template_disk_buffer: 10.0 # Optional; defaults to 10.0%. How much disk space to leave available and not allow templates to consume. Important when you have long running jobs that consume a lot of disk space while they run.
 ```
 
 - Your PAT or Github App must have **Actions** and **Administration** Read & Write permissions.
