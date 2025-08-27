@@ -1,14 +1,14 @@
 # This workflow is used to test a template with too much RAM for the host, causing it to be sent back to the queue
-name: 't3-6c14-31gb-1'
+name: 't3-6c14-40gb-1'
 on:
   workflow_dispatch:
 
 jobs:
-  t3-6c14-31gb-1:
+  t3-6c14-40gb-1:
     runs-on: [ 
       "${{ github.run_id }}-${{ strategy.job-index }}",
       "anka-template:84266873-da90-4e0d-903b-ed0233471f9f", 
-      "anka-template-tag:6c14r-31gb",
+      "anka-template-tag:6c14r-40gb",
     ]
     steps:
       - uses: actions/checkout@v3
