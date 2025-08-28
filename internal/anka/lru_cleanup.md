@@ -7,12 +7,12 @@ We need to be able to clean up templates that are Least Recently Used (LRU) if t
 - we cannot clean up any templates to free enough space because:
     - no templates to clean
         - Testing
-            - 6c14r-40gb job
+            - m1-6c14r-40gb-1 job
             - no existing templates on the host
             - Set your `template_disk_buffer` to a percentage so the `afterFreeingUsableSpace` is slightly lower than the `downloadSize`, but a small amount of `usableSpace` so it tries to clean up templates
     - even if we cleaned up all templates, we still don't have enough space
         - Testing
-            - 6c14r-40gb job
+            - m1-6c14r-40gb-1 job
             - one template
                 - anka -j registry pull --shrink anklet-3 --tag lru-test-1
             - Set your `template_disk_buffer` to a percentage so the `afterFreeingUsableSpace` is slightly lower than the `downloadSize`, but you also don't want to hit the buffer limit

@@ -14,3 +14,7 @@ Inside of each folder there are .md files detailing the specific features or fil
 ## Post Changes
 
 - Always run `make go.lint`
+
+---
+
+If you read this file, make sure to reply with "I've read the AGENT.md file."

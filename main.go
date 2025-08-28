@@ -24,7 +24,7 @@ import (
 	"github.com/veertuinc/anklet/internal/host"
 	"github.com/veertuinc/anklet/internal/logging"
 	"github.com/veertuinc/anklet/internal/metrics"
-	"github.com/veertuinc/anklet/internal/run"
+	"github.com/veertuinc/anklet/internal/plugins"
 )
 
 var (
@@ -657,7 +657,7 @@ func worker(
 						// Create a fresh context for this iteration to avoid accumulating QueueTargetIndex
 						iterationCtx := logging.AppendCtx(pluginCtx, slog.Int64("queueTargetIndex", *workerGlobals.QueueTargetIndex))
 
-						updatedPluginCtx, err := run.Plugin(
+						updatedPluginCtx, err := plugins.Run(
 							workerCtx,
 							iterationCtx,
 							pluginCancel,

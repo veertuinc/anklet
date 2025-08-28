@@ -1,6 +1,0 @@
-{
-    "go.toolsEnvVars": {
-      "GOOS": "darwin"
-    },
-    "go.buildTags": "darwin"
-}

@@ -15,7 +15,7 @@ BIN_FULL ?= dist/$(BIN)_v$(VERSION)_$(OS_TYPE)_$(ARCH)
 export PATH := $(shell go env GOPATH)/bin:$(PATH)
 
 all: build-and-install
-build-and-install: clean go.releaser install
+build-and-install: clean generate-plugins go.releaser install
 
 #clean:		@ Remove the build binaries
 clean:
@@ -31,15 +31,21 @@ go.releaser:
 	file dist/* | grep executable | awk '{print $1}' | cut -d: -f1 | xargs rm -f
 
 
+#generate-plugins:	@ Auto-generate plugin imports by scanning filesystem
+generate-plugins:
+	@echo "Auto-discovering plugins..."
+	go run cmd/generate-plugins/main.go plugins internal/plugins/plugins.go
+	@echo "✅ Plugin discovery complete"
+
 #go.lint:		@ Run `golangci-lint run` against the current code
-go.lint:
+go.lint: generate-plugins
 	go vet ./...
 	curl -L https://raw.githubusercontent.com/golangci/golangci-lint/HEAD/install.sh
 	curl -SfL https://raw.githubusercontent.com/golangci/golangci-lint/HEAD/install.sh | sh -s -- -b $(shell go env GOPATH)/bin v2.3.0
 	echo "golangci-lint run"
 	golangci-lint run
 
-go.test:
+go.test: generate-plugins
 	go mod tidy
 	# go test -v *
 
@@ -63,7 +69,7 @@ install:
 	mkdir -p ~/bin
 	cp -f dist/$(BIN)_v$(VERSION)_$(OS_TYPE)_$(ARCH) ~/bin/$(BIN)
 
-go.build:
+go.build: generate-plugins
 	GOARCH=$(ARCH) go build $(RACE) -ldflags "-X main.version=$(VERSION)" -o dist/$(BIN)_v$(VERSION)_$(OS_TYPE)_$(ARCH)
 	chmod +x dist/$(BIN)_v$(VERSION)_$(OS_TYPE)_$(ARCH)
 
