@@ -36,6 +36,7 @@ generate-plugins:
 	@echo "Auto-discovering plugins..."
 	go run cmd/generate-plugins/main.go plugins internal/plugins/plugins.go
 	@echo "✅ Plugin discovery complete"
+	git add internal/plugins/plugins.go
 
 #go.lint:		@ Run `golangci-lint run` against the current code
 go.lint: generate-plugins
