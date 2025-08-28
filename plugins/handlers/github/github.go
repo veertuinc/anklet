@@ -720,7 +720,7 @@ func cleanup(
 		return
 	}
 
-	// get the original job with the latest status and check if it's running
+	// get the original job with the latest status
 	originalJobJSON, err := databaseContainer.RetryLIndex(cleanupContext, pluginQueueName, 0)
 	if err != nil && err != redis.Nil {
 		logging.Error(pluginCtx, "error getting job from the list", "err", err)
@@ -805,7 +805,7 @@ func cleanup(
 
 		switch queuedJob.Type {
 		case "anka.VM":
-			logging.Debug(pluginCtx, "cleanup | anka.VM | queuedJob", "queuedJob", queuedJob)
+			logging.Info(pluginCtx, "cleanup | anka.VM | queuedJob", "queuedJob", queuedJob)
 			ankaCLI, err := internalAnka.GetAnkaCLIFromContext(pluginCtx)
 			if err != nil {
 				logging.Error(pluginCtx, "error getting ankaCLI from context", "err", err)
@@ -828,7 +828,7 @@ func cleanup(
 			}
 			continue // required to keep processing tasks in the db list
 		case "WorkflowJobPayload": // MUST COME LAST
-			logging.Debug(pluginCtx, "cleanup | WorkflowJobPayload | queuedJob", "queuedJob", queuedJob)
+			logging.Info(pluginCtx, "cleanup | WorkflowJobPayload | queuedJob", "queuedJob", queuedJob)
 			// delete the in_progress queue's index that matches the wrkflowJobID
 			// use cleanupContext so we don't orphan the job in the DB on context cancel of pluginCtx
 			err = internalGithub.DeleteFromQueue(cleanupContext, *queuedJob.WorkflowJob.ID, mainInProgressQueueName)
@@ -1194,10 +1194,18 @@ func Run(
 		return pluginCtx, fmt.Errorf("error getting last object from %s", pluginQueueName)
 	}
 	if queuedJobString != "" {
+		logging.Info(pluginCtx, "found job in plugin queue", "queuedJobString", queuedJobString)
 		var typeErr error
 		queuedJob, err, typeErr = database.Unwrap[internalGithub.QueueJob](queuedJobString)
 		if err != nil || typeErr != nil {
 			return pluginCtx, fmt.Errorf("error unmarshalling job: %s", err.Error())
+		}
+		if queuedJob.Action == "anka.VM" {
+			logging.Error(pluginCtx, "found anka.VM job in plugin queue (critical error)", "queuedJob", queuedJob)
+			queuedJob.Action = "cancel"
+			queuedJob.WorkflowJob.Status = github.String("completed")
+			pluginGlobals.JobChannel <- queuedJob
+			return pluginCtx, nil
 		}
 	} else {
 		// if we haven't done anything before, get something from the main queue
