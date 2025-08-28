@@ -208,7 +208,7 @@ func watchJobStatus(
 
 			var registrationTimeoutSeconds int
 			if pluginConfig.RegistrationTimeoutSeconds <= 0 {
-				registrationTimeoutSeconds = 80
+				registrationTimeoutSeconds = 120
 			} else {
 				registrationTimeoutSeconds = pluginConfig.RegistrationTimeoutSeconds
 			}
@@ -217,12 +217,12 @@ func watchJobStatus(
 				// if not, then the runner registration failed
 				if mainInProgressQueueJobJSON == "" {
 					logging.Error(pluginCtx, "waiting for runner registration timed out, will retry")
-					pluginGlobals.RetryChannel <- "waiting_for_runner_registration_timed_out"
 					queuedJob.Action = "remove_self_hosted_runner" // required or removeSelfHostedRunner won't run
 					err = internalGithub.UpdateJobInDB(pluginCtx, pluginQueueName, &queuedJob)
 					if err != nil {
 						logging.Error(pluginCtx, "error updating job in db", "err", err)
 					}
+					pluginGlobals.RetryChannel <- "waiting_for_runner_registration_timed_out"
 					return pluginCtx, nil
 				}
 			}
@@ -727,6 +727,7 @@ func cleanup(
 		return
 	}
 	if err == redis.Nil {
+		logging.Warn(pluginCtx, "cleanup | nothing to clean up (or redis returned nil)")
 		return // nothing to clean up
 	}
 	originalQueuedJob, err, typeErr := database.Unwrap[internalGithub.QueueJob](originalJobJSON)
@@ -751,7 +752,7 @@ func cleanup(
 	if originalQueuedJob.WorkflowJob.Status != nil &&
 		(*originalQueuedJob.WorkflowJob.Status == "in_progress" ||
 			(workerGlobals.ReturnAllToMainQueue.Load() && originalQueuedJob.Action == "in_progress")) {
-		logging.Debug(pluginCtx, "cleanup | job is still running; skipping cleanup")
+		logging.Warn(pluginCtx, "cleanup | job is still running; skipping cleanup")
 		return
 	}
 
@@ -1151,7 +1152,7 @@ func Run(
 	case runningJob := <-pluginGlobals.JobChannel:
 		// fmt.Println("after first cleanup status", runningJob.WorkflowJob.Status)
 		if *runningJob.WorkflowJob.Status == "completed" || *runningJob.WorkflowJob.Status == "failed" {
-			logging.Info(pluginCtx, *runningJob.WorkflowJob.Status+" job found at start")
+			logging.Info(pluginCtx, *runningJob.WorkflowJob.Status+" job found at start, after first cleanup")
 			pluginGlobals.JobChannel <- runningJob
 			return pluginCtx, nil
 		}
@@ -2093,34 +2094,45 @@ func removeSelfHostedRunner(
 				if *runner.Name == queuedJob.AnkaVM.Name {
 
 					// found = true
-					/*
-						UPDATE as of 0.14.2: We can't really prevent this from happening. Since the job can be retried, we don't want to cancel it.
-						We have to cancel the workflow run before we can remove the runner.
-						[11:12:53.736] ERROR: error executing githubClient.Actions.RemoveRunner {
-						"ankaTemplate": "d792c6f6-198c-470f-9526-9c998efe7ab4",
-						"ankaTemplateTag": "(using latest)",
-						"err": "DELETE https://api.github.com/repos/veertuinc/anklet/actions/runners/142: 422 Bad request - Runner \"anklet-vm-\u003cuuid\u003e\" is still running a job\" []",
-					*/
-					if queuedJob.Action != "remove_self_hosted_runner" { // no need to cancel if we're just removing the runner
-						err := sendCancelWorkflowRun(workerCtx, pluginCtx, queuedJob)
-						if err != nil {
-							logging.Error(pluginCtx, "error sending cancel workflow run", "err", err)
-							return
-						}
-					}
+					// First attempt to remove the runner without canceling
+					var removeErr error
 					if pluginConfig.Repo != "" {
-						pluginCtx, _, _, err = internalGithub.ExecuteGitHubClientFunction(workerCtx, pluginCtx, func() (*github.Response, *github.Response, error) {
+						pluginCtx, _, _, removeErr = internalGithub.ExecuteGitHubClientFunction(workerCtx, pluginCtx, func() (*github.Response, *github.Response, error) {
 							response, err := githubClient.Actions.RemoveRunner(context.Background(), pluginConfig.Owner, pluginConfig.Repo, *runner.ID)
 							return response, nil, err
 						})
 					} else {
-						pluginCtx, _, _, err = internalGithub.ExecuteGitHubClientFunction(workerCtx, pluginCtx, func() (*github.Response, *github.Response, error) {
+						pluginCtx, _, _, removeErr = internalGithub.ExecuteGitHubClientFunction(workerCtx, pluginCtx, func() (*github.Response, *github.Response, error) {
 							response, err := githubClient.Actions.RemoveOrganizationRunner(context.Background(), pluginConfig.Owner, *runner.ID)
 							return response, nil, err
 						})
 					}
-					if err != nil {
-						logging.Error(pluginCtx, "error executing githubClient.Actions.RemoveRunner", "err", err)
+
+					// Only cancel workflow if we get the specific "runner is currently running a job" error
+					if removeErr != nil && strings.Contains(removeErr.Error(), "is currently running a job and cannot be deleted") {
+						logging.Info(pluginCtx, "runner is currently running a job, canceling workflow before removal")
+						cancelErr := sendCancelWorkflowRun(workerCtx, pluginCtx, queuedJob)
+						if cancelErr != nil {
+							logging.Error(pluginCtx, "error sending cancel workflow run", "err", cancelErr)
+							// do not return here; as sometimes it's already cancelled or not running
+						}
+
+						// Retry removing the runner after cancellation
+						if pluginConfig.Repo != "" {
+							pluginCtx, _, _, removeErr = internalGithub.ExecuteGitHubClientFunction(workerCtx, pluginCtx, func() (*github.Response, *github.Response, error) {
+								response, err := githubClient.Actions.RemoveRunner(context.Background(), pluginConfig.Owner, pluginConfig.Repo, *runner.ID)
+								return response, nil, err
+							})
+						} else {
+							pluginCtx, _, _, removeErr = internalGithub.ExecuteGitHubClientFunction(workerCtx, pluginCtx, func() (*github.Response, *github.Response, error) {
+								response, err := githubClient.Actions.RemoveOrganizationRunner(context.Background(), pluginConfig.Owner, *runner.ID)
+								return response, nil, err
+							})
+						}
+					}
+
+					if removeErr != nil {
+						logging.Error(pluginCtx, "error executing githubClient.Actions.RemoveRunner", "err", removeErr)
 						return
 					} else {
 						logging.Info(pluginCtx, "successfully removed runner")
