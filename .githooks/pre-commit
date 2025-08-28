@@ -1,0 +1,18 @@
+#!/bin/bash
+set -e
+
+echo "Running pre-commit checks..."
+
+# Run linter
+echo "🔍 Running linter..."
+make go.lint
+
+# Quick cross-platform check for non-CGO packages
+echo "🏗️  Checking cross-platform compilation..."
+make quick-compile-check
+
+# generate proper plugin imports
+echo "Generating plugin imports..."
+make generate-plugins
+
+echo "✅ Pre-commit checks passed!"

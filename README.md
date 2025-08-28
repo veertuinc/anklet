@@ -630,6 +630,7 @@ Because Anklet is installed as a service, you need to stop the service, replace 
 brew install go
 go mod tidy
 cd ${REPO_ROOT}
+git config --local core.hooksPath .githooks/
 ln -s ~/.config/anklet/org-config.yml org-config.yml
 ln -s ~/.config/anklet/repo-receiver-config.yml repo-receiver-config.yml
 ./run org-receiver-config.yml # run the receiver
