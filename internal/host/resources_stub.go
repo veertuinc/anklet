@@ -17,3 +17,9 @@ func GetHostMemoryBytes(pluginCtx context.Context) (uint64, error) {
 	// Return a default value for unsupported platforms
 	return 1024 * 1024 * 1024, nil // 1GB default
 }
+
+// GetHostDiskSizeBytes returns the total disk space in bytes
+func GetHostDiskSizeBytes(pluginCtx context.Context) (uint64, error) {
+	// Return a default value for unsupported platforms
+	return 100 * 1024 * 1024 * 1024, nil // 100GB default
+}

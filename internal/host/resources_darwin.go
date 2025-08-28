@@ -20,17 +20,7 @@ func GetHostMemoryBytes(pluginCtx context.Context) (uint64, error) {
 	return uint64(C.sysconf(C._SC_PHYS_PAGES) * C.sysconf(C._SC_PAGE_SIZE)), nil
 }
 
-// GetHostDiskTotalBytes returns the total disk space in bytes
-func GetHostDiskTotalBytes(pluginCtx context.Context) (uint64, error) {
-	var stat syscall.Statfs_t
-	err := syscall.Statfs("/", &stat)
-	if err != nil {
-		return 0, err
-	}
-	return uint64(stat.Blocks) * uint64(stat.Bsize), nil
-}
-
-// GetHostDiskUsedBytes returns the used disk space in bytes
+// GetHostDiskSizeBytes returns the used disk space in bytes
 func GetHostDiskSizeBytes(pluginCtx context.Context) (uint64, error) {
 	var stat syscall.Statfs_t
 	err := syscall.Statfs("/", &stat)

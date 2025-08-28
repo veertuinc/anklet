@@ -1,4 +1,5 @@
 //go:build darwin
+// +build darwin
 
 package anka
 
@@ -30,7 +31,7 @@ func (cli *Cli) EnsureSpaceForTemplate(
 	var bufferSize uint64
 
 	// Get total disk size once at the beginning
-	totalDiskSize, err = host.GetHostDiskTotalBytes(pluginCtx)
+	totalDiskSize, err = host.GetHostDiskSizeBytes(pluginCtx)
 	if err != nil {
 		return nil, err
 	}
