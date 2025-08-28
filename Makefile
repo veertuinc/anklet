@@ -40,7 +40,6 @@ generate-plugins:
 #go.lint:		@ Run `golangci-lint run` against the current code
 go.lint: generate-plugins
 	go vet ./...
-	curl -L https://raw.githubusercontent.com/golangci/golangci-lint/HEAD/install.sh
 	curl -SfL https://raw.githubusercontent.com/golangci/golangci-lint/HEAD/install.sh | sh -s -- -b $(shell go env GOPATH)/bin v2.3.0
 	echo "golangci-lint run"
 	golangci-lint run
