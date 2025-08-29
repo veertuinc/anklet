@@ -727,7 +727,7 @@ func cleanup(
 		return
 	}
 	if err == redis.Nil {
-		logging.Warn(pluginCtx, "cleanup | nothing to clean up (or redis returned nil)")
+		logging.Info(pluginCtx, "cleanup | nothing to clean up (or redis returned nil)")
 		return // nothing to clean up
 	}
 	originalQueuedJob, err, typeErr := database.Unwrap[internalGithub.QueueJob](originalJobJSON)
