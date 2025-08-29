@@ -47,6 +47,7 @@ go.test:
 cross-compile-check:
 	@echo "Checking compilation for all target platforms..."
 	@echo "Using goreleaser to test all platform builds..."
+	env
 	goreleaser build --snapshot --clean --single-target=false --skip-validate
 	@echo "✅ All target platforms compile successfully via goreleaser"
 
