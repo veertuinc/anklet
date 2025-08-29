@@ -7,7 +7,6 @@ before:
   hooks:
     - make go.lint
     - make go.test
-    - make cross-compile-check
     - brew install filosottile/musl-cross/musl-cross
 builds:
   - id: linux-amd64
