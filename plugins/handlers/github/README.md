@@ -34,7 +34,7 @@ plugins:
     # skip_pull: true # Optional; skips pulling the template from the Anka Build Cloud Registry
     runner_group: macOS # requires Enterprise github
     # sleep_interval: 5 # Optional; defaults to 1 second.
-    # registration_timeout_seconds: 60 # Optional; defaults to 60 seconds.
+    # registration_timeout_seconds: 80 # Optional; defaults to 80 seconds.
     # template_disk_buffer: 10.0 # Optional; defaults to 10.0%. How much disk space to leave free on the host for templates.
     #database:
     #  enabled: true
