@@ -208,7 +208,7 @@ func watchJobStatus(
 
 			var registrationTimeoutSeconds int
 			if pluginConfig.RegistrationTimeoutSeconds <= 0 {
-				registrationTimeoutSeconds = 120
+				registrationTimeoutSeconds = 80
 			} else {
 				registrationTimeoutSeconds = pluginConfig.RegistrationTimeoutSeconds
 			}
