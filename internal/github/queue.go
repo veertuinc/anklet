@@ -30,7 +30,11 @@ func GetJobJSONFromQueueByID(
 	if err != nil {
 		logging.Panic(pluginCtx, pluginCtx, "error getting database client from context: "+err.Error())
 	}
-	localCtx := context.Background() // avoids context cancellation preventing this from running
+	// Create background context to avoid cancellation but preserve the logger
+	localCtx := context.Background()
+	if logger, err := logging.GetLoggerFromContext(pluginCtx); err == nil {
+		localCtx = context.WithValue(localCtx, config.ContextKey("logger"), logger)
+	}
 	queued, err := databaseContainer.RetryLRange(localCtx, queue, 0, -1)
 	if err != nil {
 		logging.Error(pluginCtx, "error getting list of queued jobs", "err", err)
@@ -64,7 +68,11 @@ func GetJobFromQueue(
 	if err != nil {
 		logging.Panic(pluginCtx, pluginCtx, "error getting database client from context: "+err.Error())
 	}
-	localCtx := context.Background() // avoids context cancellation preventing this from running
+	// Create background context to avoid cancellation but preserve the logger
+	localCtx := context.Background()
+	if logger, err := logging.GetLoggerFromContext(pluginCtx); err == nil {
+		localCtx = context.WithValue(localCtx, config.ContextKey("logger"), logger)
+	}
 	queuedJobJSON, err := databaseContainer.RetryLIndex(localCtx, queue, 0)
 	if err != nil {
 		logging.Error(pluginCtx, "error getting list of queued jobs", "err", err)
@@ -82,11 +90,14 @@ func GetJobFromQueue(
 }
 
 func DeleteFromQueue(ctx context.Context, jobID int64, queue string) error {
-	// can't use GetLoggerFromContext here because the ctx might not be the actual pluginCtx
-	innerContext := context.Background() // avoids context cancellation preventing cleanup
 	databaseContainer, err := database.GetDatabaseFromContext(ctx)
 	if err != nil {
 		return fmt.Errorf("error getting database client from context: %s", err.Error())
+	}
+	// Create background context to avoid cancellation but preserve the logger if available
+	innerContext := context.Background()
+	if logger, err := logging.GetLoggerFromContext(ctx); err == nil {
+		innerContext = context.WithValue(innerContext, config.ContextKey("logger"), logger)
 	}
 	queued, err := databaseContainer.RetryLRange(innerContext, queue, 0, -1)
 	if err != nil {

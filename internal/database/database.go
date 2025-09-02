@@ -162,9 +162,14 @@ func RemoveUniqueKeyFromDB(ctx context.Context) (context.Context, error) {
 		return ctx, fmt.Errorf("database not found in context")
 	}
 	// we don't use ctx for the database deletion so we avoid getting the cancelled context state, which fails when Del runs
+	// but we need to preserve the logger for database operations
+	dbCtx := context.Background()
+	if logger, err := logging.GetLoggerFromContext(ctx); err == nil {
+		dbCtx = context.WithValue(dbCtx, config.ContextKey("logger"), logger)
+	}
 	var deletion int64
-	err := database.retryOperation(context.Background(), "delete unique key", func() error {
-		result, err := database.RetryDel(context.Background(), database.UniqueRunKey)
+	err := database.retryOperation(dbCtx, "delete unique key", func() error {
+		result, err := database.RetryDel(dbCtx, database.UniqueRunKey)
 		if err != nil {
 			return err
 		}
