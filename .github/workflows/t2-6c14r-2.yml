@@ -1,9 +1,9 @@
-name: 't2-6c14r-1'
+name: ' [CI TEST] test name with brackets and space'
 on:
   workflow_dispatch:
 
 jobs:
-  t2-6c14r-1:
+  t2-6c14r-2:
     runs-on: [ 
       "${{ github.run_id }}-${{ strategy.job-index }}",
       "anka-template:84266873-da90-4e0d-903b-ed0233471f9f", 
