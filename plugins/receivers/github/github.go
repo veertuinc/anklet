@@ -155,8 +155,8 @@ func Run(
 				AnkaVM:   anka.VM{},
 				Attempts: 0,
 			}
-			// Add job context for all subsequent logging
-			pluginCtx = logging.AppendCtx(pluginCtx, slog.Group("job",
+			// Create a fresh context for this webhook request to avoid accumulating job contexts
+			webhookCtx := logging.AppendCtx(pluginCtx, slog.Group("job",
 				slog.Group("workflowJob",
 					slog.Any("labels", simplifiedWorkflowJobEvent.WorkflowJob.Labels),
 					slog.Any("id", simplifiedWorkflowJobEvent.WorkflowJob.ID),
@@ -174,28 +174,28 @@ func Run(
 				slog.Any("ankaVM", simplifiedWorkflowJobEvent.AnkaVM),
 			))
 
-			logging.Info(pluginCtx, "received workflow job to consider")
+			logging.Info(webhookCtx, "received workflow job to consider")
 			if *workflowJob.Action == "queued" {
 				if exists_in_array_partial(simplifiedWorkflowJobEvent.WorkflowJob.Labels, []string{"anka-template"}) {
 					// make sure it doesn't already exist
 					inQueueJobJSON, err := internalGithub.GetJobJSONFromQueueByID(pluginCtx, *simplifiedWorkflowJobEvent.WorkflowJob.ID, "anklet/jobs/github/queued/"+pluginConfig.Owner)
 					if err != nil {
-						logging.Error(pluginCtx, "error searching in queue", "error", err)
+						logging.Error(webhookCtx, "error searching in queue", "error", err)
 						return
 					}
 					if inQueueJobJSON == "" { // if it doesn't exist already
 						// push it to the queue
 						wrappedPayloadJSON, err := json.Marshal(simplifiedWorkflowJobEvent)
 						if err != nil {
-							logging.Error(pluginCtx, "error converting job payload to JSON", "error", err)
+							logging.Error(webhookCtx, "error converting job payload to JSON", "error", err)
 							return
 						}
 						_, pushErr := databaseContainer.RetryRPush(pluginCtx, "anklet/jobs/github/queued/"+pluginConfig.Owner, wrappedPayloadJSON)
 						if pushErr != nil {
-							logging.Error(pluginCtx, "error pushing job to queue", "error", pushErr)
+							logging.Error(webhookCtx, "error pushing job to queue", "error", pushErr)
 							return
 						}
-						logging.Info(pluginCtx, "job pushed to queued queue")
+						logging.Info(webhookCtx, "job pushed to queued queue")
 					}
 				}
 			} else if *workflowJob.Action == "in_progress" {
@@ -207,22 +207,22 @@ func Run(
 					// make sure it doesn't already exist
 					inQueueJobJSON, err := internalGithub.GetJobJSONFromQueueByID(pluginCtx, *simplifiedWorkflowJobEvent.WorkflowJob.ID, "anklet/jobs/github/in_progress/"+pluginConfig.Owner)
 					if err != nil {
-						logging.Error(pluginCtx, "error searching in queue", "error", err)
+						logging.Error(webhookCtx, "error searching in queue", "error", err)
 						return
 					}
 					if inQueueJobJSON == "" { // if it doesn't exist already
 						// push it to the queue
 						wrappedPayloadJSON, err := json.Marshal(simplifiedWorkflowJobEvent)
 						if err != nil {
-							logging.Error(pluginCtx, "error converting job payload to JSON", "error", err)
+							logging.Error(webhookCtx, "error converting job payload to JSON", "error", err)
 							return
 						}
 						_, pushErr := databaseContainer.RetryRPush(pluginCtx, "anklet/jobs/github/in_progress/"+pluginConfig.Owner, wrappedPayloadJSON)
 						if pushErr != nil {
-							logging.Error(pluginCtx, "error pushing job to queue", "error", pushErr)
+							logging.Error(webhookCtx, "error pushing job to queue", "error", pushErr)
 							return
 						}
-						logging.Info(pluginCtx, "job pushed to in_progress queue")
+						logging.Info(webhookCtx, "job pushed to in_progress queue")
 					}
 				}
 			} else if *workflowJob.Action == "completed" {
@@ -231,7 +231,7 @@ func Run(
 					// get all keys from database for the main queue and service queues as well as completed
 					queuedKeys, err := databaseContainer.RetryKeys(pluginCtx, "anklet/jobs/github/queued/"+pluginConfig.Owner+"*")
 					if err != nil {
-						logging.Error(pluginCtx, "error getting list of queued keys (completed)", "err", err)
+						logging.Error(webhookCtx, "error getting list of queued keys (completed)", "err", err)
 						return
 					}
 					queues = append(queues, queuedKeys...)
@@ -243,7 +243,7 @@ func Run(
 							defer wg.Done()
 							inQueueJobJSON, err := internalGithub.GetJobJSONFromQueueByID(pluginCtx, *simplifiedWorkflowJobEvent.WorkflowJob.ID, queue)
 							if err != nil {
-								logging.Warn(pluginCtx, err.Error(), "queue", queue)
+								logging.Warn(webhookCtx, err.Error(), "queue", queue)
 							}
 							results <- inQueueJobJSON != ""
 						}(queue)
@@ -262,22 +262,22 @@ func Run(
 					if inAQueue { // only add completed if it's in a queue
 						inCompletedQueueJobJSON, err := internalGithub.GetJobJSONFromQueueByID(pluginCtx, *simplifiedWorkflowJobEvent.WorkflowJob.ID, "anklet/jobs/github/completed/"+pluginConfig.Owner)
 						if err != nil {
-							logging.Error(pluginCtx, "error searching in queue", "error", err)
+							logging.Error(webhookCtx, "error searching in queue", "error", err)
 							return
 						}
 						if inCompletedQueueJobJSON == "" {
 							// push it to the queue
 							wrappedPayloadJSON, err := json.Marshal(simplifiedWorkflowJobEvent)
 							if err != nil {
-								logging.Error(pluginCtx, "error converting job payload to JSON", "error", err)
+								logging.Error(webhookCtx, "error converting job payload to JSON", "error", err)
 								return
 							}
 							_, pushErr := databaseContainer.RetryRPush(pluginCtx, "anklet/jobs/github/completed/"+pluginConfig.Owner, wrappedPayloadJSON)
 							if pushErr != nil {
-								logging.Error(pluginCtx, "error pushing job to queue", "error", pushErr)
+								logging.Error(webhookCtx, "error pushing job to queue", "error", pushErr)
 								return
 							}
-							logging.Info(pluginCtx, "job pushed to completed queue")
+							logging.Info(webhookCtx, "job pushed to completed queue")
 						}
 					}
 

@@ -13,4 +13,4 @@ Inside of each folder there are .md files detailing the specific features or fil
 
 ## Post Changes
 
-- Always run `make go.lint`
+- Always run `make go.lint` and do not do your own linting.
