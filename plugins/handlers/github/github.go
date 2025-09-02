@@ -962,7 +962,8 @@ func Run(
 	pluginCtx context.Context,
 	pluginCancel context.CancelFunc,
 ) (context.Context, error) {
-	logging.Info(pluginCtx, "running github plugin")
+
+	logging.Info(pluginCtx, "starting github plugin")
 
 	pluginConfig, err := config.GetPluginFromContext(pluginCtx)
 	if err != nil {

@@ -149,6 +149,13 @@ func AppendCtx(ctx context.Context, attr slog.Attr) context.Context {
 	}
 
 	if v, ok := ctx.Value(slogFields).([]slog.Attr); ok {
+		// Check for duplicate keys and overwrite if found
+		for i, existingAttr := range v {
+			if existingAttr.Key == attr.Key {
+				v[i] = attr
+				return context.WithValue(ctx, slogFields, v)
+			}
+		}
 		v = append(v, attr)
 		return context.WithValue(ctx, slogFields, v)
 	}
