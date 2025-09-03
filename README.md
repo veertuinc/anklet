@@ -163,7 +163,7 @@ You can control the location plugins are stored on the host by setting the `plug
 
 #### Docker / Containers
 
-Docker images are available at [veertu/anklet](https://hub.docker.com/r/veertu/anklet). [You can find the example docker-compose file in the `docker` directory.](https://github.com/veertuinc/anklet/blob/main/docker/docker-compose.yml)
+We do not provide any Docker images or kubernetes manifests for Anklet. However, you can find an example docker-compose and Dockerfile in the [`docker`](./docker) directory.
 
 #### MacOS Daemon
 
