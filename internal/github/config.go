@@ -13,6 +13,7 @@ import (
 
 type PluginGlobals struct {
 	FirstCheckForCompletedJobsRan int32         // atomic flag: 0 = false, 1 = true - allows us to do a full check for completed jobs on startup
+	FirstStartCapacityCheckRan    int32         // atomic flag: 0 = false, 1 = true - allows us to check VM capacity only on first plugin start
 	RetryChannel                  chan string   // Send a string to this channel to send the job back to the main queue after checking for reason
 	CleanupMutex                  *sync.Mutex   // prevent multiple cleanup jobs from running at the same time
 	JobChannel                    chan QueueJob // Used in the CheckForCompletedJobs to handle logic specific to the job
@@ -48,6 +49,18 @@ func (p *PluginGlobals) SetFirstCheckForCompletedJobsRan(ran bool) {
 
 func (p *PluginGlobals) GetFirstCheckForCompletedJobsRan() bool {
 	return atomic.LoadInt32(&p.FirstCheckForCompletedJobsRan) == 1
+}
+
+func (p *PluginGlobals) SetFirstStartCapacityCheckRan(ran bool) {
+	var value int32
+	if ran {
+		value = 1
+	}
+	atomic.StoreInt32(&p.FirstStartCapacityCheckRan, value)
+}
+
+func (p *PluginGlobals) GetFirstStartCapacityCheckRan() bool {
+	return atomic.LoadInt32(&p.FirstStartCapacityCheckRan) == 1
 }
 
 func GetPluginGlobalsFromContext(ctx context.Context) (*PluginGlobals, error) {
