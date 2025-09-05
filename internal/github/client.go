@@ -11,7 +11,7 @@ import (
 
 	"github.com/bradleyfalzon/ghinstallation/v2"
 	"github.com/gofri/go-github-ratelimit/github_ratelimit"
-	"github.com/google/go-github/v66/github"
+	"github.com/google/go-github/v74/github"
 	"github.com/veertuinc/anklet/internal/config"
 	"github.com/veertuinc/anklet/internal/logging"
 	"github.com/veertuinc/anklet/internal/metrics"

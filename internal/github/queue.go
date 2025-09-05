@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/google/go-github/v66/github"
+	"github.com/google/go-github/v74/github"
 	"github.com/redis/go-redis/v9"
 	"github.com/veertuinc/anklet/internal/config"
 	"github.com/veertuinc/anklet/internal/database"
@@ -283,49 +283,49 @@ func UpdateJobsWorkflowJobStatus(
 		switch status {
 		case "completed":
 			logging.Info(pluginCtx, "workflow job is completed")
-			queuedJob.WorkflowJob.Status = github.String("completed")
+			queuedJob.WorkflowJob.Status = github.Ptr("completed")
 		case "action_required":
 			logging.Info(pluginCtx, "workflow job requires action")
-			queuedJob.WorkflowJob.Conclusion = github.String("failure")
-			queuedJob.WorkflowJob.Status = github.String("completed")
+			queuedJob.WorkflowJob.Conclusion = github.Ptr("failure")
+			queuedJob.WorkflowJob.Status = github.Ptr("completed")
 		case "cancelled":
 			logging.Info(pluginCtx, "workflow job was cancelled")
-			queuedJob.WorkflowJob.Status = github.String("completed")
+			queuedJob.WorkflowJob.Status = github.Ptr("completed")
 		case "failure":
 			logging.Info(pluginCtx, "workflow job failed")
-			queuedJob.WorkflowJob.Conclusion = github.String("failure")
-			queuedJob.WorkflowJob.Status = github.String("completed")
+			queuedJob.WorkflowJob.Conclusion = github.Ptr("failure")
+			queuedJob.WorkflowJob.Status = github.Ptr("completed")
 		case "neutral":
 			logging.Info(pluginCtx, "workflow job ended with neutral status")
-			queuedJob.WorkflowJob.Status = github.String("completed")
+			queuedJob.WorkflowJob.Status = github.Ptr("completed")
 		case "skipped":
 			logging.Info(pluginCtx, "workflow job was skipped")
-			queuedJob.WorkflowJob.Status = github.String("completed")
+			queuedJob.WorkflowJob.Status = github.Ptr("completed")
 		case "stale":
 			logging.Info(pluginCtx, "workflow job is stale")
-			queuedJob.WorkflowJob.Status = github.String("completed")
+			queuedJob.WorkflowJob.Status = github.Ptr("completed")
 		case "success":
 			logging.Info(pluginCtx, "workflow job succeeded")
-			queuedJob.WorkflowJob.Status = github.String("completed")
+			queuedJob.WorkflowJob.Status = github.Ptr("completed")
 		case "timed_out":
 			logging.Info(pluginCtx, "workflow job timed out")
-			queuedJob.WorkflowJob.Conclusion = github.String("failure")
-			queuedJob.WorkflowJob.Status = github.String("completed")
+			queuedJob.WorkflowJob.Conclusion = github.Ptr("failure")
+			queuedJob.WorkflowJob.Status = github.Ptr("completed")
 		case "in_progress":
 			logging.Info(pluginCtx, "workflow job is in progress")
-			queuedJob.WorkflowJob.Status = github.String("in_progress")
+			queuedJob.WorkflowJob.Status = github.Ptr("in_progress")
 		case "queued":
 			logging.Info(pluginCtx, "workflow job is queued")
-			queuedJob.WorkflowJob.Status = github.String("queued")
+			queuedJob.WorkflowJob.Status = github.Ptr("queued")
 		case "requested":
 			logging.Info(pluginCtx, "workflow job was requested")
-			queuedJob.WorkflowJob.Status = github.String("queued")
+			queuedJob.WorkflowJob.Status = github.Ptr("queued")
 		case "waiting":
 			logging.Info(pluginCtx, "workflow job is waiting")
-			queuedJob.WorkflowJob.Status = github.String("in_progress")
+			queuedJob.WorkflowJob.Status = github.Ptr("in_progress")
 		case "pending":
 			logging.Info(pluginCtx, "workflow job is pending")
-			queuedJob.WorkflowJob.Status = github.String("in_progress")
+			queuedJob.WorkflowJob.Status = github.Ptr("in_progress")
 		default:
 			logging.Info(pluginCtx, "workflow job has unknown status", "status", status)
 		}

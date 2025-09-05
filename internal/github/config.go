@@ -6,7 +6,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/google/go-github/v66/github"
+	"github.com/google/go-github/v74/github"
 	"github.com/veertuinc/anklet/internal/anka"
 	"github.com/veertuinc/anklet/internal/config"
 )

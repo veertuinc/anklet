@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/go-github/v66/github"
+	"github.com/google/go-github/v74/github"
 	"github.com/veertuinc/anklet/internal/anka"
 	"github.com/veertuinc/anklet/internal/config"
 	"github.com/veertuinc/anklet/internal/database"

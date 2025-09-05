@@ -13,7 +13,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/go-github/v66/github"
+	"github.com/google/go-github/v74/github"
 	"github.com/redis/go-redis/v9"
 	internalAnka "github.com/veertuinc/anklet/internal/anka"
 	"github.com/veertuinc/anklet/internal/config"
@@ -439,6 +439,7 @@ func checkForCompletedJobs(
 				if err != nil {
 					logging.Error(pluginCtx, "error updating job in db (checkForCompletedJobs)", "err", err)
 				}
+				pluginGlobals.JobChannel <- job
 			}
 		// case <-pluginCtx.Done():
 		// 	// logging.Dev(pluginCtx, "checkForCompletedJobs "+pluginConfig.Name+" pluginCtx.Done()")
@@ -490,7 +491,7 @@ func checkForCompletedJobs(
 					updateDB = true
 				}
 				queuedJob.Action = "in_progress"
-				queuedJob.WorkflowJob.Status = github.String("in_progress")
+				queuedJob.WorkflowJob.Status = github.Ptr("in_progress")
 			}
 
 			var mainCompletedQueueJobJSON string
@@ -513,7 +514,7 @@ func checkForCompletedJobs(
 
 			if pluginCompletedQueueJobJSON != "" {
 				logging.Debug(pluginCtx, "checkForCompletedJobs -> job is in pluginCompletedQueue")
-				queuedJob.WorkflowJob.Status = github.String("completed")
+				queuedJob.WorkflowJob.Status = github.Ptr("completed")
 				queuedJob.Action = "finish"
 				select {
 				case pluginGlobals.JobChannel <- queuedJob:
@@ -1216,7 +1217,7 @@ func Run(
 		if queuedJob.Action == "anka.VM" {
 			logging.Error(pluginCtx, "found anka.VM job in plugin queue (critical error)", "queuedJob", queuedJob)
 			queuedJob.Action = "cancel"
-			queuedJob.WorkflowJob.Status = github.String("completed")
+			queuedJob.WorkflowJob.Status = github.Ptr("completed")
 			pluginGlobals.JobChannel <- queuedJob
 			return pluginCtx, nil
 		}
@@ -1522,7 +1523,7 @@ func Run(
 		if queuedJob.Attempts > 5 {
 			logging.Warn(pluginCtx, "job has attempts > 5, cancelling it")
 			queuedJob.Action = "cancel"
-			queuedJob.WorkflowJob.Status = github.String("completed")
+			queuedJob.WorkflowJob.Status = github.Ptr("completed")
 			err = internalGithub.UpdateJobInDB(pluginCtx, pluginQueueName, &queuedJob)
 			if err != nil {
 				logging.Error(pluginCtx, "error updating job in db", "err", err)
@@ -1619,8 +1620,8 @@ func Run(
 				if strings.Contains(err.Error(), "not found") {
 					logging.Warn(pluginCtx, err.Error())
 					queuedJob.Action = "cancel"
-					queuedJob.WorkflowJob.Conclusion = github.String("failure")
-					queuedJob.WorkflowJob.Status = github.String("completed")
+					queuedJob.WorkflowJob.Conclusion = github.Ptr("failure")
+					queuedJob.WorkflowJob.Status = github.Ptr("completed")
 					err = internalGithub.UpdateJobInDB(pluginCtx, pluginQueueName, &queuedJob)
 					if err != nil {
 						logging.Error(pluginCtx, "error updating job in db", "err", err)
