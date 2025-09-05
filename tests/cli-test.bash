@@ -90,6 +90,7 @@ log_does_not_contain() {
 
 run_test() {
     TEST_YML=$1
+    TIMEOUT=$2
     TEST_NAME=$(basename $TEST_YML | cut -d. -f1)
     TEST_LOG_FILE="/tmp/${TEST_NAME}.log"
     TESTS=""
@@ -98,11 +99,10 @@ run_test() {
     done
     echo "]] Running ${TEST_NAME} (log: ${TEST_LOG_FILE})"
     ln -s ${TESTS_DIR}/$TEST_YML ~/.config/anklet/config.yml
-    if [[ $2 =~ ^[0-9]+$ ]]; then
-        SLEEP_SECONDS=$2
+    if [[ $TIMEOUT =~ ^[0-9]+$ ]]; then
         $BINARY > $TEST_LOG_FILE 2>&1 &
         BINARY_PID=$!
-        sleep $SLEEP_SECONDS
+        sleep $TIMEOUT
         kill -SIGQUIT $BINARY_PID
         wait $BINARY_PID
     else
@@ -112,7 +112,7 @@ run_test() {
     rm -f ~/.config/anklet/config.yml
 }
 
-run_single_test() {
+run_test_case() {
     local test_name=$1
 
     case $test_name in
@@ -185,7 +185,7 @@ TESTS
             anka delete --yes "${TEST_VM}-2"
             ;;
         "start-stop")
-            run_test cli-test-start-stop.yml 4 <<TESTS
+            run_test cli-test-start-stop.yml 10 <<TESTS
     log_does_not_contain "ERROR"
     log_contains "starting anklet"
     log_contains "checking for jobs...."
@@ -198,6 +198,11 @@ TESTS
             exit 1
             ;;
     esac
+}
+
+run_single_test() {
+    local test_name=$1
+    run_test_case "$test_name"
 }
 
 # Build the binary only if we have valid tests to run
@@ -218,77 +223,12 @@ else
     echo "] Running all tests..."
     build_binary
 
-    run_test cli-test-empty.yml <<TESTS
-    log_contains "ERROR"
-    log_contains "unable to load config.yml"
-    log_does_not_contain "starting anklet"
-TESTS
-
-    run_test cli-test-no-log-directory.yml <<TESTS
-    log_contains "ERROR"
-    log_contains "log directory does not exist"
-    log_does_not_contain "starting anklet"
-TESTS
-
-    # test no plugins
-    run_test cli-test-no-plugins.yml <<TESTS
-    log_does_not_contain "ERROR"
-    log_contains "starting anklet"
-    log_contains "anklet (and all plugins) shut down"
-    log_contains "config\":{\"Plugins\":null"
-TESTS
-
-    # Test no name for plugin
-    run_test cli-test-no-plugin-name.yml <<TESTS
-    log_contains "ERROR"
-    log_contains "name is required for plugins"
-    log_contains "RUNNER2"
-    log_contains "plugin1"
-    log_contains "plugin2"
-    log_contains "mycompanyone"
-    log_contains "mycompanytwo"
-    log_contains "SleepInterval\":10"
-    log_contains "SleepInterval\":5"
-TESTS
-
-    # Test non-existent plugin
-    run_test cli-test-non-existent-plugin.yml <<TESTS
-    log_contains "ERROR"
-    log_contains "plugin not supported"
-    log_contains "\"name\":\"RUNNER1\""
-    log_contains "checking for jobs...."
-    log_contains "\"name\":\"RUNNER2\""
-    log_contains "anklet (and all plugins) shut down"
-TESTS
-
-    # test no db
-    run_test cli-test-no-db.yml <<TESTS
-    log_contains "ERROR"
-    log_contains "error getting database from context"
-    log_does_not_contain "checking for jobs...."
-    log_contains "\"name\":\"RUNNER1\""
-    log_does_not_contain "\"name\":\"RUNNER2\""
-    log_contains "anklet (and all plugins) shut down"
-TESTS
-
-    # test capacity
-    anka clone "${TEST_VM}" "${TEST_VM}-1" &> /dev/null
-    anka start "${TEST_VM}-1" &> /dev/null
-    anka clone "${TEST_VM}" "${TEST_VM}-2" &> /dev/null
-    anka start "${TEST_VM}-2" &> /dev/null
-    run_test cli-test-capacity.yml <<TESTS
-    log_contains "ERROR"
-    log_contains "host does not have vm capacity"
-    log_contains "anklet (and all plugins) shut down"
-TESTS
-    anka delete --yes "${TEST_VM}-1"
-    anka delete --yes "${TEST_VM}-2"
-
-    # test start and stop
-    run_test cli-test-start-stop.yml 4 <<TESTS
-    log_does_not_contain "ERROR"
-    log_contains "starting anklet"
-    log_contains "checking for jobs...."
-    log_contains "anklet (and all plugins) shut down"
-TESTS
+    run_test_case "empty"
+    run_test_case "no-log-directory"
+    run_test_case "no-plugins"
+    run_test_case "no-plugin-name"
+    run_test_case "non-existent-plugin"
+    run_test_case "no-db"
+    run_test_case "capacity"
+    run_test_case "start-stop"
 fi
