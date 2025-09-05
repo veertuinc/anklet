@@ -424,7 +424,7 @@ func worker(
 		// Check host VM capacity on startup
 		hostHasVmCapacity := anka.HostHasVmCapacity(workerCtx)
 		if !hostHasVmCapacity {
-			parentLogger.ErrorContext(workerCtx, "host does not have vm capacity on startup")
+			parentLogger.ErrorContext(workerCtx, "host does not have vm capacity on startup (orphaned VMs?)")
 			workerCancel()
 			return
 		}
