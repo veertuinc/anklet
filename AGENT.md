@@ -15,6 +15,7 @@ Inside of each folder there are .md files detailing the specific features or fil
 
 - `make go.lint` - Run linter
 - `make go.test` - Run tests
+- `./tests/cli-test.bash` - Run CLI tests
 
 ## Post Changes
 
