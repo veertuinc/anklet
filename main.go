@@ -421,14 +421,6 @@ func worker(
 		parentLogger.InfoContext(workerCtx, "metrics server started on port "+metricsPort)
 		metrics.UpdateSystemMetrics(workerCtx, metricsData)
 
-		// Check host VM capacity on startup
-		hostHasVmCapacity := anka.HostHasVmCapacity(workerCtx)
-		if !hostHasVmCapacity {
-			parentLogger.ErrorContext(workerCtx, "host does not have vm capacity on startup (orphaned VMs?)")
-			workerCancel()
-			return
-		}
-
 		/////////////
 		// Plugins //
 		soloReceiver := false

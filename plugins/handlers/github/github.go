@@ -986,6 +986,7 @@ func Run(
 	// must come after first cleanup
 	pluginGlobals := internalGithub.PluginGlobals{
 		FirstCheckForCompletedJobsRan: 0,                    // atomic: 0 = false
+		FirstStartCapacityCheckRan:    0,                    // atomic: 0 = false
 		RetryChannel:                  make(chan string, 1), // TODO: do we need this if we have ReturnToMainQueue?
 		CleanupMutex:                  &sync.Mutex{},
 		JobChannel:                    make(chan internalGithub.QueueJob, 1),
@@ -1163,6 +1164,17 @@ func Run(
 	default:
 	}
 
+	// Check host VM capacity on first plugin start
+	if !pluginGlobals.GetFirstStartCapacityCheckRan() {
+		pluginGlobals.SetFirstStartCapacityCheckRan(true)
+		hostHasVmCapacity := internalAnka.HostHasVmCapacity(pluginCtx)
+		if !hostHasVmCapacity {
+			pluginGlobals.JobChannel <- internalGithub.QueueJob{Action: "finish"}
+			return pluginCtx, fmt.Errorf("host does not have vm capacity on first plugin start")
+		}
+	}
+
+	// Check host VM capacity during normal operation (existing behavior)
 	hostHasVmCapacity := internalAnka.HostHasVmCapacity(pluginCtx)
 	if !hostHasVmCapacity {
 		logging.Warn(pluginCtx, "host does not have vm capacity")

@@ -696,6 +696,7 @@ func (cli *Cli) AnkaCopyIntoVM(
 func HostHasVmCapacity(pluginCtx context.Context) bool {
 	ankaCLI, err := GetAnkaCLIFromContext(pluginCtx)
 	if err != nil {
+		logging.Error(pluginCtx, "error getting anka cli", "err", err)
 		return false
 	}
 	// check if there are already two VMS running or not
