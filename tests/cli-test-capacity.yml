@@ -13,10 +13,3 @@ plugins:
     owner: mycompanyone
     registry_url: http://anka.registry:8089
     sleep_interval: 5
-  - name: RUNNER2
-    plugin: github2
-    app_id: 949431
-    installation_id: 52970581
-    owner: mycompanytwo
-    registry_url: http://anka.registry:8089
-    sleep_interval: 10

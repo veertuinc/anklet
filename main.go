@@ -289,6 +289,12 @@ func worker(
 	}
 	toRunOnce := workerGlobals.RunPluginsOnce
 	workerCtx, workerCancel := context.WithCancel(parentCtx)
+
+	defer func() {
+		time.Sleep(time.Second) // prevents exiting before the logger has a chance to write the final log entry (from panics)
+		parentLogger.WarnContext(parentCtx, "anklet (and all plugins) shut down")
+		os.Exit(0)
+	}()
 	suffix := parentCtx.Value(config.ContextKey("suffix")).(string)
 	parentLogger.InfoContext(workerCtx, "starting anklet"+suffix)
 	var wg sync.WaitGroup
@@ -352,6 +358,7 @@ func worker(
 		os.Exit(1)
 	}
 	metricsService := metrics.NewServer(metricsPort)
+	metricsDone := make(chan struct{})
 	if loadedConfig.Metrics.Aggregator {
 		var metricsServiceDatabaseURL = loadedConfig.GlobalDatabaseURL
 		var metricsServiceDatabasePort = loadedConfig.GlobalDatabasePort
@@ -703,13 +710,19 @@ func worker(
 				soloReceiver = false
 			}
 		}
-		// wg.Add(1)
 		go func() {
+			defer close(metricsDone)
 			metricsService.Start(workerCtx, soloReceiver)
 		}()
 	}
 	wg.Wait()
-	time.Sleep(time.Second) // prevents exiting before the logger has a chance to write the final log entry (from panics)
-	parentLogger.WarnContext(parentCtx, "anklet (and all plugins) shut down")
-	os.Exit(0)
+	// Wait for metrics service to shut down if context was canceled (error case)
+	if workerCtx.Err() != nil {
+		select {
+		case <-metricsDone:
+			// Metrics service finished shutting down
+		case <-time.After(5 * time.Second):
+			// Timeout waiting for metrics service
+		}
+	}
 }

@@ -885,6 +885,7 @@ func Cleanup(ctx context.Context, owner string, name string) {
 	databaseContainer, err := database.GetDatabaseFromContext(ctx)
 	if err != nil {
 		logging.Error(ctx, "error getting database client from context", "error", err.Error())
+		return
 	}
 	_, result := databaseContainer.RetryDel(context.Background(), "anklet/metrics/"+owner+"/"+name)
 	if result != nil {
@@ -898,6 +899,7 @@ func ExportMetricsToDB(workerCtx context.Context, pluginCtx context.Context, key
 	databaseContainer, err := database.GetDatabaseFromContext(pluginCtx)
 	if err != nil {
 		logging.Error(pluginCtx, "error getting database client from context", "error", err)
+		return
 	}
 	ticker := time.NewTicker(10 * time.Second)
 	amountOfErrorsAllowed := 60
