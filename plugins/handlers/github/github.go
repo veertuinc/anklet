@@ -355,7 +355,7 @@ func checkForCompletedJobs(
 	mainCompletedQueueName string,
 	mainInProgressQueueName string,
 ) {
-	logging.Debug(pluginCtx, "starting checkForCompletedJobs")
+	// logging.Debug(pluginCtx, "starting checkForCompletedJobs")
 	randomInt := rand.Intn(100)
 	pluginCtx = logging.AppendCtx(pluginCtx, slog.Int("check_id", randomInt))
 	workerGlobals, err := config.GetWorkerGlobalsFromContext(pluginCtx)
@@ -381,7 +381,9 @@ func checkForCompletedJobs(
 	checkForCompletedJobsContext := context.Background() // needed so we can finalize database changes without orphaning or losing jobs
 
 	for {
-		// logging.Debug(pluginCtx, "checkForCompletedJobs loop")
+		if pluginGlobals.GetCheckForCompletedJobsRunCount()%10 == 0 {
+			logging.Info(pluginCtx, "checking for completed jobs...")
+		}
 		var updateDB = false
 		// BE VERY CAREFUL when you use return here. You could orphan the job if you're not careful.
 		pluginGlobals.IncrementCheckForCompletedJobsRunCount()
@@ -439,7 +441,7 @@ func checkForCompletedJobs(
 				if err != nil {
 					logging.Error(pluginCtx, "error updating job in db (checkForCompletedJobs)", "err", err)
 				}
-				pluginGlobals.JobChannel <- job
+				return
 			}
 		// case <-pluginCtx.Done():
 		// 	// logging.Dev(pluginCtx, "checkForCompletedJobs "+pluginConfig.Name+" pluginCtx.Done()")
