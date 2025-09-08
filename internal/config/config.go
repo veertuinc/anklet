@@ -32,6 +32,9 @@ type Config struct {
 	GlobalDatabaseMaxRetries         int      `yaml:"global_database_max_retries"`
 	GlobalDatabaseRetryDelay         int      `yaml:"global_database_retry_delay"`
 	GlobalDatabaseRetryBackoffFactor float64  `yaml:"global_database_retry_backoff_factor"`
+	GlobalDatabaseClusterMode        bool     `yaml:"global_database_cluster_mode"`
+	GlobalDatabaseTLSEnabled         bool     `yaml:"global_database_tls_enabled"`
+	GlobalDatabaseTLSInsecure        bool     `yaml:"global_database_tls_insecure"`
 	GlobalReceiverSecret             string   `yaml:"global_receiver_secret"`
 	GlobalTemplateDiskBuffer         float64  `yaml:"global_template_disk_buffer"` // Global disk buffer percentage (e.g., 10.0 for 10%)
 }
@@ -58,6 +61,9 @@ type Database struct {
 	MaxRetries         int     `yaml:"max_retries"`          // Maximum number of retry attempts (default: 3)
 	RetryDelay         int     `yaml:"retry_delay"`          // Initial retry delay in milliseconds (default: 1000)
 	RetryBackoffFactor float64 `yaml:"retry_backoff_factor"` // Backoff multiplier for retry delay (default: 2.0)
+	ClusterMode        bool    `yaml:"cluster_mode"`         // Enable Redis cluster mode
+	TLSEnabled         bool    `yaml:"tls_enabled"`          // Enable TLS connection
+	TLSInsecure        bool    `yaml:"tls_insecure"`         // Skip TLS certificate verification
 }
 
 type Workflow struct {
@@ -192,6 +198,26 @@ func LoadInEnvs(config Config) (Config, error) {
 	envGlobalDatabasePassword := os.Getenv("ANKLET_GLOBAL_DATABASE_PASSWORD")
 	if envGlobalDatabasePassword != "" {
 		config.GlobalDatabasePassword = envGlobalDatabasePassword
+	}
+	envGlobalDatabaseDatabase := os.Getenv("ANKLET_GLOBAL_DATABASE_DATABASE")
+	if envGlobalDatabaseDatabase != "" {
+		database, err := strconv.Atoi(envGlobalDatabaseDatabase)
+		if err != nil {
+			return Config{}, err
+		}
+		config.GlobalDatabaseDatabase = database
+	}
+	envGlobalDatabaseClusterMode := os.Getenv("ANKLET_GLOBAL_DATABASE_CLUSTER_MODE")
+	if envGlobalDatabaseClusterMode != "" {
+		config.GlobalDatabaseClusterMode = envGlobalDatabaseClusterMode == "true"
+	}
+	envGlobalDatabaseTLSEnabled := os.Getenv("ANKLET_GLOBAL_DATABASE_TLS_ENABLED")
+	if envGlobalDatabaseTLSEnabled != "" {
+		config.GlobalDatabaseTLSEnabled = envGlobalDatabaseTLSEnabled == "true"
+	}
+	envGlobalDatabaseTLSInsecure := os.Getenv("ANKLET_GLOBAL_DATABASE_TLS_INSECURE")
+	if envGlobalDatabaseTLSInsecure != "" {
+		config.GlobalDatabaseTLSInsecure = envGlobalDatabaseTLSInsecure == "true"
 	}
 
 	envGlobalReceiverSecret := os.Getenv("ANKLET_GLOBAL_RECEIVER_SECRET")
