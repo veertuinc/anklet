@@ -1522,8 +1522,12 @@ func Run(
 	// Github can mark a job completed, but it's not sending the webhook event for completed and it can sit like this for hours
 	// TODO: find a way to test this
 	if queuedJob.Attempts > 0 {
-		if queuedJob.Attempts > 5 {
-			logging.Warn(pluginCtx, "job has attempts > 5, cancelling it")
+		maxAttempts := pluginConfig.JobRetryAttempts
+		if maxAttempts == 0 {
+			maxAttempts = 5 // default value
+		}
+		if queuedJob.Attempts > maxAttempts {
+			logging.Warn(pluginCtx, "job has attempts > max attempts, cancelling it", "attempts", queuedJob.Attempts, "max_attempts", maxAttempts)
 			queuedJob.Action = "cancel"
 			queuedJob.WorkflowJob.Status = github.Ptr("completed")
 			err = internalGithub.UpdateJobInDB(pluginCtx, pluginQueueName, &queuedJob)

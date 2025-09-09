@@ -36,6 +36,7 @@ plugins:
     # sleep_interval: 5 # Optional; defaults to 1 second.
     # registration_timeout_seconds: 80 # Optional; defaults to 80 seconds.
     # template_disk_buffer: 10.0 # Optional; defaults to 10.0%. How much disk space to leave free on the host for templates.
+    # job_retry_attempts: 10  # Override the default of 5
     #database:
     #  enabled: true
     #  url: localhost
