@@ -18,7 +18,7 @@ if [[ ! -d "./.github/workflows" ]]; then
 fi
 
 for ((i=1; i<=TRIGGER_RUN_COUNT; i++)); do
-    echo "[run $i] Starting"
+    # echo "[run $i] Starting"
     WORKFLOW_FILES=$(ls ./.github/workflows/*.yml | grep "./.github/workflows/t[0-9]-" | grep -E "$REGEX_PATTERN")
 
     # Check if any workflow files match the pattern
@@ -27,11 +27,11 @@ for ((i=1; i<=TRIGGER_RUN_COUNT; i++)); do
         continue
     fi
 
-    echo "[run $i] Found $(echo "$WORKFLOW_FILES" | wc -l) workflow(s) matching pattern"
+    # echo "[run $i] Found $(echo "$WORKFLOW_FILES" | wc -l) workflow(s) matching pattern"
 
     for FILE in $WORKFLOW_FILES; do
         WORKFLOW_ID=$(basename $FILE)
-        echo "[run $i] Triggering workflow $WORKFLOW_ID"
+        # echo "[run $i] Triggering workflow $WORKFLOW_ID"
         curl \
             -X POST \
             -H "Authorization: Bearer ${TRIGGER_PAT}" \
