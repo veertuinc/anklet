@@ -924,6 +924,11 @@ func cleanup(
 					logging.Error(pluginCtx, "error pushing job back to queued", "err", err)
 					return
 				}
+				// remove from paused queue
+				err = internalGithub.DeleteFromQueue(cleanupContext, *cleaningQueuedJob.WorkflowJob.ID, pausedQueueName)
+				if err != nil {
+					logging.Warn(pluginCtx, "unable to delete from paused queue", "err", err)
+				}
 				_, err = databaseContainer.RetryDel(cleanupContext, pluginQueueName+"/cleaning")
 				if err != nil {
 					logging.Error(pluginCtx, "error deleting job from cleaning queue", "err", err)
