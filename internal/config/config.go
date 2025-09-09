@@ -87,6 +87,7 @@ type Plugin struct {
 	RedeliverHours             int      `yaml:"redeliver_hours"`
 	RegistrationTimeoutSeconds int      `yaml:"registration_timeout_seconds"`
 	TemplateDiskBuffer         float64  `yaml:"template_disk_buffer"` // Plugin-specific disk buffer percentage (e.g., 10.0 for 10%)
+	JobRetryAttempts           int      `yaml:"job_retry_attempts"`   // Maximum number of retry attempts for failed jobs
 }
 
 func LoadConfig(configPath string) (Config, error) {
@@ -205,6 +206,18 @@ func LoadInEnvs(config Config) (Config, error) {
 			return Config{}, err
 		}
 		config.GlobalTemplateDiskBuffer = buffer
+	}
+
+	envJobRetryAttempts := os.Getenv("ANKLET_JOB_RETRY_ATTEMPTS")
+	if envJobRetryAttempts != "" {
+		attempts, err := strconv.Atoi(envJobRetryAttempts)
+		if err != nil {
+			return Config{}, err
+		}
+		// Apply to all plugins if set globally
+		for i := range config.Plugins {
+			config.Plugins[i].JobRetryAttempts = attempts
+		}
 	}
 
 	// pidFileDir := os.Getenv("ANKLET_PID_FILE_DIR")
