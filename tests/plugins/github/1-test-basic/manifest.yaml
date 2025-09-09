@@ -1,0 +1,28 @@
+description: "Github Actions basic test"
+tests:
+    - name: "Starts Properly"
+      hosts:
+        - name: "receiver"
+          id: "ubuntu-22.04-linux"
+          config: |
+            ---
+            # Note: Don't specify any credentials for the plugin. We will inject them into the config for you.
+            plugins:
+              - name: GITHUB_RECEIVER1
+                plugin: github_receiver
+                redeliver_hours: 10
+
+        - name: "handler-8-16"
+          id: "13-L-ARM-macos"
+          config: |
+            ---
+            # Note: Don't specify any credentials for the plugin. We will inject them into the config for you.
+            plugins:
+              - name: GITHUB_HANDLER1
+                plugin: github
+
+      steps:
+        - name: "Trigger test run on 13-L-ARM-macos then watch the logs for the expected output"
+          id: "13-L-ARM-macos"
+          # working directory: tests/plugins/github/1-test-basic
+          run: ./test.bash
