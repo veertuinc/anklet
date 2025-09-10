@@ -128,9 +128,13 @@ It is also possible to use ENVs for several of the items in the config. They ove
 | ANKLET_GLOBAL_DATABASE_MAX_RETRIES | Maximum number of retries for database operations (ex: 5) |
 | ANKLET_GLOBAL_DATABASE_RETRY_DELAY | Delay between retries for database operations (ex: 1000) |
 | ANKLET_GLOBAL_DATABASE_RETRY_BACKOFF_FACTOR | Backoff factor for database operations (ex: 2.0) |
+| ANKLET_GLOBAL_DATABASE_CLUSTER_MODE | Whether to use Redis cluster mode (ex: true) |
+| ANKLET_GLOBAL_DATABASE_TLS_ENABLED | Whether to use TLS for the database connection (ex: true) |
+| ANKLET_GLOBAL_DATABASE_TLS_INSECURE | Whether to skip TLS certificate verification for the database connection (ex: true) |
 | ANKLET_GLOBAL_PRIVATE_KEY | Absolute path to private key for anklet (ex: /Users/myUser/.private-key.pem) |
 | ANKLET_GLOBAL_RECEIVER_SECRET | Secret to use for receiver plugin (ex: "my-secret") |
 | ANKLET_GLOBAL_TEMPLATE_DISK_BUFFER | Disk buffer (how much disk space to leave free on the host) percentage for templates (ex: 10.0 for 10%) |
+
 
 ### Database Setup
 
@@ -148,7 +152,7 @@ For production, we recommend running a [redis cluster](https://redis.io/docs/lat
 Your config.yml file must define the database in one of the following ways:
 - Using the `database` variables (under each plugin).
 - Using the `global_database_*` variables (applies to and overrides the `database` variables under each plugin).
-- Using the ENVs: `ANKLET_GLOBAL_DATABASE_URL`, `ANKLET_GLOBAL_DATABASE_PORT`, `ANKLET_GLOBAL_DATABASE_USER`, `ANKLET_GLOBAL_DATABASE_PASSWORD`, `ANKLET_GLOBAL_DATABASE_DATABASE`.
+- Using the ENVs: `ANKLET_GLOBAL_DATABASE_URL`, `ANKLET_GLOBAL_DATABASE_PORT`, `ANKLET_GLOBAL_DATABASE_USER`, `ANKLET_GLOBAL_DATABASE_PASSWORD`, `ANKLET_GLOBAL_DATABASE_DATABASE`, `ANKLET_GLOBAL_DATABASE_CLUSTER_MODE`, `ANKLET_GLOBAL_DATABASE_TLS_ENABLED`, `ANKLET_GLOBAL_DATABASE_TLS_INSECURE`.
 
 ### Plugin Setup and Usage Guides
 
