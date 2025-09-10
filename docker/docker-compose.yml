@@ -1,19 +1,29 @@
-version: '3.1'
 services:
+  redis:
+    image: redis:7-alpine
+    container_name: anklet-redis
+    ports:
+      - "6379:6379"
+    command: redis-server --save 60 1 --loglevel warning
+    volumes:
+      - redis_data:/data
+
   anklet:
     build:
       context: ./
       dockerfile: Dockerfile
     # image: veertu/anklet:latest
     container_name: anklet
+    depends_on:
+      - redis
     volumes:
-      - /Users/nathanpierce/.config/anklet:/root/.config/anklet/
-      - /Users/nathanpierce/veertuinc-anklet.2024-10-09.private-key.pem:/private-key.pem
-    ports: 
+      - ./config:/root/.config/anklet/
+      - ./anklet-private-key.pem:/private-key.pem
+    ports:
       - "8081:8081"
     environment:
       # - LOG_LEVEL=dev
-      - ANKLET_CONFIG_FILE_NAME=org-receiver-config.yml
+      - ANKLET_CONFIG_FILE_NAME=receiver-config.yml
       ##################################################################################
       # ANKLET_GLOBAL_PRIVATE_KEY allows you to use the same private key for all runners
       # instead of defining a different one in the config.yml file for each runner.
@@ -27,21 +37,24 @@ services:
       ################################################################
       # AGGREGATOR
       # - ANKLET_METRICS_AGGREGATOR=true
-      # - ANKLET_METRICS_PORT=8081 
+      # - ANKLET_METRICS_PORT=8081
       # - ANKLET_METRICS_URLS=http://host.docker.internal:8080/metrics # comma separation for multiple urls
       # - ANKLET_METRICS_SLEEP_INTERVAL=10
       # - ANKLET_METRICS_DATABASE_ENABLED=true
-      # - ANKLET_METRICS_DATABASE_URL=host.docker.internal
+      # - ANKLET_METRICS_DATABASE_URL=redis
       # - ANKLET_METRICS_DATABASE_PORT=6379
       # - ANKLET_METRICS_DATABASE_USER=
       # - ANKLET_METRICS_DATABASE_PASSWORD=
       # - ANKLET_METRICS_DATABASE_DATABASE=0
       ##################################################################################
       # GLOBAL DATABASE ENVs: if set, they will be used instead of the definitions in the config .yml file
-      - ANKLET_GLOBAL_DATABASE_URL=host.docker.internal
+      - ANKLET_GLOBAL_DATABASE_URL=redis
       - ANKLET_GLOBAL_DATABASE_PORT=6379
       - ANKLET_GLOBAL_DATABASE_USER=
       - ANKLET_GLOBAL_DATABASE_PASSWORD=
       - ANKLET_GLOBAL_DATABASE_DATABASE=0
       # ANKLET_GLOBAL_RECEIVER_SECRET allows you to set a global secret for all receivers
       # - ANKLET_GLOBAL_RECEIVER_SECRET=12345
+
+volumes:
+  redis_data:

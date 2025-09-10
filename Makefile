@@ -3,6 +3,8 @@ LATEST-GIT-SHA := $(shell git rev-parse HEAD)
 VERSION := $(shell cat VERSION)
 FLAGS := -X main.version=$(VERSION) -X main.commit=$(LATEST-GIT-SHA)
 BIN := anklet
+IMAGE := veertu/anklet
+TAG := latest
 ARCH ?= $(shell arch)
 ifeq ($(ARCH), i386)
 	ARCH = amd64
@@ -77,3 +79,33 @@ run-docker-compose:
 		mv anklet_v$(VERSION)*_linux_$(ARCH) anklet_linux_$(ARCH) && \
 		rm -f anklet_v$(VERSION)*_linux_$(ARCH).zip && \
 		docker-compose up --build --force-recreate
+
+#build-snapshot:	@ Build snapshot binaries with goreleaser
+build-snapshot:
+	@echo "Building snapshot with goreleaser..."
+	goreleaser build --snapshot --clean
+
+#prepare-docker:	@ Copy Linux binaries to docker folder and build multi-arch image
+prepare-docker:
+	@echo "Copying Linux binaries to docker folder..."
+	cp dist/anklet_v*-SNAPSHOT-*_linux_amd64 docker/anklet_linux_amd64
+	cp dist/anklet_v*-SNAPSHOT-*_linux_arm64 docker/anklet_linux_arm64
+	@echo "Building multi-arch Docker image..."
+	cd docker && docker buildx build --platform linux/amd64,linux/arm64 -t anklet:snapshot .
+
+#push-docker:	@ Push Docker image to registry
+push-docker:
+	@echo "Pushing multi-arch Docker image to registry..."
+	docker tag anklet:snapshot $(IMAGE):$(TAG)
+	docker push $(IMAGE):$(TAG)
+
+#build-docker-snapshot:	@ Complete workflow: build snapshot, prepare docker, and build image
+build-docker-snapshot: build-snapshot prepare-docker
+
+#build-docker-snapshot-push:	@ Complete workflow: build, prepare, and push to registry
+build-docker-snapshot-push: build-snapshot prepare-docker push-docker
+
+#load-docker:	@ Build and load Docker image for local testing
+load-docker:
+	@echo "Building and loading Docker image for local use..."
+	cd docker && docker buildx build --platform linux/amd64,linux/arm64 -t anklet:snapshot --load .

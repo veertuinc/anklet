@@ -2,6 +2,7 @@ package database
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,7 +18,7 @@ import (
 
 type Database struct {
 	UniqueRunKey       string
-	Client             *redis.Client
+	Client             redis.Cmdable // Interface that both *redis.Client and *redis.ClusterClient implement
 	MaxRetries         int
 	RetryDelay         time.Duration
 	RetryBackoffFactor float64
@@ -95,13 +96,38 @@ func NewClient(ctx context.Context, config config.Database) (*Database, error) {
 		retryBackoffFactor = 2.0 // Default to 2x backoff
 	}
 
-	rdb := redis.NewClient(&redis.Options{
-		Addr:     fmt.Sprintf("%s:%d", config.URL, config.Port),
-		Username: config.User,
-		Password: config.Password, // no password set
-		DB:       config.Database, // use default DB,
-	})
-	logging.Dev(ctx, fmt.Sprintf("created redis client: %v", rdb))
+	var rdb redis.Cmdable
+
+	// Configure TLS if enabled
+	var tlsConfig *tls.Config
+	if config.TLSEnabled {
+		tlsConfig = &tls.Config{
+			InsecureSkipVerify: config.TLSInsecure,
+		}
+	}
+
+	if config.ClusterMode {
+		// Use cluster client
+		clusterClient := redis.NewClusterClient(&redis.ClusterOptions{
+			Addrs:     []string{fmt.Sprintf("%s:%d", config.URL, config.Port)},
+			Username:  config.User,
+			Password:  config.Password,
+			TLSConfig: tlsConfig,
+		})
+		rdb = clusterClient
+		logging.Dev(ctx, fmt.Sprintf("created redis cluster client: %v", clusterClient))
+	} else {
+		// Use regular client
+		regularClient := redis.NewClient(&redis.Options{
+			Addr:      fmt.Sprintf("%s:%d", config.URL, config.Port),
+			Username:  config.User,
+			Password:  config.Password,
+			DB:        config.Database,
+			TLSConfig: tlsConfig,
+		})
+		rdb = regularClient
+		logging.Dev(ctx, fmt.Sprintf("created redis client: %v", regularClient))
+	}
 
 	// Create Database instance with retry configuration
 	db := &Database{
