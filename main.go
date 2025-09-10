@@ -381,11 +381,14 @@ func worker(
 			metricsServiceDatabaseDatabase = loadedConfig.Metrics.Database.Database
 		}
 		databaseContainer, err := database.NewClient(workerCtx, config.Database{
-			URL:      metricsServiceDatabaseURL,
-			Port:     metricsServiceDatabasePort,
-			User:     metricsServiceDatabaseUser,
-			Password: metricsServiceDatabasePassword,
-			Database: metricsServiceDatabaseDatabase,
+			URL:         metricsServiceDatabaseURL,
+			Port:        metricsServiceDatabasePort,
+			User:        metricsServiceDatabaseUser,
+			Password:    metricsServiceDatabasePassword,
+			Database:    metricsServiceDatabaseDatabase,
+			ClusterMode: loadedConfig.GlobalDatabaseClusterMode,
+			TLSEnabled:  loadedConfig.GlobalDatabaseTLSEnabled,
+			TLSInsecure: loadedConfig.GlobalDatabaseTLSInsecure,
 		})
 		if err != nil {
 			parentLogger.ErrorContext(workerCtx, "unable to access database", "error", err)
@@ -560,11 +563,14 @@ func worker(
 					}
 					logging.Dev(pluginCtx, "connecting to database")
 					databaseClient, err := database.NewClient(pluginCtx, config.Database{
-						URL:      databaseURL,
-						Port:     databasePort,
-						User:     databaseUser,
-						Password: databasePassword,
-						Database: databaseDatabase,
+						URL:         databaseURL,
+						Port:        databasePort,
+						User:        databaseUser,
+						Password:    databasePassword,
+						Database:    databaseDatabase,
+						ClusterMode: loadedConfig.GlobalDatabaseClusterMode,
+						TLSEnabled:  loadedConfig.GlobalDatabaseTLSEnabled,
+						TLSInsecure: loadedConfig.GlobalDatabaseTLSInsecure,
 					})
 					if err != nil {
 						logging.Error(pluginCtx, "unable to access database", "error", err)
