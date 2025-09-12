@@ -51,6 +51,7 @@ plugins:
 ```
 
 - Your PAT or Github App must have **Actions** and **Administration** Read & Write permissions.
+- To avoid 404s from the Github API, you need to be sure the app is installed on the repos you want to run jobs on.
 - You must define the database in the config.yml file either using the `database` section or the `global_database_*` variables. You can find installation instructions in the anklet main [README.md](../../README.md#database-setup).
 - If you are attempting to register runners for an entire organization, do NOT set `repo` and make sure your Github App has `Self-hosted runners` > `Read and write` permissions.
 - If your Organization level runner is registered and your public repo jobs are not picking it up even though the labels are a perfect match, make sure the Runner groups (likely `Default`) has `Allow public repositories`.
