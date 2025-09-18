@@ -247,29 +247,39 @@ cleanup() {
 }
 
 # we use JQ here instead of pretty print in the logging.go so that we can ensure valid JSON is output from go
-# Feed stdout through jq so we still validate JSON, but only surface time/level/msg/attributes for readability (errors red, warnings yellow, debug grey).
+# Feed stdout through jq so we still validate JSON, but surface time/name/level/msg/attributes for readability (errors red, warnings yellow, debug grey; names get stable colors).
 LOG_LEVEL=${LOG_LEVEL:-dev} go run main.go -c ${YAML_CONFIG_FILE} 2>&1 \
     | tee /tmp/$(basename ${YAML_CONFIG_FILE}).log \
     | jq -r '
+        def palette: ["\u001b[32m", "\u001b[35m", "\u001b[36m", "\u001b[94m", "\u001b[95m", "\u001b[96m"];
+        def name_color($name):
+            palette as $palette |
+            (reduce ($name | tostring | explode[]) as $c (0; . + $c)) as $sum |
+            ($palette | length) as $plen |
+            (if $plen > 0 then $palette[$sum % $plen] else "" end);
         if type == "object" then
             (.level // .severity // "") as $level |
             (.time // .ts // .timestamp // "") as $time |
             (.msg // "") as $msg |
             (.attributes // {}) as $attrs |
+            (if ($attrs | type) == "object" and ($attrs | has("name")) then ($attrs.name // "") else "" end) as $rawName |
+            (if ($rawName | tostring | length) > 0 then ($rawName | tostring) else "-" end) as $nameStr |
+            (if ($rawName | tostring | length) > 0 then name_color($rawName) else "\u001b[37m" end) as $nameColor |
             ($level | tostring) as $levelStr |
             ($time | tostring) as $timeStr |
             ($msg | tostring) as $msgStr |
             ($attrs | tojson) as $attrsJson |
-            ("time=" + $timeStr + " level=" + $levelStr + " msg=" + $msgStr + " attributes=" + $attrsJson) as $line |
+            ($nameColor + $nameStr) as $coloredName |
+            ("time=" + $timeStr + " name=" + $nameStr + " level=" + $levelStr + " msg=" + $msgStr + " attributes=" + $attrsJson) as $line |
             ($levelStr | ascii_upcase) as $levelUpper |
             (if $levelUpper == "ERROR" then
-                "\u001b[31m" + $line + "\u001b[0m"
+                "\u001b[31mtime=" + $timeStr + " name=" + $coloredName + "\u001b[31m level=" + $levelStr + " msg=" + $msgStr + " attributes=" + $attrsJson + "\u001b[0m"
             elif ($levelUpper == "WARN" or $levelUpper == "WARNING") then
-                "\u001b[33m" + $line + "\u001b[0m"
+                "\u001b[33mtime=" + $timeStr + " name=" + $coloredName + "\u001b[33m level=" + $levelStr + " msg=" + $msgStr + " attributes=" + $attrsJson + "\u001b[0m"
             elif $levelUpper == "DEBUG" then
-                "\u001b[90m" + $line + "\u001b[0m"
+                "\u001b[90mtime=" + $timeStr + " name=" + $coloredName + "\u001b[90m level=" + $levelStr + " msg=" + $msgStr + " attributes=" + $attrsJson + "\u001b[0m"
             else
-                "\u001b[33mtime\u001b[0m=\u001b[37m" + $timeStr + "\u001b[0m level=" + $levelStr + " msg=" + $msgStr + " attributes=" + $attrsJson
+                "\u001b[33mtime\u001b[0m=\u001b[37m" + $timeStr + "\u001b[0m name=" + $nameColor + $nameStr + "\u001b[0m level=" + $levelStr + " msg=" + $msgStr + " attributes=" + $attrsJson
             end)
         else
             .
