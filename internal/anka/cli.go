@@ -129,6 +129,47 @@ func (cli *Cli) Execute(pluginCtx context.Context, args ...string) ([]byte, int,
 	}
 }
 
+func (cli *Cli) ExecuteWithTimeout(
+	pluginCtx context.Context,
+	timeoutInSeconds int,
+	args ...string,
+) ([]byte, int, error, error) {
+	if args[2] != "list" { // hide spammy list command
+		logging.Debug(pluginCtx, "executing", "command", strings.Join(args, " "))
+	}
+	done := make(chan error, 1)
+	var cmd *exec.Cmd
+	var combinedOutput bytes.Buffer
+
+	go func() {
+		cmd = exec.Command(args[0], args[1:]...)
+		cmd.Stdout = &combinedOutput
+		cmd.Stderr = &combinedOutput
+		err := cmd.Run()
+		done <- err
+	}()
+
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
+
+	timeout := time.After(time.Duration(timeoutInSeconds) * time.Second)
+
+	for {
+		select {
+		case <-timeout:
+			return nil, 0, nil, fmt.Errorf("execution of command %v timed out", args)
+		case <-ticker.C:
+			logging.Info(pluginCtx, fmt.Sprintf("execution of command %v is still in progress...", args))
+		case err := <-done:
+			exitCode := 0
+			if exitErr, ok := err.(*exec.ExitError); ok {
+				exitCode = exitErr.ExitCode()
+			}
+			return combinedOutput.Bytes(), exitCode, err, nil
+		}
+	}
+}
+
 func (cli *Cli) ParseAnkaJson(pluginCtx context.Context, jsonData []byte) (*AnkaJson, error) {
 	ankaJson := &AnkaJson{}
 	err := json.Unmarshal(jsonData, &ankaJson)
@@ -203,6 +244,18 @@ func (cli *Cli) AnkaRun(pluginCtx context.Context, vmName string, args ...string
 	}
 	logging.Debug(pluginCtx, "command executed successfully", "stdout", string(runOutput))
 	return nil
+}
+
+func (cli *Cli) AnkaRunWithTimeout(pluginCtx context.Context, timeoutInSeconds int, vmName string, args ...string) (error, error) {
+	runOutput, exitCode, err, errTimeout := cli.ExecuteWithTimeout(pluginCtx, timeoutInSeconds, "anka", "-j", "run", vmName, "bash", "-c", strings.Join(args, " "))
+	if errTimeout != nil {
+		return nil, fmt.Errorf("command execution timed out: %s %s", string(runOutput), errTimeout)
+	}
+	if exitCode != 0 || err != nil {
+		return fmt.Errorf("command execution failed with code %d: %s %s", exitCode, string(runOutput), err), nil
+	}
+	logging.Debug(pluginCtx, "command executed successfully", "stdout", string(runOutput))
+	return nil, nil
 }
 
 func (cli *Cli) AnkaShow(pluginCtx context.Context, vmName string) (*AnkaShowOutput, error) {

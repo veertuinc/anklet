@@ -126,7 +126,6 @@ func watchJobStatus(
 	jobStatusCheckIntervalSeconds := 10
 	firstLog := true
 	for {
-		// logging.Debug(pluginCtx, "watchJobStatus loop")
 		// Check for shutdown signal more frequently
 		if workerCtx.Err() != nil || pluginCtx.Err() != nil {
 			logging.Warn(pluginCtx, "context canceled while watching for job completion")
@@ -355,7 +354,7 @@ func checkForCompletedJobs(
 	mainCompletedQueueName string,
 	mainInProgressQueueName string,
 ) {
-	// logging.Debug(pluginCtx, "starting checkForCompletedJobs")
+	logging.Debug(pluginCtx, "starting checkForCompletedJobs")
 	randomInt := rand.Intn(100)
 	pluginCtx = logging.AppendCtx(pluginCtx, slog.Int("check_id", randomInt))
 	workerGlobals, err := config.GetWorkerGlobalsFromContext(pluginCtx)
@@ -515,7 +514,7 @@ func checkForCompletedJobs(
 			}
 
 			if pluginCompletedQueueJobJSON != "" {
-				logging.Debug(pluginCtx, "checkForCompletedJobs -> job is in pluginCompletedQueue")
+				logging.Info(pluginCtx, "checkForCompletedJobs -> found completed job in pluginCompletedQueue")
 				queuedJob.WorkflowJob.Status = github.Ptr("completed")
 				queuedJob.Action = "finish"
 				select {
@@ -581,9 +580,7 @@ func checkForCompletedJobs(
 				if workerGlobals.Plugins[pluginConfig.Plugin][pluginConfig.Name].PluginRunCount.Load()%2 == 0 {
 					workerGlobals.ResetQueueTargetIndex() // make sure we reset the index so we don't leave any jobs behind at the lower indexes
 				}
-				logging.Info(pluginCtx, "checkForCompletedJobs -> debug 1")
 				pluginGlobals.JobChannel <- queuedJob
-				logging.Info(pluginCtx, "checkForCompletedJobs -> debug 2")
 				updateDB = true
 			}
 
@@ -1998,7 +1995,9 @@ func Run(
 	default:
 	}
 	logging.Debug(pluginCtx, "registering github runner inside of vm", "queuedJob", queuedJob)
-	registerRunnerErr = ankaCLI.AnkaRun(pluginCtx,
+	// if the job is cancelled in github right before registration happens, the config.sh can hang indefinitely
+	registerRunnerErr, registerRunnerErrTimeout := ankaCLI.AnkaRunWithTimeout(pluginCtx,
+		60,
 		queuedJob.AnkaVM.Name,
 		"./register-runner.bash",
 		queuedJob.AnkaVM.Name,
@@ -2007,6 +2006,12 @@ func Run(
 		strings.Join(queuedJob.WorkflowJob.Labels, ","),
 		pluginConfig.RunnerGroup,
 	)
+	if registerRunnerErrTimeout != nil { // retryable
+		logging.Error(pluginCtx, "timeout executing register-runner.bash", "err", registerRunnerErrTimeout)
+		pluginGlobals.RetryChannel <- "timeout_executing_register_runner_bash"
+		pluginGlobals.JobChannel <- internalGithub.QueueJob{Action: "finish"}
+		return pluginCtx, nil
+	}
 	if registerRunnerErr != nil {
 		// logging.Error(pluginCtx, "error executing register-runner.bash", "err", registerRunnerErr)
 		pluginGlobals.RetryChannel <- "error_executing_register_runner_bash"
