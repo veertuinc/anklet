@@ -57,9 +57,39 @@ func (cli *Cli) EnsureSpaceForTemplate(
 		}
 		pullCheckOutput := &AnkaPullCheckOutput{}
 		if body, ok := pullJson.Body.(map[string]any); ok {
-			pullCheckOutput.Size = uint64(body["size"].(float64))
-			pullCheckOutput.Cached = uint64(body["cached"].(float64))
-			pullCheckOutput.Available = uint64(body["available"].(float64))
+			// Handle empty body case (template already available locally)
+			if len(body) == 0 {
+				// Template is already available locally, no download needed
+				// Set all values to 0 - the later logic will handle this case appropriately
+				pullCheckOutput.Size = 0
+				pullCheckOutput.Cached = 0
+				pullCheckOutput.Available = 0
+			} else {
+				// Safely extract values from non-empty body
+				if sizeVal, exists := body["size"]; exists && sizeVal != nil {
+					if sizeFloat, ok := sizeVal.(float64); ok {
+						pullCheckOutput.Size = uint64(sizeFloat)
+					} else {
+						logging.Warn(pluginCtx, "invalid size value type in pull check response", "value", sizeVal)
+					}
+				}
+
+				if cachedVal, exists := body["cached"]; exists && cachedVal != nil {
+					if cachedFloat, ok := cachedVal.(float64); ok {
+						pullCheckOutput.Cached = uint64(cachedFloat)
+					} else {
+						logging.Warn(pluginCtx, "invalid cached value type in pull check response", "value", cachedVal)
+					}
+				}
+
+				if availableVal, exists := body["available"]; exists && availableVal != nil {
+					if availableFloat, ok := availableVal.(float64); ok {
+						pullCheckOutput.Available = uint64(availableFloat)
+					} else {
+						logging.Warn(pluginCtx, "invalid available value type in pull check response", "value", availableVal)
+					}
+				}
+			}
 		} else {
 			return nil, 0, 0, fmt.Errorf("unable to parse pull check output")
 		}
