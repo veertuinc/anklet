@@ -71,6 +71,7 @@ func (cli *Cli) EnsureSpaceForTemplate(
 						pullCheckOutput.Size = uint64(sizeFloat)
 					} else {
 						logging.Warn(pluginCtx, "invalid size value type in pull check response", "value", sizeVal)
+						return nil, 0, 0, fmt.Errorf("invalid size value type in pull check response")
 					}
 				}
 
@@ -79,6 +80,7 @@ func (cli *Cli) EnsureSpaceForTemplate(
 						pullCheckOutput.Cached = uint64(cachedFloat)
 					} else {
 						logging.Warn(pluginCtx, "invalid cached value type in pull check response", "value", cachedVal)
+						return nil, 0, 0, fmt.Errorf("invalid cached value type in pull check response")
 					}
 				}
 
@@ -87,6 +89,7 @@ func (cli *Cli) EnsureSpaceForTemplate(
 						pullCheckOutput.Available = uint64(availableFloat)
 					} else {
 						logging.Warn(pluginCtx, "invalid available value type in pull check response", "value", availableVal)
+						return nil, 0, 0, fmt.Errorf("invalid available value type in pull check response")
 					}
 				}
 			}
