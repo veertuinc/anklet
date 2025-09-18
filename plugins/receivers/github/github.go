@@ -231,7 +231,7 @@ func Run(
 					// get all keys from database for the main queue and service queues as well as completed
 					queuedKeys, err := databaseContainer.RetryKeys(pluginCtx, "anklet/jobs/github/queued/"+pluginConfig.Owner+"*")
 					if err != nil {
-						logging.Error(webhookCtx, "error getting list of queued keys (completed)", "err", err)
+						logging.Error(webhookCtx, "error getting list of queued keys (completed)", "error", err)
 						return
 					}
 					queues = append(queues, queuedKeys...)
@@ -370,7 +370,7 @@ func Run(
 	// 			})
 	// 		}
 	// 		if err != nil {
-	// 			logger.ErrorContext(pluginCtx, "error listing hooks", "err", err)
+	// 			logger.ErrorContext(pluginCtx, "error listing hooks", "error", err)
 	// 			return
 	// 		}
 
@@ -385,7 +385,7 @@ func Run(
 	// 		// // Pretty print hookDeliveries
 	// 		// hookDeliveriesJSON, err := json.MarshalIndent(failedHookDeliveries, "", "  ")
 	// 		// if err != nil {
-	// 		// 	logger.ErrorContext(pluginCtx, "error marshalling hook deliveries to JSON", "err", err)
+	// 		// 	logger.ErrorContext(pluginCtx, "error marshalling hook deliveries to JSON", "error", err)
 	// 		// 	return
 	// 		// }
 	// 		// fmt.Println("Hook Deliveries:", string(hookDeliveriesJSON))
@@ -421,13 +421,13 @@ func Run(
 	// 					})
 	// 				}
 	// 				if err != nil {
-	// 					logger.ErrorContext(pluginCtx, "error listing hooks", "err", err)
+	// 					logger.ErrorContext(pluginCtx, "error listing hooks", "error", err)
 	// 					return
 	// 				}
 	// 				var workflowJobEvent github.WorkflowJobEvent
 	// 				err = json.Unmarshal(*gottenHookDelivery.Request.RawPayload, &workflowJobEvent)
 	// 				if err != nil {
-	// 					logger.ErrorContext(pluginCtx, "error unmarshalling hook request raw payload to HookResponse", "err", err)
+	// 					logger.ErrorContext(pluginCtx, "error unmarshalling hook request raw payload to HookResponse", "error", err)
 	// 					return
 	// 				}
 	// 				if !exists_in_array_partial(workflowJobEvent.WorkflowJob.Labels, []string{"anka-template"}) {
@@ -476,7 +476,7 @@ func Run(
 			})
 		}
 		if err != nil {
-			// logger.ErrorContext(pluginCtx, "error listing hooks", "err", err)
+			// logger.ErrorContext(pluginCtx, "error listing hooks", "error", err)
 			return pluginCtx, fmt.Errorf("error listing hooks: %s", err.Error())
 		}
 
@@ -523,21 +523,21 @@ func Run(
 	for _, key := range queuedKeys {
 		queuedJobs, err := databaseContainer.RetryLRange(pluginCtx, key, 0, -1)
 		if err != nil {
-			// logger.ErrorContext(pluginCtx, "error getting list of queued jobs for key: "+key, "err", err)
+			// logger.ErrorContext(pluginCtx, "error getting list of queued jobs for key: "+key, "error", err)
 			return pluginCtx, fmt.Errorf("error getting list of queued jobs for key: %s", err.Error())
 		}
 		allQueuedJobs[key] = queuedJobs
 	}
 	completedKeys, err := databaseContainer.RetryKeys(pluginCtx, "anklet/jobs/github/completed"+pluginConfig.Owner+"*")
 	if err != nil {
-		// logger.ErrorContext(pluginCtx, "error getting list of keys", "err", err)
+		// logger.ErrorContext(pluginCtx, "error getting list of keys", "error", err)
 		return pluginCtx, fmt.Errorf("error getting list of completed keys: %s", err.Error())
 	}
 	var allCompletedJobs = make(map[string][]string)
 	for _, key := range completedKeys {
 		completedJobs, err := databaseContainer.RetryLRange(pluginCtx, key, 0, -1)
 		if err != nil {
-			// logger.ErrorContext(pluginCtx, "error getting list of queued jobs for key: "+key, "err", err)
+			// logger.ErrorContext(pluginCtx, "error getting list of queued jobs for key: "+key, "error", err)
 			return pluginCtx, fmt.Errorf("error getting list of queued jobs for key: %s", err.Error())
 		}
 		allCompletedJobs[key] = completedJobs
@@ -567,13 +567,13 @@ MainLoop:
 			})
 		}
 		if err != nil {
-			// logger.ErrorContext(pluginCtx, "error listing hooks", "err", err)
+			// logger.ErrorContext(pluginCtx, "error listing hooks", "error", err)
 			return pluginCtx, fmt.Errorf("error listing hooks: %s", err.Error())
 		}
 		var workflowJobEventPayload internalGithub.QueueJob
 		err = json.Unmarshal(*gottenHookDelivery.Request.RawPayload, &workflowJobEventPayload)
 		if err != nil {
-			// logger.ErrorContext(pluginCtx, "error unmarshalling hook request raw payload to HookResponse", "err", err)
+			// logger.ErrorContext(pluginCtx, "error unmarshalling hook request raw payload to HookResponse", "error", err)
 			return pluginCtx, fmt.Errorf("error unmarshalling hook request raw payload to HookResponse: %s", err.Error())
 		}
 		workflowJob := workflowJobEventPayload.WorkflowJob
@@ -603,7 +603,7 @@ MainLoop:
 				}
 				wrappedPayload, err, typeErr := database.Unwrap[internalGithub.QueueJob](queuedJob)
 				if err != nil {
-					// logger.ErrorContext(pluginCtx, "error unmarshalling job", "err", err)
+					// logger.ErrorContext(pluginCtx, "error unmarshalling job", "error", err)
 					return pluginCtx, fmt.Errorf("error unmarshalling job: %s", err.Error())
 				}
 				if typeErr != nil { // not the type we want
@@ -630,7 +630,7 @@ MainLoop:
 				for index, completedJob := range completedJobs {
 					wrappedPayload, err, typeErr := database.Unwrap[internalGithub.QueueJob](completedJob)
 					if err != nil {
-						// logger.ErrorContext(pluginCtx, "error unmarshalling job", "err", err)
+						// logger.ErrorContext(pluginCtx, "error unmarshalling job", "error", err)
 						return pluginCtx, fmt.Errorf("error unmarshalling job: %s", err.Error())
 					}
 					if typeErr != nil { // not the type we want
@@ -655,7 +655,7 @@ MainLoop:
 		if inCompleted && !inQueued {
 			_, err = databaseContainer.RetryLRem(pluginCtx, inCompletedListKey, 1, allCompletedJobs[inCompletedListKey][inCompletedIndex])
 			if err != nil {
-				// logger.ErrorContext(pluginCtx, "error removing completedJob from anklet/jobs/github/completed/"+pluginConfig.Owner, "err", err, "completedJob", allCompletedJobs[inCompletedListKey][inCompletedIndex])
+				// logger.ErrorContext(pluginCtx, "error removing completedJob from anklet/jobs/github/completed/"+pluginConfig.Owner, "error", err, "completedJob", allCompletedJobs[inCompletedListKey][inCompletedIndex])
 				return pluginCtx, fmt.Errorf("error removing completedJob from anklet/jobs/github/completed/"+pluginConfig.Owner+": %s", err.Error())
 			}
 			continue
@@ -688,13 +688,13 @@ MainLoop:
 						})
 					}
 					if err != nil {
-						// logger.ErrorContext(pluginCtx, "error listing hooks", "err", err)
+						// logger.ErrorContext(pluginCtx, "error listing hooks", "error", err)
 						return pluginCtx, fmt.Errorf("error listing hooks: %s", err.Error())
 					}
 					var otherWorkflowJobEventPayload internalGithub.QueueJob
 					err = json.Unmarshal(*otherGottenHookDelivery.Request.RawPayload, &otherWorkflowJobEventPayload)
 					if err != nil {
-						// logger.ErrorContext(pluginCtx, "error unmarshalling hook request raw payload to HookResponse", "err", err)
+						// logger.ErrorContext(pluginCtx, "error unmarshalling hook request raw payload to HookResponse", "error", err)
 						return pluginCtx, fmt.Errorf("error unmarshalling hook request raw payload to HookResponse: %s", err.Error())
 					}
 					otherWorkflowJob := otherWorkflowJobEventPayload.WorkflowJob

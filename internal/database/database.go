@@ -48,7 +48,7 @@ func (db *Database) retryOperation(ctx context.Context, operationName string, op
 		if attempt > 0 {
 			// Calculate delay with exponential backoff
 			delay := time.Duration(float64(db.RetryDelay) * float64(attempt) * db.RetryBackoffFactor)
-			logging.Debug(ctx, fmt.Sprintf("retrying %s in %v (attempt %d/%d)", operationName, delay, attempt, db.MaxRetries))
+			logging.Warn(ctx, fmt.Sprintf("retrying %s in %v (attempt %d/%d)", operationName, delay, attempt, db.MaxRetries))
 
 			select {
 			case <-ctx.Done():

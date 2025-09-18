@@ -265,21 +265,23 @@ LOG_LEVEL=${LOG_LEVEL:-dev} go run main.go -c ${YAML_CONFIG_FILE} 2>&1 \
             (if ($attrs | type) == "object" and ($attrs | has("name")) then ($attrs.name // "") else "" end) as $rawName |
             (if ($rawName | tostring | length) > 0 then ($rawName | tostring) else "-" end) as $nameStr |
             (if ($rawName | tostring | length) > 0 then name_color($rawName) else "\u001b[37m" end) as $nameColor |
+            ($nameColor + $nameStr + "\u001b[0m") as $coloredName |
             ($level | tostring) as $levelStr |
             ($time | tostring) as $timeStr |
             ($msg | tostring) as $msgStr |
             ($attrs | tojson) as $attrsJson |
-            ($nameColor + $nameStr) as $coloredName |
-            ("time=" + $timeStr + " name=" + $nameStr + " level=" + $levelStr + " msg=" + $msgStr + " attributes=" + $attrsJson) as $line |
+            (if has("error") then " error=" + (.error | tojson)
+             elif has("err") then " error=" + (.err | tojson)
+             else "" end) as $errorStr |
             ($levelStr | ascii_upcase) as $levelUpper |
             (if $levelUpper == "ERROR" then
-                "\u001b[31mtime=" + $timeStr + " name=" + $coloredName + "\u001b[31m level=" + $levelStr + " msg=" + $msgStr + " attributes=" + $attrsJson + "\u001b[0m"
+                "\u001b[31mtime=" + $timeStr + " name=" + $coloredName + "\u001b[31m level=" + $levelStr + " msg=" + $msgStr + $errorStr + " attributes=" + $attrsJson + "\u001b[0m"
             elif ($levelUpper == "WARN" or $levelUpper == "WARNING") then
-                "\u001b[33mtime=" + $timeStr + " name=" + $coloredName + "\u001b[33m level=" + $levelStr + " msg=" + $msgStr + " attributes=" + $attrsJson + "\u001b[0m"
+                "\u001b[33mtime=" + $timeStr + " name=" + $coloredName + "\u001b[33m level=" + $levelStr + " msg=" + $msgStr + $errorStr + " attributes=" + $attrsJson + "\u001b[0m"
             elif $levelUpper == "DEBUG" then
-                "\u001b[90mtime=" + $timeStr + " name=" + $coloredName + "\u001b[90m level=" + $levelStr + " msg=" + $msgStr + " attributes=" + $attrsJson + "\u001b[0m"
+                "\u001b[90mtime=" + $timeStr + " name=" + $coloredName + "\u001b[90m level=" + $levelStr + " msg=" + $msgStr + $errorStr + " attributes=" + $attrsJson + "\u001b[0m"
             else
-                "\u001b[33mtime\u001b[0m=\u001b[37m" + $timeStr + "\u001b[0m name=" + $nameColor + $nameStr + "\u001b[0m level=" + $levelStr + " msg=" + $msgStr + " attributes=" + $attrsJson
+                "\u001b[33mtime\u001b[0m=\u001b[37m" + $timeStr + "\u001b[0m name=" + $coloredName + " level=" + $levelStr + " msg=" + $msgStr + $errorStr + " attributes=" + $attrsJson
             end)
         else
             .
