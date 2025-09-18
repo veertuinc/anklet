@@ -1976,7 +1976,7 @@ func Run(
 	}
 
 	// Install runner
-	logging.Debug(pluginCtx, "installing github runner inside of vm")
+	logging.Info(pluginCtx, "installing github runner inside of vm")
 	installRunnerErr = ankaCLI.AnkaRun(pluginCtx, queuedJob.AnkaVM.Name, "./install-runner.bash")
 	if installRunnerErr != nil {
 		logging.Error(pluginCtx, "error executing install-runner.bash", "err", installRunnerErr)
@@ -1994,7 +1994,7 @@ func Run(
 		return pluginCtx, nil
 	default:
 	}
-	logging.Debug(pluginCtx, "registering github runner inside of vm", "queuedJob", queuedJob)
+	logging.Info(pluginCtx, "registering github runner inside of vm", "queuedJob", queuedJob)
 	// if the job is cancelled in github right before registration happens, the config.sh can hang indefinitely
 	registerRunnerErr, registerRunnerErrTimeout := ankaCLI.AnkaRunWithTimeout(pluginCtx,
 		60,
@@ -2038,7 +2038,7 @@ func Run(
 		return pluginCtx, nil
 	default:
 	}
-	logging.Debug(pluginCtx, "starting github runner inside of vm")
+	logging.Info(pluginCtx, "starting github runner inside of vm")
 	startRunnerErr = ankaCLI.AnkaRun(pluginCtx, queuedJob.AnkaVM.Name, "./start-runner.bash")
 	if startRunnerErr != nil {
 		// logging.Error(pluginCtx, "error executing start-runner.bash", "err", startRunnerErr)
