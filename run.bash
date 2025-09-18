@@ -247,7 +247,33 @@ cleanup() {
 }
 
 # we use JQ here instead of pretty print in the logging.go so that we can ensure valid JSON is output from go
-LOG_LEVEL=${LOG_LEVEL:-dev} go run main.go -c ${YAML_CONFIG_FILE} 2>&1 | tee /tmp/$(basename ${YAML_CONFIG_FILE}).log | jq &
+# Feed stdout through jq so we still validate JSON, but only surface time/level/msg/attributes for readability (errors red, warnings yellow, debug grey).
+LOG_LEVEL=${LOG_LEVEL:-dev} go run main.go -c ${YAML_CONFIG_FILE} 2>&1 \
+    | tee /tmp/$(basename ${YAML_CONFIG_FILE}).log \
+    | jq -r '
+        if type == "object" then
+            (.level // .severity // "") as $level |
+            (.time // .ts // .timestamp // "") as $time |
+            (.msg // "") as $msg |
+            (.attributes // {}) as $attrs |
+            ($level | tostring) as $levelStr |
+            ($time | tostring) as $timeStr |
+            ($msg | tostring) as $msgStr |
+            ($attrs | tojson) as $attrsJson |
+            ("time=" + $timeStr + " level=" + $levelStr + " msg=" + $msgStr + " attributes=" + $attrsJson) as $line |
+            ($levelStr | ascii_upcase) as $levelUpper |
+            (if $levelUpper == "ERROR" then
+                "\u001b[31m" + $line + "\u001b[0m"
+            elif ($levelUpper == "WARN" or $levelUpper == "WARNING") then
+                "\u001b[33m" + $line + "\u001b[0m"
+            elif $levelUpper == "DEBUG" then
+                "\u001b[90m" + $line + "\u001b[0m"
+            else
+                "\u001b[33mtime\u001b[0m=\u001b[37m" + $timeStr + "\u001b[0m level=" + $levelStr + " msg=" + $msgStr + " attributes=" + $attrsJson
+            end)
+        else
+            .
+        end' &
 go_pid=$!
 
 # Set up trap to run cleanup on exit
