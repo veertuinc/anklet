@@ -1,19 +1,21 @@
 #!/usr/bin/env bash
 set -exo pipefail
 
-echo "] Starting receiver..."
-
 clean() {
-    echo "] Cleaning up..."
+    echo "] Cleaning up receiver..."
     for pid in $(cat /tmp/anklet-pids); do
-        kill -SIGINT $pid
+        kill -SIGINT $pid || true
         wait $pid || true
     done
     rm -f /tmp/anklet-pids
-    rm -f /tmp/anklet.log
-    exit 0
 }
-[[ ${CLEAN:-false} == true || "$1" == "--clean" ]] && clean
+if [[ ${CLEAN:-false} == true || "$1" == "--clean" ]]; then
+    clean
+    exit 0
+fi
+clean
+
+echo "] Starting receiver..."
 
 # Start anklet with nohup and background it
 eval nohup /tmp/anklet > /tmp/anklet.log 2>&1 &
