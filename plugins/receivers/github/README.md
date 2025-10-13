@@ -151,3 +151,12 @@ host_disk_usage_percentage 62.637773
 ## Healthcheck
 
 A Healthcheck endpoint is available at `http://{url/ip}:{port}/healthcheck`. It will return a 200 status code and `ok` if the plugin is running.
+
+## FAQS
+
+1. Available `plugin_status` values are: `running`, `in_progress`, `limit_paused`, `idle`, `stopped`.
+  - `running`: The plugin has started and is available to run a job.
+  - `in_progress`: The plugin has picked up a job to run.
+  - `limit_paused`: The plugin is paused because of Github API rate limits. (will continue once the rate limits are reset after the specific github duration)
+  - `idle`: The plugin is idle.
+  - `stopped`: The plugin is stopped.
