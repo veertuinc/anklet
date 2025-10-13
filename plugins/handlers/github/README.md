@@ -132,6 +132,13 @@ Check that:
 
 2. Debug logging can be enabled with `LOG_LEVEL=dev` in the environment. All output of debug logging will be in JSON.
 
+3. Available `plugin_status` values are: `running`, `in_progress`, `limit_paused`, `idle`, `stopped`.
+  - `running`: The plugin has started and is available to run a job.
+  - `in_progress`: The plugin has picked up a job to run.
+  - `limit_paused`: The plugin is paused because of Github API rate limits. (will continue once the rate limits are reset after the specific github duration)
+  - `idle`: The plugin is idle.
+  - `stopped`: The plugin is stopped.
+
 ## Development
 
 This plugin handles running jobs queued in the DB. It checks queued items one by one (starting at 0 index) to find one that it can run. It is also responsible for finding completed jobs in the DB and cleaning the jobs up, even if it can't run the job according to requirements.
