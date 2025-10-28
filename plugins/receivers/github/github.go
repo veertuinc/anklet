@@ -130,6 +130,7 @@ func Run(
 			logging.Error(pluginCtx, "error parsing event", "error", err)
 			return
 		}
+		deliveryID := r.Header.Get("X-GitHub-Delivery")
 		switch workflowJob := event.(type) {
 		case *github.WorkflowJobEvent:
 			simplifiedWorkflowJobEvent := internalGithub.QueueJob{
@@ -173,12 +174,14 @@ func Run(
 				slog.Any("repository", simplifiedWorkflowJobEvent.Repository),
 				slog.Any("ankaVM", simplifiedWorkflowJobEvent.AnkaVM),
 			))
+			webhookCtx = logging.AppendCtx(webhookCtx, slog.String("deliveryID", deliveryID))
 
 			logging.Info(webhookCtx, "received workflow job to consider")
 			if *workflowJob.Action == "queued" {
 				if exists_in_array_partial(simplifiedWorkflowJobEvent.WorkflowJob.Labels, []string{"anka-template"}) {
 					// make sure it doesn't already exist
-					inQueueJobJSON, err := internalGithub.GetJobJSONFromQueueByID(pluginCtx, *simplifiedWorkflowJobEvent.WorkflowJob.ID, "anklet/jobs/github/queued/"+pluginConfig.Owner)
+					queueName := "anklet/jobs/github/queued/" + pluginConfig.Owner
+					inQueueJobJSON, err := internalGithub.GetJobJSONFromQueueByID(pluginCtx, *simplifiedWorkflowJobEvent.WorkflowJob.ID, queueName)
 					if err != nil {
 						logging.Error(webhookCtx, "error searching in queue", "error", err)
 						return
@@ -190,12 +193,14 @@ func Run(
 							logging.Error(webhookCtx, "error converting job payload to JSON", "error", err)
 							return
 						}
-						_, pushErr := databaseContainer.RetryRPush(pluginCtx, "anklet/jobs/github/queued/"+pluginConfig.Owner, wrappedPayloadJSON)
+						queueLength, pushErr := databaseContainer.RetryRPush(pluginCtx, queueName, wrappedPayloadJSON)
 						if pushErr != nil {
 							logging.Error(webhookCtx, "error pushing job to queue", "error", pushErr)
 							return
 						}
-						logging.Info(webhookCtx, "job pushed to queued queue")
+						logging.Info(webhookCtx, "job pushed to queued queue", "queue", queueName, "queue_length", queueLength)
+					} else {
+						logging.Debug(webhookCtx, "job already present in queued queue, skipping enqueue", "queue", queueName)
 					}
 				}
 			} else if *workflowJob.Action == "in_progress" {
@@ -205,7 +210,8 @@ func Run(
 				// store in_progress so we can know if the registration failed
 				if exists_in_array_partial(simplifiedWorkflowJobEvent.WorkflowJob.Labels, []string{"anka-template"}) {
 					// make sure it doesn't already exist
-					inQueueJobJSON, err := internalGithub.GetJobJSONFromQueueByID(pluginCtx, *simplifiedWorkflowJobEvent.WorkflowJob.ID, "anklet/jobs/github/in_progress/"+pluginConfig.Owner)
+					inProgressQueueName := "anklet/jobs/github/in_progress/" + pluginConfig.Owner
+					inQueueJobJSON, err := internalGithub.GetJobJSONFromQueueByID(pluginCtx, *simplifiedWorkflowJobEvent.WorkflowJob.ID, inProgressQueueName)
 					if err != nil {
 						logging.Error(webhookCtx, "error searching in queue", "error", err)
 						return
@@ -217,12 +223,14 @@ func Run(
 							logging.Error(webhookCtx, "error converting job payload to JSON", "error", err)
 							return
 						}
-						_, pushErr := databaseContainer.RetryRPush(pluginCtx, "anklet/jobs/github/in_progress/"+pluginConfig.Owner, wrappedPayloadJSON)
+						queueLength, pushErr := databaseContainer.RetryRPush(pluginCtx, inProgressQueueName, wrappedPayloadJSON)
 						if pushErr != nil {
 							logging.Error(webhookCtx, "error pushing job to queue", "error", pushErr)
 							return
 						}
-						logging.Info(webhookCtx, "job pushed to in_progress queue")
+						logging.Info(webhookCtx, "job pushed to in_progress queue", "queue", inProgressQueueName, "queue_length", queueLength)
+					} else {
+						logging.Debug(webhookCtx, "job already present in in_progress queue, skipping enqueue", "queue", inProgressQueueName)
 					}
 				}
 			} else if *workflowJob.Action == "completed" {
@@ -260,7 +268,8 @@ func Run(
 						}
 					}
 					if inAQueue { // only add completed if it's in a queue
-						inCompletedQueueJobJSON, err := internalGithub.GetJobJSONFromQueueByID(pluginCtx, *simplifiedWorkflowJobEvent.WorkflowJob.ID, "anklet/jobs/github/completed/"+pluginConfig.Owner)
+						completedQueueName := "anklet/jobs/github/completed/" + pluginConfig.Owner
+						inCompletedQueueJobJSON, err := internalGithub.GetJobJSONFromQueueByID(pluginCtx, *simplifiedWorkflowJobEvent.WorkflowJob.ID, completedQueueName)
 						if err != nil {
 							logging.Error(webhookCtx, "error searching in queue", "error", err)
 							return
@@ -272,13 +281,21 @@ func Run(
 								logging.Error(webhookCtx, "error converting job payload to JSON", "error", err)
 								return
 							}
-							_, pushErr := databaseContainer.RetryRPush(pluginCtx, "anklet/jobs/github/completed/"+pluginConfig.Owner, wrappedPayloadJSON)
+							queueLength, pushErr := databaseContainer.RetryRPush(pluginCtx, completedQueueName, wrappedPayloadJSON)
 							if pushErr != nil {
 								logging.Error(webhookCtx, "error pushing job to queue", "error", pushErr)
 								return
 							}
-							logging.Info(webhookCtx, "job pushed to completed queue")
+							logging.Info(webhookCtx, "job pushed to completed queue", "queue", completedQueueName, "queue_length", queueLength)
+						} else {
+							logging.Debug(webhookCtx, "job already present in completed queue, skipping enqueue", "queue", completedQueueName)
 						}
+					}
+					if !inAQueue {
+						logging.Debug(webhookCtx, "job not present in any tracked queue, skipping completed enqueue",
+							"job_id", simplifiedWorkflowJobEvent.WorkflowJob.ID,
+							"queues_checked", queues,
+						)
 					}
 
 					// // make sure we don't orphan completed if there is nothing in queued or other lists for it
