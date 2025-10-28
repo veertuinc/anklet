@@ -254,6 +254,14 @@ func UpdateJobsWorkflowJobStatus(
 	pluginCtx context.Context,
 	queuedJob *QueueJob,
 ) (QueueJob, error) {
+	var previousStatus string
+	if queuedJob.WorkflowJob.Status != nil {
+		previousStatus = *queuedJob.WorkflowJob.Status
+	}
+	var previousConclusion string
+	if queuedJob.WorkflowJob.Conclusion != nil {
+		previousConclusion = *queuedJob.WorkflowJob.Conclusion
+	}
 	githubClient, err := GetGitHubClientFromContext(pluginCtx)
 	if err != nil {
 		logging.Error(pluginCtx, "error getting github client from context", "err", err)
@@ -280,6 +288,17 @@ func UpdateJobsWorkflowJobStatus(
 	// running = let it run, don't do anything
 	if currentWorkflowJob.Status != nil {
 		status := *currentWorkflowJob.Status
+		if status != previousStatus {
+			logging.Debug(
+				pluginCtx,
+				"workflow job status transition observed",
+				"job_id", queuedJob.WorkflowJob.ID,
+				"attempts", queuedJob.Attempts,
+				"previous_status", previousStatus,
+				"new_status", status,
+				"raw_response", currentWorkflowJob,
+			)
+		}
 		switch status {
 		case "completed":
 			logging.Info(pluginCtx, "workflow job is completed")
@@ -331,6 +350,21 @@ func UpdateJobsWorkflowJobStatus(
 		}
 	} else {
 		logging.Warn(pluginCtx, "workflow job status is nil")
+	}
+	if currentWorkflowJob.Conclusion != nil {
+		newConclusion := *currentWorkflowJob.Conclusion
+		if newConclusion != "" && newConclusion != previousConclusion {
+			logging.Debug(
+				pluginCtx,
+				"workflow job conclusion transition observed",
+				"job_id", queuedJob.WorkflowJob.ID,
+				"attempts", queuedJob.Attempts,
+				"previous_conclusion", previousConclusion,
+				"new_conclusion", newConclusion,
+				"raw_response", currentWorkflowJob,
+			)
+		}
+		queuedJob.WorkflowJob.Conclusion = github.Ptr(newConclusion)
 	}
 	return *queuedJob, nil
 }

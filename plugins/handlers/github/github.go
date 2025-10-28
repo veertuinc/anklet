@@ -125,6 +125,9 @@ func watchJobStatus(
 	alreadyLogged := false
 	jobStatusCheckIntervalSeconds := 10
 	firstLog := true
+	previousStatus := ""
+	previousConclusion := ""
+	previousRegistrationState := ""
 	for {
 		// Check for shutdown signal more frequently
 		if workerCtx.Err() != nil || pluginCtx.Err() != nil {
@@ -148,6 +151,42 @@ func watchJobStatus(
 				logging.Error(pluginCtx, "error unmarshalling job", "error", err, "typeErr", typeErr, "queuedJobJSON", queuedJobJSON)
 				return pluginCtx, err
 			}
+			if queuedJob.WorkflowJob.ID == nil {
+				logging.Warn(pluginCtx, "watchJobStatus -> queued job missing ID", "raw_payload", queuedJobJSON)
+				continue
+			}
+			currentStatus := ""
+			if queuedJob.WorkflowJob.Status != nil {
+				currentStatus = *queuedJob.WorkflowJob.Status
+			}
+			if currentStatus != previousStatus {
+				logging.Debug(
+					pluginCtx,
+					"watchJobStatus -> observed status transition from queue snapshot",
+					"job_id", *queuedJob.WorkflowJob.ID,
+					"attempts", queuedJob.Attempts,
+					"previous_status", previousStatus,
+					"new_status", currentStatus,
+					"raw_payload", queuedJobJSON,
+				)
+				previousStatus = currentStatus
+			}
+			currentConclusion := ""
+			if queuedJob.WorkflowJob.Conclusion != nil {
+				currentConclusion = *queuedJob.WorkflowJob.Conclusion
+			}
+			if currentConclusion != "" && currentConclusion != previousConclusion {
+				logging.Debug(
+					pluginCtx,
+					"watchJobStatus -> observed conclusion transition from queue snapshot",
+					"job_id", *queuedJob.WorkflowJob.ID,
+					"attempts", queuedJob.Attempts,
+					"previous_conclusion", previousConclusion,
+					"new_conclusion", currentConclusion,
+					"raw_payload", queuedJobJSON,
+				)
+			}
+			previousConclusion = currentConclusion
 			if queuedJob.WorkflowJob.Status != nil && *queuedJob.WorkflowJob.Status == "completed" {
 				logging.Info(pluginCtx, "job completed",
 					"job_id", queuedJob.WorkflowJob.ID,
@@ -192,6 +231,17 @@ func watchJobStatus(
 				return pluginCtx, err
 			}
 			if mainInProgressQueueJobJSON != "" {
+				if previousRegistrationState != "in_progress" {
+					logging.Debug(
+						pluginCtx,
+						"watchJobStatus -> job present in mainInProgressQueue",
+						"job_id", *queuedJob.WorkflowJob.ID,
+						"previous_registration_state", previousRegistrationState,
+						"new_registration_state", "in_progress",
+						"queue_payload", mainInProgressQueueJobJSON,
+					)
+					previousRegistrationState = "in_progress"
+				}
 				if logCounter%2 == 0 {
 					if firstLog {
 						logging.Info(pluginCtx, "job found registered runner and is now in progress", "job_id", *queuedJob.WorkflowJob.ID)
@@ -199,6 +249,16 @@ func watchJobStatus(
 					}
 				}
 			} else {
+				if previousRegistrationState != "waiting" {
+					logging.Debug(
+						pluginCtx,
+						"watchJobStatus -> job not present in mainInProgressQueue",
+						"job_id", *queuedJob.WorkflowJob.ID,
+						"previous_registration_state", previousRegistrationState,
+						"new_registration_state", "waiting",
+					)
+					previousRegistrationState = "waiting"
+				}
 				if !alreadyLogged {
 					logging.Info(pluginCtx, "job is waiting for registered runner", "job_id", *queuedJob.WorkflowJob.ID)
 					alreadyLogged = true
@@ -484,6 +544,18 @@ func checkForCompletedJobs(
 				)
 				return
 			}
+			if queuedJob.WorkflowJob.ID == nil {
+				logging.Warn(pluginCtx, "checkForCompletedJobs -> queued job missing ID", "queue", pluginQueueName, "raw_payload", existingJobString)
+				return
+			}
+			logging.Debug(
+				pluginCtx,
+				"checkForCompletedJobs -> evaluating job from plugin queue",
+				"queue", pluginQueueName,
+				"job_id", *queuedJob.WorkflowJob.ID,
+				"status", queuedJob.WorkflowJob.Status,
+				"raw_payload", existingJobString,
+			)
 
 			// check if in_progress queue, so we can skip cleanup later on
 			mainInProgressQueueJobJSON, err := internalGithub.GetJobJSONFromQueueByID(pluginCtx, *queuedJob.WorkflowJob.ID, mainInProgressQueueName)
@@ -492,6 +564,14 @@ func checkForCompletedJobs(
 				return
 			}
 			if mainInProgressQueueJobJSON != "" {
+				logging.Debug(
+					pluginCtx,
+					"checkForCompletedJobs -> matched job in mainInProgressQueue",
+					"queue", mainInProgressQueueName,
+					"job_id", *queuedJob.WorkflowJob.ID,
+					"run_count", pluginGlobals.GetCheckForCompletedJobsRunCount(),
+					"raw_payload", mainInProgressQueueJobJSON,
+				)
 				if pluginGlobals.GetCheckForCompletedJobsRunCount()%5 == 0 {
 					logging.Info(
 						pluginCtx,
@@ -535,6 +615,13 @@ func checkForCompletedJobs(
 
 			if pluginCompletedQueueJobJSON != "" {
 				logging.Info(pluginCtx, "checkForCompletedJobs -> found completed job in pluginCompletedQueue")
+				logging.Debug(
+					pluginCtx,
+					"checkForCompletedJobs -> pluginCompletedQueue payload",
+					"queue", pluginCompletedQueueName,
+					"job_id", *queuedJob.WorkflowJob.ID,
+					"raw_payload", pluginCompletedQueueJobJSON,
+				)
 				queuedJob.WorkflowJob.Status = github.Ptr("completed")
 				queuedJob.Action = "finish"
 				select {
@@ -552,7 +639,20 @@ func checkForCompletedJobs(
 			}
 
 			if mainCompletedQueueJobJSON != "" {
+				mainCompletedQueueLength, lenErr := databaseContainer.RetryLLen(pluginCtx, mainCompletedQueueName)
+				if lenErr != nil {
+					logging.Error(pluginCtx, "error checking mainCompletedQueue length", "error", lenErr)
+					return
+				}
 				logging.Debug(pluginCtx, "checkForCompletedJobs -> job is in mainCompletedQueue")
+				logging.Debug(
+					pluginCtx,
+					"checkForCompletedJobs -> mainCompletedQueue payload",
+					"queue", mainCompletedQueueName,
+					"queue_length", mainCompletedQueueLength,
+					"job_id", *queuedJob.WorkflowJob.ID,
+					"raw_payload", mainCompletedQueueJobJSON,
+				)
 				// remove the completed job we found
 				success, err := databaseContainer.RetryLRem(checkForCompletedJobsContext, mainCompletedQueueName, 1, mainCompletedQueueJobJSON)
 				if err != nil {
@@ -582,6 +682,24 @@ func checkForCompletedJobs(
 						"queuedJob", queuedJob,
 					)
 					return
+				}
+				if completedQueuedJob.WorkflowJob.ID != nil && *completedQueuedJob.WorkflowJob.ID != *queuedJob.WorkflowJob.ID {
+					var expectedRunID any
+					if queuedJob.WorkflowJob.RunID != nil {
+						expectedRunID = *queuedJob.WorkflowJob.RunID
+					}
+					var receivedRunID any
+					if completedQueuedJob.WorkflowJob.RunID != nil {
+						receivedRunID = *completedQueuedJob.WorkflowJob.RunID
+					}
+					logging.Warn(
+						pluginCtx,
+						"checkForCompletedJobs -> completed job id mismatch",
+						"expected_job_id", *queuedJob.WorkflowJob.ID,
+						"received_job_id", *completedQueuedJob.WorkflowJob.ID,
+						"expected_run_id", expectedRunID,
+						"received_run_id", receivedRunID,
+					)
 				}
 				queuedJob.WorkflowJob.Status = completedQueuedJob.WorkflowJob.Status
 				queuedJob.WorkflowJob.Conclusion = completedQueuedJob.WorkflowJob.Conclusion
