@@ -98,7 +98,7 @@ func NewCLI(pluginCtx context.Context) (*Cli, error) {
 // DO NOT RUN exec.Command with context or else the cancellation will interrupt things like VM deletion, which we don't want!
 func (cli *Cli) Execute(pluginCtx context.Context, args ...string) ([]byte, int, error) {
 	if args[2] != "list" { // hide spammy list command
-		logging.Debug(pluginCtx, "executing", "command", strings.Join(args, " "))
+		logging.Info(pluginCtx, "executing", "command", strings.Join(args, " "))
 	}
 	done := make(chan error, 1)
 	var cmd *exec.Cmd
@@ -135,7 +135,7 @@ func (cli *Cli) ExecuteWithTimeout(
 	args ...string,
 ) ([]byte, int, error, error) {
 	if args[2] != "list" { // hide spammy list command
-		logging.Debug(pluginCtx, "executing", "command", strings.Join(args, " "))
+		logging.Info(pluginCtx, "executing", "command", strings.Join(args, " "))
 	}
 	done := make(chan error, 1)
 	var cmd *exec.Cmd
@@ -199,7 +199,7 @@ func (cli *Cli) ExecuteParseJson(pluginCtx context.Context, args ...string) (*An
 	}
 
 	// Debug logging to help troubleshoot JSON parsing issues
-	logging.Debug(pluginCtx, "parsing JSON from command output",
+	logging.Info(pluginCtx, "parsing JSON from command output",
 		"lastLine", string(lastLine),
 		"allOutput", string(out))
 
@@ -242,7 +242,7 @@ func (cli *Cli) AnkaRun(pluginCtx context.Context, vmName string, args ...string
 	if exitCode != 0 || err != nil {
 		return fmt.Errorf("command execution failed with code %d: %s %s", exitCode, string(runOutput), err)
 	}
-	logging.Debug(pluginCtx, "command executed successfully", "stdout", string(runOutput))
+	logging.Info(pluginCtx, "command executed successfully", "stdout", string(runOutput))
 	return nil
 }
 
@@ -254,7 +254,7 @@ func (cli *Cli) AnkaRunWithTimeout(pluginCtx context.Context, timeoutInSeconds i
 	if exitCode != 0 || err != nil {
 		return fmt.Errorf("command execution failed with code %d: %s %s", exitCode, string(runOutput), err), nil
 	}
-	logging.Debug(pluginCtx, "command executed successfully", "stdout", string(runOutput))
+	logging.Info(pluginCtx, "command executed successfully", "stdout", string(runOutput))
 	return nil, nil
 }
 
@@ -404,7 +404,7 @@ func (cli *Cli) AnkaRegistryPull(
 		return nil, fmt.Errorf("context canceled before AnkaRegistryPull")
 	}
 
-	logging.Debug(pluginCtx, "pulling template to host")
+	logging.Info(pluginCtx, "pulling template to host")
 
 	metricsData, err := metrics.GetMetricsDataFromContext(workerCtx)
 	if err != nil {
@@ -460,7 +460,7 @@ func (cli *Cli) AnkaRegistryPull(
 	// Update template usage tracking - use current time since we just pulled it
 	workerGlobals.TemplateTracker.UpdateTemplateUsage(templateUUID, templateName, templateTag, templateSizeBytes, time.Now())
 
-	logging.Debug(pluginCtx, "TemplateTracker state", "tracker", workerGlobals.TemplateTracker)
+	logging.Info(pluginCtx, "TemplateTracker state", "tracker", workerGlobals.TemplateTracker)
 
 	logging.Info(pluginCtx, "successfully pulled template", "templateUUID", templateUUID, "templateName", templateName, "templateTag", templateTag, "sizeBytes", templateSizeBytes)
 
@@ -505,7 +505,7 @@ func (cli *Cli) AnkaDelete(workerCtx context.Context, pluginCtx context.Context,
 		}
 		return err
 	}
-	logging.Debug(pluginCtx, "successfully deleted vm", "std", deleteOutput.Message)
+	logging.Info(pluginCtx, "successfully deleted vm", "std", deleteOutput.Message)
 	// decrement total running VMs
 	metricsData, err := metrics.GetMetricsDataFromContext(workerCtx)
 	if err != nil {
@@ -550,7 +550,7 @@ func (cli *Cli) ObtainAnkaVM(
 	// Start
 	err = cli.AnkaStart(workerCtx, pluginCtx, vmName)
 	if err != nil {
-		logging.Debug(pluginCtx, "vm", "vm", vm)
+		logging.Info(pluginCtx, "vm", "vm", vm)
 		logging.Error(pluginCtx, "error executing anka start", "err", err)
 		return vm, err
 	}
@@ -688,7 +688,7 @@ func (cli *Cli) DiscoverAndPopulateExistingTemplates(
 					templateTracker.Mutex.Unlock()
 
 					templateCount++
-					logging.Debug(ctx, "discovered existing template",
+					logging.Info(ctx, "discovered existing template",
 						"templateUUID", templateUUID, "tag", templateTag, "size", templateSize)
 				}
 			}
@@ -707,7 +707,7 @@ func (cli *Cli) AnkaCopyOutOfVM(pluginCtx context.Context, vmName string, object
 	if copyOutput.Status != "OK" {
 		return fmt.Errorf("error copying out of vm: %s", copyOutput.Message)
 	}
-	logging.Debug(pluginCtx, "copy output", "std", copyOutput)
+	logging.Info(pluginCtx, "copy output", "std", copyOutput)
 	logging.Info(pluginCtx, fmt.Sprintf("successfully copied %s out of vm to %s", objectToCopyOut, hostLevelDestination), "stdout", copyOutput.Message)
 
 	return nil
@@ -739,7 +739,7 @@ func (cli *Cli) AnkaCopyIntoVM(
 		if copyOutput.Status != "OK" {
 			return fmt.Errorf("error copying into vm: %s", copyOutput.Message)
 		}
-		logging.Debug(pluginCtx, "copy output", "std", copyOutput)
+		logging.Info(pluginCtx, "copy output", "std", copyOutput)
 		logging.Info(pluginCtx, "successfully copied file into vm", "file", hostLevelFile, "stdout", copyOutput.Message)
 	}
 
@@ -798,10 +798,10 @@ func (cli *Cli) EnsureVMTemplateExists(
 			logging.Error(pluginCtx, "error executing anka list", "err", innerErr)
 			return nil, nil, innerErr
 		}
-		logging.Debug(pluginCtx, "list", "stdout", list.Body)
+		logging.Info(pluginCtx, "list", "stdout", list.Body)
 	}
 	logging.Info(pluginCtx, "ensuring vm template exists on host", "targetTemplateUUID", targetTemplateUUID, "targetTemplateName", targetTemplateName, "targetTemplateTag", targetTemplateTag)
-	logging.Debug(pluginCtx, "list output", "json", list)
+	logging.Info(pluginCtx, "list output", "json", list)
 	if list != nil {
 		if list.Status == "ERROR" {
 			if list.Message == fmt.Sprintf("%s: not found", targetTemplateUUID) {
@@ -905,7 +905,7 @@ func (cli *Cli) EnsureVMTemplateExists(
 			templateSizeBytes,
 			accessDate,
 		)
-		logging.Debug(pluginCtx, "using existing template", "templateUUID", targetTemplateUUID, "tag", targetTemplateTag, "sizeBytes", templateSizeBytes, "accessDate", accessDate)
+		logging.Info(pluginCtx, "using existing template", "templateUUID", targetTemplateUUID, "tag", targetTemplateTag, "sizeBytes", templateSizeBytes, "accessDate", accessDate)
 	}
 	return nil, nil, nil
 }

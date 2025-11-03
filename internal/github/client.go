@@ -127,7 +127,7 @@ func executeGitHubClientFunctionWithRetry[T any](
 	result, response, err := executeFunc()
 
 	if response != nil {
-		logging.Debug(pluginCtx,
+		logging.Info(pluginCtx,
 			"GitHub API rate limit",
 			"remaining", response.Rate.Remaining,
 			"reset", response.Rate.Reset.Format(time.RFC3339),
@@ -192,7 +192,7 @@ func executeGitHubClientFunctionWithRetry[T any](
 						// Don't retry if authentication has failed - return the original error
 						return pluginCtx, nil, nil, fmt.Errorf("GitHub API 404 error with authentication failure: %v (original: %v)", authErr, err)
 					} else {
-						logging.Debug(pluginCtx, "GitHub client authentication validated successfully during 404 retry")
+						logging.Info(pluginCtx, "GitHub client authentication validated successfully during 404 retry")
 					}
 				}
 

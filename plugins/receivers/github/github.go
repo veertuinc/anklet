@@ -200,7 +200,7 @@ func Run(
 						}
 						logging.Info(webhookCtx, "job pushed to queued queue", "queue", queueName, "queue_length", queueLength)
 					} else {
-						logging.Debug(webhookCtx, "job already present in queued queue, skipping enqueue", "queue", queueName)
+						logging.Info(webhookCtx, "job already present in queued queue, skipping enqueue", "queue", queueName)
 					}
 				}
 			} else if *workflowJob.Action == "in_progress" {
@@ -230,7 +230,7 @@ func Run(
 						}
 						logging.Info(webhookCtx, "job pushed to in_progress queue", "queue", inProgressQueueName, "queue_length", queueLength)
 					} else {
-						logging.Debug(webhookCtx, "job already present in in_progress queue, skipping enqueue", "queue", inProgressQueueName)
+						logging.Info(webhookCtx, "job already present in in_progress queue, skipping enqueue", "queue", inProgressQueueName)
 					}
 				}
 			} else if *workflowJob.Action == "completed" {
@@ -288,11 +288,11 @@ func Run(
 							}
 							logging.Info(webhookCtx, "job pushed to completed queue", "queue", completedQueueName, "queue_length", queueLength)
 						} else {
-							logging.Debug(webhookCtx, "job already present in completed queue, skipping enqueue", "queue", completedQueueName)
+							logging.Info(webhookCtx, "job already present in completed queue, skipping enqueue", "queue", completedQueueName)
 						}
 					}
 					if !inAQueue {
-						logging.Debug(webhookCtx, "job not present in any tracked queue, skipping completed enqueue",
+						logging.Info(webhookCtx, "job not present in any tracked queue, skipping completed enqueue",
 							"job_id", simplifiedWorkflowJobEvent.WorkflowJob.ID,
 							"queues_checked", queues,
 						)

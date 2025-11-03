@@ -67,12 +67,12 @@ func (db *Database) retryOperation(ctx context.Context, operationName string, op
 		}
 
 		if !isRetriableError(lastErr) {
-			// logging.Debug(ctx, fmt.Sprintf("%s failed with non-retriable error: %v", operationName, lastErr))
+			// logging.Info(ctx, fmt.Sprintf("%s failed with non-retriable error: %v", operationName, lastErr))
 			return lastErr
 		}
 
 		if attempt < db.MaxRetries {
-			logging.Debug(ctx, fmt.Sprintf("%s failed (attempt %d/%d): %v", operationName, attempt+1, db.MaxRetries+1, lastErr))
+			logging.Info(ctx, fmt.Sprintf("%s failed (attempt %d/%d): %v", operationName, attempt+1, db.MaxRetries+1, lastErr))
 		}
 	}
 
@@ -205,7 +205,7 @@ func RemoveUniqueKeyFromDB(ctx context.Context) (context.Context, error) {
 	if err != nil {
 		return nil, err
 	}
-	logging.Debug(ctx, fmt.Sprintf("removal of unique key %s from database returned %d (1 is success, 0 failed)", database.UniqueRunKey, deletion))
+	logging.Info(ctx, fmt.Sprintf("removal of unique key %s from database returned %d (1 is success, 0 failed)", database.UniqueRunKey, deletion))
 	return ctx, nil
 }
 

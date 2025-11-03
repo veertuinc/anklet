@@ -107,7 +107,7 @@ func DeleteFromQueue(ctx context.Context, jobID int64, queue string) error {
 	if len(queued) == 0 {
 		return nil
 	}
-	logging.Debug(ctx, "deleting job from queue", "jobID", jobID, "queue", queue, "queued", queued)
+	logging.Info(ctx, "deleting job from queue", "jobID", jobID, "queue", queue, "queued", queued)
 	for _, queueItem := range queued {
 		queueJob, err, typeErr := database.Unwrap[QueueJob](queueItem)
 		if err != nil {
@@ -124,7 +124,7 @@ func DeleteFromQueue(ctx context.Context, jobID int64, queue string) error {
 				return err
 			}
 			if success == 1 {
-				logging.Debug(ctx, "job removed from queue", "jobID", jobID, "queue", queue)
+				logging.Info(ctx, "job removed from queue", "jobID", jobID, "queue", queue)
 			} else {
 				return fmt.Errorf("job not removed from queue")
 			}
@@ -280,7 +280,7 @@ func UpdateJobsWorkflowJobStatus(
 		logging.Error(pluginCtx, "error getting workflow run", "err", err)
 		return *queuedJob, err
 	}
-	logging.Debug(pluginCtx, "workflowJob from API", "workflowJob", currentWorkflowJob)
+	logging.Info(pluginCtx, "workflowJob from API", "workflowJob", currentWorkflowJob)
 	// Handle each workflow job status with a log message
 	// completed = we clean up everything
 	// failed = we clean up everything
@@ -289,7 +289,7 @@ func UpdateJobsWorkflowJobStatus(
 	if currentWorkflowJob.Status != nil {
 		status := *currentWorkflowJob.Status
 		if status != previousStatus {
-			logging.Debug(
+			logging.Info(
 				pluginCtx,
 				"workflow job status transition observed",
 				"job_id", queuedJob.WorkflowJob.ID,
@@ -354,7 +354,7 @@ func UpdateJobsWorkflowJobStatus(
 	if currentWorkflowJob.Conclusion != nil {
 		newConclusion := *currentWorkflowJob.Conclusion
 		if newConclusion != "" && newConclusion != previousConclusion {
-			logging.Debug(
+			logging.Info(
 				pluginCtx,
 				"workflow job conclusion transition observed",
 				"job_id", queuedJob.WorkflowJob.ID,

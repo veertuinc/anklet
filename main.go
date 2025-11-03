@@ -536,7 +536,7 @@ func worker(
 							// Don't fail the plugin startup for this, just log the warning
 						}
 					}
-					logging.Debug(pluginCtx, "populated existing templates in TemplateTracker", "templates", workerGlobals.TemplateTracker.Templates)
+					logging.Info(pluginCtx, "populated existing templates in TemplateTracker", "templates", workerGlobals.TemplateTracker.Templates)
 				}
 
 				var databaseURL = loadedConfig.GlobalDatabaseURL

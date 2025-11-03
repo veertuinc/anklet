@@ -80,7 +80,7 @@ func UpdateJobInDB(pluginCtx context.Context, queue string, upToDateJob *QueueJo
 			if err != nil {
 				return fmt.Errorf("error updating job in database: %w", err), nil
 			}
-			logging.Debug(pluginCtx, "job updated in database", "job", upToDateJob)
+			logging.Info(pluginCtx, "job updated in database", "job", upToDateJob)
 			// Find the job in the database by ID and run_id within the plugin queue
 			// jobList, err := databaseContainer.Client.LRange(pluginCtx, queue, 0, -1).Result()
 			// if err != nil {

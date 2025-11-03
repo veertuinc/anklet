@@ -108,7 +108,7 @@ func (cli *Cli) EnsureSpaceForTemplate(
 			usableSpace = 0
 		}
 
-		logging.Debug(pluginCtx, "pull check output", "pullCheckOutput", map[string]any{
+		logging.Info(pluginCtx, "pull check output", "pullCheckOutput", map[string]any{
 			"downloadSize":    downloadSize,
 			"pullCheckOutput": pullCheckOutput,
 			"totalDiskSize":   totalDiskSize,
@@ -176,9 +176,9 @@ func (cli *Cli) EnsureSpaceForTemplate(
 				}
 				totalFreeable += lruTemplate.ImageSize
 			}
-			logging.Debug(pluginCtx, "lru templates", "lruTemplates", lruTemplates, "totalFreeable", totalFreeable, "bytesToFree", bytesToFree)
+			logging.Info(pluginCtx, "lru templates", "lruTemplates", lruTemplates, "totalFreeable", totalFreeable, "bytesToFree", bytesToFree)
 			afterFreeingUsableSpace := usableSpace + totalFreeable
-			logging.Debug(pluginCtx, "adjusted usable space after freeing", "afterFreeingUsableSpace", afterFreeingUsableSpace, "downloadSize", downloadSize)
+			logging.Info(pluginCtx, "adjusted usable space after freeing", "afterFreeingUsableSpace", afterFreeingUsableSpace, "downloadSize", downloadSize)
 			if afterFreeingUsableSpace < downloadSize {
 				return fmt.Errorf("insufficient space on host even if we cleaned up all templates (need %d, can free %d, lruTemplateCount %d)", downloadSize, totalFreeable, len(lruTemplates)), nil
 			}
@@ -215,7 +215,7 @@ func (cli *Cli) EnsureSpaceForTemplate(
 					continue
 				}
 
-				logging.Debug(pluginCtx, "space after template deletion",
+				logging.Info(pluginCtx, "space after template deletion",
 					"templatesDeleted", templatesDeleted,
 					"newUsableSpace", newUsableSpace,
 					"newDownloadSize", newDownloadSize)
@@ -242,7 +242,7 @@ func (cli *Cli) EnsureSpaceForTemplate(
 			}
 
 		} else {
-			logging.Debug(pluginCtx, "enough space on host to pull template", "usableSpace", usableSpace, "downloadSize", downloadSize)
+			logging.Info(pluginCtx, "enough space on host to pull template", "usableSpace", usableSpace, "downloadSize", downloadSize)
 		}
 	}
 
