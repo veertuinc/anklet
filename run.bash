@@ -270,18 +270,19 @@ LOG_LEVEL=${LOG_LEVEL:-dev} go run main.go -c ${YAML_CONFIG_FILE} 2>&1 \
             ($time | tostring) as $timeStr |
             ($msg | tostring) as $msgStr |
             ($attrs | tojson) as $attrsJson |
+            (if ($attrs | type) == "object" and ($attrs | has("workflowJobRunID")) then " workflowJobRunID=" + ($attrs.workflowJobRunID | tostring) else "" end) as $workflowJobRunIDStr |
             (if has("error") then " error=" + (.error | tojson)
              elif has("err") then " error=" + (.err | tojson)
              else "" end) as $errorStr |
             ($levelStr | ascii_upcase) as $levelUpper |
             (if $levelUpper == "ERROR" then
-                "\u001b[31mtime=" + $timeStr + " name=" + $coloredName + "\u001b[31m level=" + $levelStr + " msg=" + $msgStr + $errorStr + " attributes=" + $attrsJson + "\u001b[0m"
+                "\u001b[31mtime=" + $timeStr + " name=" + $coloredName + "\u001b[31m level=" + $levelStr + " msg=" + $msgStr + $workflowJobRunIDStr + $errorStr + " attributes=" + $attrsJson + "\u001b[0m"
             elif ($levelUpper == "WARN" or $levelUpper == "WARNING") then
-                "\u001b[33mtime=" + $timeStr + " name=" + $coloredName + "\u001b[33m level=" + $levelStr + " msg=" + $msgStr + $errorStr + " attributes=" + $attrsJson + "\u001b[0m"
+                "\u001b[33mtime=" + $timeStr + " name=" + $coloredName + "\u001b[33m level=" + $levelStr + " msg=" + $msgStr + $workflowJobRunIDStr + $errorStr + " attributes=" + $attrsJson + "\u001b[0m"
             elif $levelUpper == "DEBUG" then
-                "\u001b[90mtime=" + $timeStr + " name=" + $coloredName + "\u001b[90m level=" + $levelStr + " msg=" + $msgStr + $errorStr + " attributes=" + $attrsJson + "\u001b[0m"
+                "\u001b[90mtime=" + $timeStr + " name=" + $coloredName + "\u001b[90m level=" + $levelStr + " msg=" + $msgStr + $workflowJobRunIDStr + $errorStr + " attributes=" + $attrsJson + "\u001b[0m"
             else
-                "\u001b[33mtime\u001b[0m=\u001b[37m" + $timeStr + "\u001b[0m name=" + $coloredName + " level=" + $levelStr + " msg=" + $msgStr + $errorStr + " attributes=" + $attrsJson
+                "\u001b[33mtime\u001b[0m=\u001b[37m" + $timeStr + "\u001b[0m name=" + $coloredName + " level=" + $levelStr + " msg=" + $msgStr + $workflowJobRunIDStr + $errorStr + " attributes=" + $attrsJson
             end)
         else
             .

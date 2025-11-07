@@ -193,13 +193,15 @@ func main() {
 		parentLogger.ErrorContext(parentCtx, "error getting host cpu count", "error", err)
 		os.Exit(1)
 	}
-	parentCtx = logging.AppendCtx(parentCtx, slog.Int("hostCPUCount", hostCPUCount))
 	hostMemoryBytes, err := host.GetHostMemoryBytes(parentCtx)
 	if err != nil {
 		parentLogger.ErrorContext(parentCtx, "error getting host memory bytes", "error", err)
 		os.Exit(1)
 	}
-	parentCtx = logging.AppendCtx(parentCtx, slog.Uint64("hostMemoryBytes", hostMemoryBytes))
+	parentCtx = logging.AppendCtx(parentCtx,
+		slog.Int("hostCPUCount", hostCPUCount),
+		slog.Uint64("hostMemoryBytes", hostMemoryBytes),
+	)
 
 	parentCtx = context.WithValue(parentCtx, config.ContextKey("globals"), &config.Globals{
 		RunPluginsOnce:       runOnce == "true",
