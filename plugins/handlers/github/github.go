@@ -422,8 +422,8 @@ func sendCancelWorkflowRun(
 // 2. `<-pluginCtx.Done()` - context cancellation case.
 // 3. `<-pluginGlobals.JobChannel` - Other parts of the plugin logic can inject the `internalGithub.QueueJob` object into this and then handle specific logic for the job. For example we can handle if...
 //   - `.Action` is `finish` (immediate cleanup)
-//   - `.Action` is `cancel` (send a cancel request to github, then cleanup): `pluginGlobals.JobChannel <- internalGithub.QueueJob{Action: "finish"}`. Important: For `cancel`, you need to pass the entire queued job object.
-//   - `.Action` is `timed_out` (cleanup the job because it timed out): `pluginGlobals.JobChannel <- internalGithub.QueueJob{Action: "timed_out"}`. Important: For `timed_out`, you need to pass the entire queued job object.
+//   - `.Action` is `cancel` (send a cancel request to github, then cleanup). Important: For `cancel`, you need to pass the entire queued job object.
+//   - `.Action` is `timed_out` (cleanup the job because it timed out). Important: For `timed_out`, you need to pass the entire queued job object.
 //
 // 4. `<-pluginGlobals.RetryChannel` - This will send the job back to the mainQueue so other hosts can get a chance to run it.
 // 5. `<-pluginGlobals.PausedCancellationJobChannel` - This cleans up the job immediately on this host, since another host has picked it up. We could technically just use `finish` here as the Action, but it will allow us more control over logic that only happens when the paused job is removed from this host.
