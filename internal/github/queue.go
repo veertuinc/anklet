@@ -368,3 +368,74 @@ func UpdateJobsWorkflowJobStatus(
 	}
 	return *queuedJob, nil
 }
+
+// CheckIfJobExistsInHandlerQueues checks if a job with matching workflow run ID and job ID
+// already exists in any handler queue (first index only, as that's the active job)
+// This function checks all handler queues in parallel for better performance
+func CheckIfJobExistsInHandlerQueues(
+	pluginCtx context.Context,
+	workflowRunID int64,
+	jobID int64,
+	owner string,
+) (bool, error) {
+	databaseContainer, err := database.GetDatabaseFromContext(pluginCtx)
+	if err != nil {
+		return false, fmt.Errorf("error getting database client from context: %s", err.Error())
+	}
+
+	// Get all handler queue keys
+	handlerQueuePattern := "anklet/jobs/github/queued/" + owner + "/*"
+	handlerQueueKeys, err := databaseContainer.RetryKeys(pluginCtx, handlerQueuePattern)
+	if err != nil {
+		return false, fmt.Errorf("error getting handler queue keys: %s", err.Error())
+	}
+
+	// If no handler queues exist, return early
+	if len(handlerQueueKeys) == 0 {
+		return false, nil
+	}
+
+	// Use channels and goroutines to check queues in parallel
+	resultChan := make(chan bool, len(handlerQueueKeys))
+
+	// Start goroutines to check each queue in parallel
+	for _, queueKey := range handlerQueueKeys {
+		go func(key string) {
+			// Get only the first element (index 0) as that's the active job in the handler
+			firstJobJSON, err := databaseContainer.RetryLIndex(pluginCtx, key, 0)
+			if err != nil || firstJobJSON == "" {
+				// Queue might be empty or error occurred, send not found
+				resultChan <- false
+				return
+			}
+
+			// Try to unmarshal to QueueJob
+			queueJob, err, typeErr := database.Unwrap[QueueJob](firstJobJSON)
+			if err != nil || typeErr != nil {
+				// Not a QueueJob type or unmarshal error, send not found
+				resultChan <- false
+				return
+			}
+
+			// Check if workflow run ID and job ID match
+			if queueJob.WorkflowJob.RunID != nil && *queueJob.WorkflowJob.RunID == workflowRunID &&
+				queueJob.WorkflowJob.ID != nil && *queueJob.WorkflowJob.ID == jobID {
+				resultChan <- true
+				return
+			}
+
+			resultChan <- false
+		}(queueKey)
+	}
+
+	// Check results as they come in, return immediately on first match
+	for range len(handlerQueueKeys) {
+		if <-resultChan {
+			// Found a match, return immediately
+			// Note: remaining goroutines will complete and send to buffered channel
+			return true, nil
+		}
+	}
+
+	return false, nil
+}
