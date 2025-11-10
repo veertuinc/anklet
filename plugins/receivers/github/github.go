@@ -179,28 +179,48 @@ func Run(
 			logging.Info(webhookCtx, "received workflow job to consider")
 			if *workflowJob.Action == "queued" {
 				if exists_in_array_partial(simplifiedWorkflowJobEvent.WorkflowJob.Labels, []string{"anka-template"}) {
-					// make sure it doesn't already exist
-					queueName := "anklet/jobs/github/queued/" + pluginConfig.Owner
-					inQueueJobJSON, err := internalGithub.GetJobJSONFromQueueByID(pluginCtx, *simplifiedWorkflowJobEvent.WorkflowJob.ID, queueName)
+					// make sure it doesn't already exist in the main queued queue
+					queuedQueueName := "anklet/jobs/github/queued/" + pluginConfig.Owner
+					inQueueJobJSON, err := internalGithub.GetJobJSONFromQueueByID(pluginCtx, *simplifiedWorkflowJobEvent.WorkflowJob.ID, queuedQueueName)
 					if err != nil {
 						logging.Error(webhookCtx, "error searching in queue", "error", err)
 						return
 					}
-					if inQueueJobJSON == "" { // if it doesn't exist already
+
+					// Also check if it exists in any handler queues
+					inHandlerQueue := false
+					if inQueueJobJSON == "" && simplifiedWorkflowJobEvent.WorkflowJob.RunID != nil && simplifiedWorkflowJobEvent.WorkflowJob.ID != nil {
+						inHandlerQueue, err = internalGithub.CheckIfJobExistsInHandlerQueues(
+							pluginCtx,
+							*simplifiedWorkflowJobEvent.WorkflowJob.RunID,
+							*simplifiedWorkflowJobEvent.WorkflowJob.ID,
+							pluginConfig.Owner,
+						)
+						if err != nil {
+							logging.Error(webhookCtx, "error checking handler queues", "error", err)
+							return
+						}
+					}
+
+					if inQueueJobJSON == "" && !inHandlerQueue { // if it doesn't exist already
 						// push it to the queue
 						wrappedPayloadJSON, err := json.Marshal(simplifiedWorkflowJobEvent)
 						if err != nil {
 							logging.Error(webhookCtx, "error converting job payload to JSON", "error", err)
 							return
 						}
-						queueLength, pushErr := databaseContainer.RetryRPush(pluginCtx, queueName, wrappedPayloadJSON)
+						queueLength, pushErr := databaseContainer.RetryRPush(pluginCtx, queuedQueueName, wrappedPayloadJSON)
 						if pushErr != nil {
 							logging.Error(webhookCtx, "error pushing job to queue", "error", pushErr)
 							return
 						}
-						logging.Info(webhookCtx, "job pushed to queued queue", "queue", queueName, "queue_length", queueLength)
+						logging.Info(webhookCtx, "job pushed to queued queue", "queue", queuedQueueName, "queue_length", queueLength)
 					} else {
-						logging.Debug(webhookCtx, "job already present in queued queue, skipping enqueue", "queue", queueName)
+						if inHandlerQueue {
+							logging.Warn(webhookCtx, "job already being processed by a handler, rejecting duplicate queued event", "queue", queuedQueueName)
+						} else {
+							logging.Warn(webhookCtx, "job already present in queued queue, skipping enqueue", "queue", queuedQueueName)
+						}
 					}
 				}
 			} else if *workflowJob.Action == "in_progress" {
