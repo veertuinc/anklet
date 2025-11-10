@@ -129,6 +129,7 @@ func watchJobStatus(
 	previousConclusion := ""
 	previousRegistrationState := ""
 	for {
+		logging.Debug(pluginCtx, "watchJobStatus loop iteration", "logCounter", logCounter)
 		// Check for shutdown signal more frequently
 		if workerCtx.Err() != nil || pluginCtx.Err() != nil {
 			logging.Warn(pluginCtx, "context canceled while watching for job completion")
@@ -154,6 +155,10 @@ func watchJobStatus(
 			if queuedJob.WorkflowJob.ID == nil {
 				logging.Warn(pluginCtx, "watchJobStatus -> queued job missing ID", "raw_payload", queuedJobJSON)
 				continue
+			}
+			if queuedJob.Action == "timed_out" {
+				logging.Error(pluginCtx, "job timed out", "job_id", *queuedJob.WorkflowJob.ID)
+				return pluginCtx, err
 			}
 			currentStatus := ""
 			if queuedJob.WorkflowJob.Status != nil {
@@ -417,10 +422,12 @@ func sendCancelWorkflowRun(
 // 2. `<-pluginCtx.Done()` - context cancellation case.
 // 3. `<-pluginGlobals.JobChannel` - Other parts of the plugin logic can inject the `internalGithub.QueueJob` object into this and then handle specific logic for the job. For example we can handle if...
 //   - `.Action` is `finish` (immediate cleanup)
-//   - `.Action` is `cancel` (send a cancel request to github, then cleanup): `pluginGlobals.JobChannel <- internalGithub.QueueJob{Action: "finish"}`. Important: For `cancel`, you need to pass the entire queued job object.
+//   - `.Action` is `cancel` (send a cancel request to github, then cleanup). Important: For `cancel`, you need to pass the entire queued job object.
+//   - `.Action` is `timed_out` (cleanup the job because it timed out). Important: For `timed_out`, you need to pass the entire queued job object.
 //
 // 4. `<-pluginGlobals.RetryChannel` - This will send the job back to the mainQueue so other hosts can get a chance to run it.
 // 5. `<-pluginGlobals.PausedCancellationJobChannel` - This cleans up the job immediately on this host, since another host has picked it up. We could technically just use `finish` here as the Action, but it will allow us more control over logic that only happens when the paused job is removed from this host.
+// However, if you do return out of checkForCompletedJobs, be sure to set the job's Action to `finish` in the DB so it doesn't get orphaned.
 func checkForCompletedJobs(
 	workerCtx context.Context,
 	pluginCtx context.Context,
@@ -430,50 +437,56 @@ func checkForCompletedJobs(
 	mainInProgressQueueName string,
 ) {
 	logging.Debug(pluginCtx, "starting checkForCompletedJobs")
+
+	// Create a base context for this function run to avoid mutating the passed-in pluginCtx
 	randomInt := rand.Intn(100)
-	pluginCtx = logging.AppendCtx(pluginCtx, slog.Int("check_id", randomInt))
-	workerGlobals, err := config.GetWorkerGlobalsFromContext(pluginCtx)
+	baseCtx := logging.AppendCtx(pluginCtx, slog.Int("check_id", randomInt))
+
+	startTime := time.Now()
+	const timeoutDuration = 6 * time.Hour
+	workerGlobals, err := config.GetWorkerGlobalsFromContext(baseCtx)
 	if err != nil {
-		logging.Error(pluginCtx, "error getting globals from context", "error", err)
+		logging.Error(baseCtx, "error getting globals from context", "error", err)
 		os.Exit(1)
 	}
-	pluginGlobals, err := internalGithub.GetPluginGlobalsFromContext(pluginCtx)
+	pluginGlobals, err := internalGithub.GetPluginGlobalsFromContext(baseCtx)
 	if err != nil {
-		logging.Error(pluginCtx, "error getting plugin global from context", "error", err)
+		logging.Error(baseCtx, "error getting plugin global from context", "error", err)
 		os.Exit(1)
 	}
-	pluginConfig, err := config.GetPluginFromContext(pluginCtx)
+	pluginConfig, err := config.GetPluginFromContext(baseCtx)
 	if err != nil {
-		logging.Error(pluginCtx, "error getting plugin from context", "error", err)
+		logging.Error(baseCtx, "error getting plugin from context", "error", err)
 		os.Exit(1)
 	}
-	databaseContainer, err := database.GetDatabaseFromContext(pluginCtx)
+	databaseContainer, err := database.GetDatabaseFromContext(baseCtx)
 	if err != nil {
-		logging.Error(pluginCtx, "error getting database from context", "error", err)
+		logging.Error(baseCtx, "error getting database from context", "error", err)
 		os.Exit(1)
 	}
 	checkForCompletedJobsContext := context.Background() // needed so we can finalize database changes without orphaning or losing jobs
 
 	defer func() {
-		logging.Debug(pluginCtx, "ending checkForCompletedJobs")
+		logging.Debug(baseCtx, "ending checkForCompletedJobs")
 		pluginGlobals.SetFirstCheckForCompletedJobsRan(true)
 	}()
 
 	for {
-		if pluginGlobals.GetCheckForCompletedJobsRunCount()%10 == 0 {
-			logging.Info(pluginCtx, "checking for completed jobs...")
-		}
+		// Start each iteration with a fresh context from baseCtx
+		checkCtx := baseCtx
+
 		var updateDB = false
+		var hasJob = false
 		// BE VERY CAREFUL when you use return here. You could orphan the job if you're not careful.
 		pluginGlobals.IncrementCheckForCompletedJobsRunCount()
 		// do not use 'continue' in the loop or else the ranOnce won't happen
-		// logging.Dev(pluginCtx, "checkForCompletedJobs "+pluginConfig.Name+" | getFirstCheckForCompletedJobsRan "+fmt.Sprint(pluginGlobals.GetFirstCheckForCompletedJobsRan()))
+		// logging.Dev(checkCtx, "checkForCompletedJobs "+pluginConfig.Name+" | getFirstCheckForCompletedJobsRan "+fmt.Sprint(pluginGlobals.GetFirstCheckForCompletedJobsRan()))
 
 		// do NOT use context cancellation here or it will orphan the job
 
 		// must come before the select below
 		if workerGlobals.ReturnAllToMainQueue.Load() {
-			logging.Warn(pluginCtx, "main worker is attempting to return all jobs to main queue")
+			logging.Warn(checkCtx, "main worker is attempting to return all jobs to main queue")
 			if !pluginGlobals.IsUnreturnable() {
 				select {
 				case <-pluginGlobals.ReturnToMainQueue:
@@ -490,14 +503,14 @@ func checkForCompletedJobs(
 
 		select {
 		case <-pluginGlobals.PausedCancellationJobChannel:
-			// logging.Debug(pluginCtx, " checkForCompletedJobs -> pausedCancellationJobChannel")
+			// logging.Debug(checkCtx, " checkForCompletedJobs -> pausedCancellationJobChannel")
 			pluginGlobals.PausedCancellationJobChannel <- internalGithub.QueueJob{Action: "finish"} // send second one so cleanup doesn't run
 			return
 		case retryReason := <-pluginGlobals.RetryChannel:
 			select {
 			case <-pluginGlobals.ReturnToMainQueue:
 			default:
-				logging.Info(pluginCtx, "retry channel job", "retryReason", retryReason)
+				logging.Info(checkCtx, "retry channel job", "retryReason", retryReason)
 				if retryReason == "context_canceled" {
 					return
 				}
@@ -505,38 +518,53 @@ func checkForCompletedJobs(
 				pluginGlobals.JobChannel <- internalGithub.QueueJob{Action: "finish"}
 			}
 		case job := <-pluginGlobals.JobChannel:
-			logging.Debug(pluginCtx, "checkForCompletedJobs -> job channel job", "job", job)
+			logging.Debug(checkCtx, "checkForCompletedJobs -> job channel job", "job", job)
 			if job.Action == "finish" {
 				return
 			}
-			if job.Action == "cancel" {
-				// logging.Debug(pluginCtx, "checkForCompletedJobs -> cancel job", "job", job)
-				err := sendCancelWorkflowRun(workerCtx, pluginCtx, job)
+			if job.Action == "timed_out" {
+				// allow watchJobStatus to handle the timed out job
+				job.Action = "timed_out"
+				job.WorkflowJob.Conclusion = github.Ptr("timed_out")
+				// allow cleanup to handle the timed out job
+				job.WorkflowJob.Status = github.Ptr("timed_out")
+				err, _ = internalGithub.UpdateJobInDB(checkCtx, pluginQueueName, &job)
 				if err != nil {
-					logging.Error(pluginCtx, "error sending cancel workflow run", "error", err)
-				}
-				job.Action = "canceled"
-				err, _ = internalGithub.UpdateJobInDB(pluginCtx, pluginQueueName, &job)
-				if err != nil {
-					logging.Error(pluginCtx, "error updating job in db (checkForCompletedJobs)", "error", err)
+					logging.Error(checkCtx, "error updating job in db (checkForCompletedJobs)", "error", err)
 				}
 				return
 			}
-		// case <-pluginCtx.Done():
-		// 	// logging.Dev(pluginCtx, "checkForCompletedJobs "+pluginConfig.Name+" pluginCtx.Done()")
+			if job.Action == "cancel" {
+				// logging.Debug(checkCtx, "checkForCompletedJobs -> cancel job", "job", job)
+				err := sendCancelWorkflowRun(workerCtx, checkCtx, job)
+				if err != nil {
+					logging.Error(checkCtx, "error sending cancel workflow run", "error", err)
+				}
+				job.Action = "canceled"
+				err, _ = internalGithub.UpdateJobInDB(checkCtx, pluginQueueName, &job)
+				if err != nil {
+					logging.Error(checkCtx, "error updating job in db (checkForCompletedJobs)", "error", err)
+				}
+				return
+			}
+		// case <-checkCtx.Done():
+		// 	// logging.Dev(checkCtx, "checkForCompletedJobs "+pluginConfig.Name+" checkCtx.Done()")
 		// 	return
 		default:
 		}
 
 		// get the job ID
-		existingJobString, err := databaseContainer.RetryLIndex(pluginCtx, pluginQueueName, 0)
+		var queuedJob internalGithub.QueueJob
+		existingJobString, err := databaseContainer.RetryLIndex(checkCtx, pluginQueueName, 0)
 		if err == redis.Nil || existingJobString == "" {
-			// logging.Debug(pluginCtx, "checkForCompletedJobs -> no job found in pluginQueue")
+			// logging.Debug(checkCtx, "checkForCompletedJobs -> no job found in pluginQueue")
 		} else {
-			// logging.Debug(pluginCtx, "checkForCompletedJobs -> job found in pluginQueue")
-			queuedJob, err, typeErr := database.Unwrap[internalGithub.QueueJob](existingJobString)
+			hasJob = true
+			// logging.Debug(checkCtx, "checkForCompletedJobs -> job found in pluginQueue")
+			var typeErr error
+			queuedJob, err, typeErr = database.Unwrap[internalGithub.QueueJob](existingJobString)
 			if err != nil || typeErr != nil {
-				logging.Error(pluginCtx,
+				logging.Error(checkCtx,
 					"error unmarshalling job",
 					"error", err,
 					"typeErr", typeErr,
@@ -545,47 +573,62 @@ func checkForCompletedJobs(
 				return
 			}
 			if queuedJob.WorkflowJob.ID == nil {
-				logging.Warn(pluginCtx, "checkForCompletedJobs -> queued job missing ID", "queue", pluginQueueName, "raw_payload", existingJobString)
+				logging.Warn(checkCtx, "checkForCompletedJobs -> queued job missing ID", "queue", pluginQueueName, "raw_payload", existingJobString)
 				return
 			}
+			logging.Debug(checkCtx, "checkForCompletedJobs -> queued job found in pluginQueue", "queuedJob", queuedJob)
+
+			// Add job attributes to context - done once per iteration when we have a job
+			jobAttrs := []slog.Attr{
+				slog.Int64("workflowJobID", *queuedJob.WorkflowJob.ID),
+			}
+			if queuedJob.WorkflowJob.RunID != nil {
+				jobAttrs = append(jobAttrs, slog.Int64("workflowJobRunID", *queuedJob.WorkflowJob.RunID))
+			}
+			if queuedJob.WorkflowJob.WorkflowName != nil {
+				jobAttrs = append(jobAttrs, slog.String("workflowName", *queuedJob.WorkflowJob.WorkflowName))
+			}
+			if queuedJob.WorkflowJob.HTMLURL != nil {
+				jobAttrs = append(jobAttrs, slog.String("workflowJobURL", *queuedJob.WorkflowJob.HTMLURL))
+			}
+			if queuedJob.WorkflowJob.Status != nil {
+				jobAttrs = append(jobAttrs, slog.String("workflowJobStatus", *queuedJob.WorkflowJob.Status))
+			}
+			checkCtx = logging.AppendCtx(checkCtx, jobAttrs...)
+			logging.Debug(checkCtx, "context updated with job info")
+
+			if pluginGlobals.GetCheckForCompletedJobsRunCount()%10 == 0 {
+				logging.Info(checkCtx, "checking for completed jobs")
+			}
+
 			logging.Debug(
-				pluginCtx,
+				checkCtx,
 				"checkForCompletedJobs -> evaluating job from plugin queue",
 				"queue", pluginQueueName,
-				"job_id", *queuedJob.WorkflowJob.ID,
-				"status", queuedJob.WorkflowJob.Status,
 				"raw_payload", existingJobString,
 			)
 
 			// check if in_progress queue, so we can skip cleanup later on
-			mainInProgressQueueJobJSON, err := internalGithub.GetJobJSONFromQueueByID(pluginCtx, *queuedJob.WorkflowJob.ID, mainInProgressQueueName)
+			mainInProgressQueueJobJSON, err := internalGithub.GetJobJSONFromQueueByID(checkCtx, *queuedJob.WorkflowJob.ID, mainInProgressQueueName)
 			if err != nil {
-				logging.Error(pluginCtx, "error searching in queue", "error", err)
+				logging.Error(checkCtx, "error searching in queue", "error", err)
 				return
 			}
 			if mainInProgressQueueJobJSON != "" {
 				logging.Debug(
-					pluginCtx,
+					checkCtx,
 					"checkForCompletedJobs -> matched job in mainInProgressQueue",
 					"queue", mainInProgressQueueName,
-					"job_id", *queuedJob.WorkflowJob.ID,
 					"run_count", pluginGlobals.GetCheckForCompletedJobsRunCount(),
 					"raw_payload", mainInProgressQueueJobJSON,
 				)
 				if pluginGlobals.GetCheckForCompletedJobsRunCount()%5 == 0 {
-					logging.Info(
-						pluginCtx,
-						"job is still in progress",
-						"job_id", *queuedJob.WorkflowJob.ID,
-						"run_count", pluginGlobals.GetCheckForCompletedJobsRunCount(),
-						"html_url", *queuedJob.WorkflowJob.HTMLURL,
-						"workflow_name", *queuedJob.WorkflowJob.Name,
-					)
+					logging.Info(checkCtx, "job is still in progress", "run_count", pluginGlobals.GetCheckForCompletedJobsRunCount())
 				}
 				// fmt.Println(pluginConfig.Name, " checkForCompletedJobs -> job is in mainInProgressQueue", randomInt)
 				mainInProgressQueueJob, err, typeErr := database.Unwrap[internalGithub.QueueJob](mainInProgressQueueJobJSON)
 				if err != nil || typeErr != nil {
-					logging.Error(pluginCtx, "error unmarshalling job", "error", err, "typeErr", typeErr, "mainInProgressQueueJobJSON", mainInProgressQueueJobJSON)
+					logging.Error(checkCtx, "error unmarshalling job", "error", err, "typeErr", typeErr, "mainInProgressQueueJobJSON", mainInProgressQueueJobJSON)
 					return
 				}
 				if *queuedJob.WorkflowJob.Status != *mainInProgressQueueJob.WorkflowJob.Status { // prevent running the dbUpdate more than once if not needed
@@ -598,28 +641,27 @@ func checkForCompletedJobs(
 			var mainCompletedQueueJobJSON string
 			var pluginCompletedQueueJobJSON string
 			// check if there is already a completed job queued in the pluginCompletedQueue
-			pluginCompletedQueueJobJSON, err = internalGithub.GetJobJSONFromQueueByID(pluginCtx, *queuedJob.WorkflowJob.ID, pluginCompletedQueueName)
+			pluginCompletedQueueJobJSON, err = internalGithub.GetJobJSONFromQueueByID(checkCtx, *queuedJob.WorkflowJob.ID, pluginCompletedQueueName)
 			if err != nil {
-				logging.Error(pluginCtx, "error searching in queue", "error", err)
+				logging.Error(checkCtx, "error searching in queue", "error", err)
 				return
 			}
 			if pluginCompletedQueueJobJSON == "" {
-				// logging.Debug(pluginCtx, " checkForCompletedJobs -> job is not in pluginCompletedQueue")
+				// logging.Debug(checkCtx, " checkForCompletedJobs -> job is not in pluginCompletedQueue")
 				// check if there is already a completed job queued in the mainCompletedQueue
-				mainCompletedQueueJobJSON, err = internalGithub.GetJobJSONFromQueueByID(pluginCtx, *queuedJob.WorkflowJob.ID, mainCompletedQueueName)
+				mainCompletedQueueJobJSON, err = internalGithub.GetJobJSONFromQueueByID(checkCtx, *queuedJob.WorkflowJob.ID, mainCompletedQueueName)
 				if err != nil {
-					logging.Error(pluginCtx, "error searching in queue", "error", err)
+					logging.Error(checkCtx, "error searching in queue", "error", err)
 					return
 				}
 			}
 
 			if pluginCompletedQueueJobJSON != "" {
-				logging.Info(pluginCtx, "checkForCompletedJobs -> found completed job in pluginCompletedQueue")
+				logging.Info(checkCtx, "checkForCompletedJobs -> found completed job in pluginCompletedQueue")
 				logging.Debug(
-					pluginCtx,
+					checkCtx,
 					"checkForCompletedJobs -> pluginCompletedQueue payload",
 					"queue", pluginCompletedQueueName,
-					"job_id", *queuedJob.WorkflowJob.ID,
 					"raw_payload", pluginCompletedQueueJobJSON,
 				)
 				queuedJob.WorkflowJob.Status = github.Ptr("completed")
@@ -639,24 +681,23 @@ func checkForCompletedJobs(
 			}
 
 			if mainCompletedQueueJobJSON != "" {
-				mainCompletedQueueLength, lenErr := databaseContainer.RetryLLen(pluginCtx, mainCompletedQueueName)
+				mainCompletedQueueLength, lenErr := databaseContainer.RetryLLen(checkCtx, mainCompletedQueueName)
 				if lenErr != nil {
-					logging.Error(pluginCtx, "error checking mainCompletedQueue length", "error", lenErr)
+					logging.Error(checkCtx, "error checking mainCompletedQueue length", "error", lenErr)
 					return
 				}
-				logging.Debug(pluginCtx, "checkForCompletedJobs -> job is in mainCompletedQueue")
+				logging.Debug(checkCtx, "checkForCompletedJobs -> job is in mainCompletedQueue")
 				logging.Debug(
-					pluginCtx,
+					checkCtx,
 					"checkForCompletedJobs -> mainCompletedQueue payload",
 					"queue", mainCompletedQueueName,
 					"queue_length", mainCompletedQueueLength,
-					"job_id", *queuedJob.WorkflowJob.ID,
 					"raw_payload", mainCompletedQueueJobJSON,
 				)
 				// remove the completed job we found
 				success, err := databaseContainer.RetryLRem(checkForCompletedJobsContext, mainCompletedQueueName, 1, mainCompletedQueueJobJSON)
 				if err != nil {
-					logging.Error(pluginCtx,
+					logging.Error(checkCtx,
 						"error removing completedJob from "+mainCompletedQueueName,
 						"error", err,
 						"mainCompletedQueueJobJSON", mainCompletedQueueJobJSON,
@@ -665,7 +706,7 @@ func checkForCompletedJobs(
 				}
 				if success != 1 {
 					logging.Error(
-						pluginCtx,
+						checkCtx,
 						"non-successful removal of completedJob from "+mainCompletedQueueName,
 						"error", err,
 						"mainCompletedQueueJobJSON", mainCompletedQueueJobJSON,
@@ -675,7 +716,7 @@ func checkForCompletedJobs(
 
 				completedQueuedJob, err, typeErr := database.Unwrap[internalGithub.QueueJob](mainCompletedQueueJobJSON)
 				if err != nil || typeErr != nil {
-					logging.Error(pluginCtx,
+					logging.Error(checkCtx,
 						"error unmarshalling job",
 						"error", err,
 						"typeErr", typeErr,
@@ -693,7 +734,7 @@ func checkForCompletedJobs(
 						receivedRunID = *completedQueuedJob.WorkflowJob.RunID
 					}
 					logging.Warn(
-						pluginCtx,
+						checkCtx,
 						"checkForCompletedJobs -> completed job id mismatch",
 						"expected_job_id", *queuedJob.WorkflowJob.ID,
 						"received_job_id", *completedQueuedJob.WorkflowJob.ID,
@@ -704,10 +745,10 @@ func checkForCompletedJobs(
 				queuedJob.WorkflowJob.Status = completedQueuedJob.WorkflowJob.Status
 				queuedJob.WorkflowJob.Conclusion = completedQueuedJob.WorkflowJob.Conclusion
 				// add a task for the completed job so we know the clean up
-				logging.Info(pluginCtx, "checkForCompletedJobs -> found completed job in mainCompletedQueue, adding to pluginCompletedQueue", "completedQueuedJob", completedQueuedJob)
+				logging.Info(checkCtx, "checkForCompletedJobs -> found completed job in mainCompletedQueue, adding to pluginCompletedQueue", "completedQueuedJob", completedQueuedJob)
 				_, err = databaseContainer.RetryLPush(checkForCompletedJobsContext, pluginCompletedQueueName, mainCompletedQueueJobJSON)
 				if err != nil {
-					logging.Error(pluginCtx, "error inserting completed job into list", "error", err)
+					logging.Error(checkCtx, "error inserting completed job into list", "error", err)
 					return
 				}
 				select { // handle when pluginGlobals.RetryChannel sends something to pluginGlobals.JobChannel already so we don't orphan anything
@@ -726,10 +767,10 @@ func checkForCompletedJobs(
 			if !pluginGlobals.GetFirstCheckForCompletedJobsRan() &&
 				mainCompletedQueueJobJSON == "" && pluginCompletedQueueJobJSON == "" &&
 				mainInProgressQueueJobJSON != "" {
-				logging.Debug(pluginCtx, "checkForCompletedJobs -> job is in mainInProgressQueue, checking status from API")
-				queuedJob, err = internalGithub.UpdateJobsWorkflowJobStatus(workerCtx, pluginCtx, &queuedJob)
+				logging.Debug(checkCtx, "checkForCompletedJobs -> job is in mainInProgressQueue, checking status from API")
+				queuedJob, err = internalGithub.UpdateJobsWorkflowJobStatus(workerCtx, checkCtx, &queuedJob)
 				if err != nil {
-					logging.Error(pluginCtx, "error checking workflow job status", "error", err)
+					logging.Error(checkCtx, "error checking workflow job status", "error", err)
 					return
 				}
 				if queuedJob.WorkflowJob.Status != nil &&
@@ -739,12 +780,12 @@ func checkForCompletedJobs(
 					// add a task for the completed job so we clean it up
 					queuedJobJSON, err := json.Marshal(queuedJob)
 					if err != nil {
-						logging.Error(pluginCtx, "error marshalling queued job", "error", err)
+						logging.Error(checkCtx, "error marshalling queued job", "error", err)
 						return
 					}
-					_, err = databaseContainer.RetryLPush(pluginCtx, pluginCompletedQueueName, queuedJobJSON)
+					_, err = databaseContainer.RetryLPush(checkCtx, pluginCompletedQueueName, queuedJobJSON)
 					if err != nil {
-						logging.Error(pluginCtx, "error inserting completed job into list", "error", err)
+						logging.Error(checkCtx, "error inserting completed job into list", "error", err)
 						return
 					}
 				}
@@ -757,22 +798,35 @@ func checkForCompletedJobs(
 
 			// update the job in the database so we can get the new status for subsequent steps
 			if updateDB {
-				// logging.Debug(pluginCtx, "checkForCompletedJobs -> updating job in database")
-				err, completed := internalGithub.UpdateJobInDB(pluginCtx, pluginQueueName, &queuedJob)
+				// logging.Debug(checkCtx, "checkForCompletedJobs -> updating job in database")
+				err, completed := internalGithub.UpdateJobInDB(checkCtx, pluginQueueName, &queuedJob)
 				if completed != nil {
 					return
 				}
 				if err != nil {
-					logging.Error(pluginCtx, "error updating job in db", "error", err)
+					logging.Error(checkCtx, "error updating job in db", "error", err)
 				}
 			}
 		}
 
-		// logging.Debug(pluginCtx, "checkForCompletedJobs end loop")
+		// logging.Debug(checkCtx, "checkForCompletedJobs end loop")
+
+		// Check if timeout has been exceeded (handles orphaned duplicate jobs)
+		elapsed := time.Since(startTime)
+		if elapsed >= timeoutDuration && hasJob {
+			logging.Warn(
+				checkCtx,
+				"checkForCompletedJobs timeout exceeded, cleaning up potentially orphaned job",
+				"elapsed_hours", elapsed.Hours(),
+				"timeout_hours", timeoutDuration.Hours(),
+			)
+			queuedJob.Action = "timed_out"
+			pluginGlobals.JobChannel <- queuedJob
+		}
 
 		// Check for shutdown signal before sleeping
-		if workerCtx.Err() != nil || pluginCtx.Err() != nil {
-			logging.Warn(pluginCtx, "context canceled in checkForCompletedJobs loop")
+		if workerCtx.Err() != nil || checkCtx.Err() != nil {
+			logging.Warn(checkCtx, "context canceled in checkForCompletedJobs loop")
 			return
 		}
 
@@ -805,8 +859,6 @@ func cleanup(
 		return
 	}
 	cleanupContext = context.WithValue(cleanupContext, config.ContextKey("logger"), logger)
-
-	logging.Info(pluginCtx, "cleanup | started", "onStartRun", onStartRun)
 
 	pluginGlobals, err := internalGithub.GetPluginGlobalsFromContext(pluginCtx)
 	if err != nil {
@@ -868,9 +920,11 @@ func cleanup(
 		return
 	}
 	if err == redis.Nil {
-		logging.Info(pluginCtx, "cleanup | nothing to clean up (or redis returned nil)")
+		logging.Debug(pluginCtx, "cleanup | nothing to clean up (or redis returned nil)")
 		return // nothing to clean up
 	}
+
+	logging.Info(pluginCtx, "cleanup | started", "onStartRun", onStartRun)
 	originalQueuedJob, err, typeErr := database.Unwrap[internalGithub.QueueJob](originalJobJSON)
 	if err != nil || typeErr != nil {
 		logging.Error(pluginCtx, "error unmarshalling job", "error", err, "typeErr", typeErr, "originalJobJSON", originalJobJSON)
@@ -1074,7 +1128,9 @@ func cleanup(
 				}
 			default:
 				if queuedJob.WorkflowJob.Status != nil &&
-					(*queuedJob.WorkflowJob.Status == "completed" || *queuedJob.WorkflowJob.Status == "failed") { // don't send it back to the queue if the job is completed
+					(*queuedJob.WorkflowJob.Status == "completed" ||
+						*queuedJob.WorkflowJob.Status == "failed" ||
+						*queuedJob.WorkflowJob.Status == "timed_out") { // don't send it back to the queue if the job is completed, failed, or timed out
 					_, err = databaseContainer.RetryDel(cleanupContext, pluginQueueName+"/cleaning")
 					if err != nil {
 						logging.Error(pluginCtx, "error deleting job from cleaning queue", "error", err)
@@ -1126,8 +1182,10 @@ func Run(
 		return pluginCtx, err
 	}
 
-	pluginCtx = logging.AppendCtx(pluginCtx, slog.Int("hostCPUCount", workerGlobals.HostCPUCount))
-	pluginCtx = logging.AppendCtx(pluginCtx, slog.Uint64("hostMemoryBytes", workerGlobals.HostMemoryBytes))
+	pluginCtx = logging.AppendCtx(pluginCtx,
+		slog.Int("hostCPUCount", workerGlobals.HostCPUCount),
+		slog.Uint64("hostMemoryBytes", workerGlobals.HostMemoryBytes),
+	)
 
 	// must come after first cleanup
 	pluginGlobals := internalGithub.PluginGlobals{
@@ -1612,11 +1670,13 @@ func Run(
 		"queuedJob", queuedJob,
 	)
 
-	pluginCtx = logging.AppendCtx(pluginCtx, slog.Int64("workflowJobID", *queuedJob.WorkflowJob.ID))
-	pluginCtx = logging.AppendCtx(pluginCtx, slog.Int64("workflowJobRunID", *queuedJob.WorkflowJob.RunID))
-	pluginCtx = logging.AppendCtx(pluginCtx, slog.String("workflowName", *queuedJob.WorkflowJob.WorkflowName))
-	pluginCtx = logging.AppendCtx(pluginCtx, slog.String("workflowJobURL", *queuedJob.WorkflowJob.HTMLURL))
-	pluginCtx = logging.AppendCtx(pluginCtx, slog.Int("attempts", queuedJob.Attempts))
+	pluginCtx = logging.AppendCtx(pluginCtx,
+		slog.Int64("workflowJobID", *queuedJob.WorkflowJob.ID),
+		slog.Int64("workflowJobRunID", *queuedJob.WorkflowJob.RunID),
+		slog.String("workflowName", *queuedJob.WorkflowJob.WorkflowName),
+		slog.String("workflowJobURL", *queuedJob.WorkflowJob.HTMLURL),
+		slog.Int("attempts", queuedJob.Attempts),
+	)
 
 	// now that the job is in the plugin's queue, check if the job is already completed so we don't orphan if there is
 	// a job in anklet/jobs/github/queued and also a anklet/jobs/github/completed
@@ -1727,12 +1787,14 @@ func Run(
 		pluginGlobals.JobChannel <- queuedJob
 		return pluginCtx, nil
 	}
-	pluginCtx = logging.AppendCtx(pluginCtx, slog.String("ankaTemplateUUID", ankaTemplateUUID))
 	ankaTemplateTag := extractLabelValue(queuedJob.WorkflowJob.Labels, "anka-template-tag:")
 	if ankaTemplateTag == "" {
 		ankaTemplateTag = "(using latest)"
 	}
-	pluginCtx = logging.AppendCtx(pluginCtx, slog.String("ankaTemplateTag", ankaTemplateTag))
+	pluginCtx = logging.AppendCtx(pluginCtx,
+		slog.String("ankaTemplateUUID", ankaTemplateUUID),
+		slog.String("ankaTemplateTag", ankaTemplateTag),
+	)
 
 	// get anka CLI
 	ankaCLI, err := internalAnka.GetAnkaCLIFromContext(pluginCtx)

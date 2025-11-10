@@ -141,27 +141,37 @@ func GetPluginAttributes(ctx context.Context) map[string]any {
 	return attributes
 }
 
-// AppendCtx adds an slog attribute to the provided context so that it will be
+// AppendCtx adds one or more slog attributes to the provided context so that they will be
 // included in any Record created with such context
-func AppendCtx(ctx context.Context, attr slog.Attr) context.Context {
+func AppendCtx(ctx context.Context, attrs ...slog.Attr) context.Context {
 	if ctx == nil {
 		panic("parent context required")
 	}
 
+	if len(attrs) == 0 {
+		return ctx
+	}
+
 	if v, ok := ctx.Value(slogFields).([]slog.Attr); ok {
 		// Check for duplicate keys and overwrite if found
-		for i, existingAttr := range v {
-			if existingAttr.Key == attr.Key {
-				v[i] = attr
-				return context.WithValue(ctx, slogFields, v)
+		for _, attr := range attrs {
+			found := false
+			for i, existingAttr := range v {
+				if existingAttr.Key == attr.Key {
+					v[i] = attr
+					found = true
+					break
+				}
+			}
+			if !found {
+				v = append(v, attr)
 			}
 		}
-		v = append(v, attr)
 		return context.WithValue(ctx, slogFields, v)
 	}
 
-	v := []slog.Attr{}
-	v = append(v, attr)
+	v := make([]slog.Attr, 0, len(attrs))
+	v = append(v, attrs...)
 	return context.WithValue(ctx, slogFields, v)
 }
 
