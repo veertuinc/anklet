@@ -129,6 +129,8 @@ func executeGitHubClientFunctionWithRetry[T any](
 	if response != nil {
 		logging.Debug(pluginCtx,
 			"GitHub API rate limit",
+			"method", response.Request.Method,
+			"url", response.Request.URL.String(),
 			"remaining", response.Rate.Remaining,
 			"reset", response.Rate.Reset.Format(time.RFC3339),
 			"limit", response.Rate.Limit,

@@ -396,13 +396,7 @@ func CheckIfJobExistsInHandlerQueues(
 	}
 
 	// Use channels and goroutines to check queues in parallel
-	type checkResult struct {
-		found bool
-		err   error
-	}
-
-	resultChan := make(chan checkResult, len(handlerQueueKeys))
-	doneChan := make(chan struct{})
+	resultChan := make(chan bool, len(handlerQueueKeys))
 
 	// Start goroutines to check each queue in parallel
 	for _, queueKey := range handlerQueueKeys {
@@ -411,7 +405,7 @@ func CheckIfJobExistsInHandlerQueues(
 			firstJobJSON, err := databaseContainer.RetryLIndex(pluginCtx, key, 0)
 			if err != nil || firstJobJSON == "" {
 				// Queue might be empty or error occurred, send not found
-				resultChan <- checkResult{found: false, err: nil}
+				resultChan <- false
 				return
 			}
 
@@ -419,48 +413,27 @@ func CheckIfJobExistsInHandlerQueues(
 			queueJob, err, typeErr := database.Unwrap[QueueJob](firstJobJSON)
 			if err != nil || typeErr != nil {
 				// Not a QueueJob type or unmarshal error, send not found
-				resultChan <- checkResult{found: false, err: nil}
+				resultChan <- false
 				return
 			}
 
 			// Check if workflow run ID and job ID match
 			if queueJob.WorkflowJob.RunID != nil && *queueJob.WorkflowJob.RunID == workflowRunID &&
 				queueJob.WorkflowJob.ID != nil && *queueJob.WorkflowJob.ID == jobID {
-				resultChan <- checkResult{found: true, err: nil}
+				resultChan <- true
 				return
 			}
 
-			resultChan <- checkResult{found: false, err: nil}
+			resultChan <- false
 		}(queueKey)
 	}
 
-	// Wait for all goroutines to complete or find a match
-	go func() {
-		count := 0
-		for range resultChan {
-			count++
-			if count == len(handlerQueueKeys) {
-				close(doneChan)
-				return
-			}
-		}
-	}()
-
 	// Check results as they come in, return immediately on first match
 	for range len(handlerQueueKeys) {
-		select {
-		case result := <-resultChan:
-			if result.err != nil {
-				// Log error but continue checking other queues
-				continue
-			}
-			if result.found {
-				// Found a match, return immediately
-				return true, nil
-			}
-		case <-doneChan:
-			// All checks complete, no match found
-			return false, nil
+		if <-resultChan {
+			// Found a match, return immediately
+			// Note: remaining goroutines will complete and send to buffered channel
+			return true, nil
 		}
 	}
 
