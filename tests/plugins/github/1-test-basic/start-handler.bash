@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 set -eo pipefail
 
-
 clean() {
     echo "] Cleaning up handler..."
     exit 0
