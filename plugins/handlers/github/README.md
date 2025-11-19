@@ -118,6 +118,44 @@ This means worst case scenario it could make a total of 3 api calls total. Other
 
 ---
 
+## Metrics
+
+#### Key Names and Descriptions
+
+| Key | Description | 
+| ------ | ----------- |
+| total_running_vms | Total number of running VMs |
+| total_successful_runs_since_start | Total number of successful runs since start |
+| total_failed_runs_since_start | Total number of failed runs since start |
+| total_canceled_runs_since_start | Total number of canceled runs since start |
+| plugin_name | Name of the plugin |
+| plugin_plugin_name | Name of the plugin |
+| plugin_owner_name | Name of the owner |
+| plugin_repo_name | Name of the repo |
+| plugin_status | Status of the plugin (running, in_progress, limit_paused, idle, stopped) |
+| plugin_last_successful_run_job_url | Last successful run job url of the plugin |
+| plugin_last_failed_run_job_url | Last failed run job url of the plugin |
+| plugin_last_successful_run | Timestamp of last successful run of the plugin (RFC3339) |
+| plugin_last_failed_run | Timestamp of last failed run of the plugin (RFC3339) |
+| plugin_status_since | Timestamp of when the plugin was last started (RFC3339) |
+| plugin_total_ran_vms | Total number of VMs ran by the plugin |
+| plugin_total_successful_runs_since_start | Total number of successful runs since start |
+| plugin_total_failed_runs_since_start | Total number of failed runs since start |
+| plugin_total_canceled_runs_since_start | Total number of canceled runs since start |
+| host_cpu_count | Total CPU count of the host |
+| host_cpu_used_count | Total in use CPU count of the host |
+| host_cpu_usage_percentage | CPU usage percentage of the host |
+| host_memory_total_bytes | Total memory of the host (bytes) |
+| host_memory_used_bytes | Used memory of the host (bytes) |
+| host_memory_available_bytes | Available memory of the host (bytes) |
+| host_memory_usage_percentage | Memory usage percentage of the host |
+| host_disk_total_bytes | Total disk space of the host (bytes) |
+| host_disk_used_bytes | Used disk space of the host (bytes) |
+| host_disk_available_bytes | Available disk space of the host (bytes) |
+| host_disk_usage_percentage | Disk usage percentage of the host |
+
+---
+
 ## FAQS
 
 1. My Jobs are taking a long time to be picked up.

@@ -200,7 +200,11 @@ Note: If port 8080 is already in use, Anklet will automatically increment the po
 | plugin_plugin_name | Name of the plugin |
 | plugin_owner_name | Name of the owner |
 | plugin_repo_name | Name of the repo |
+<<<<<<< HEAD
 | plugin_status | Status of the plugin (idle, pulling, running, limit_paused, stopped) |
+=======
+| plugin_status | Status of the plugin (can change depending on the plugin; see specific plugin documentation for more information) |
+>>>>>>> 3bbf064 (github plugin status)
 | plugin_last_successful_run_job_url | Last successful run job url of the plugin |
 | plugin_last_failed_run_job_url | Last failed run job url of the plugin |
 | plugin_last_successful_run | Timestamp of last successful run of the plugin (RFC3339) |
