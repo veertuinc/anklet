@@ -2,4 +2,4 @@
 plugins:
   - name: GITHUB_RECEIVER1
     plugin: github_receiver
-    redeliver_hours: 10
+    skip_redeliver: true
