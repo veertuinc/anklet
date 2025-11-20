@@ -45,23 +45,62 @@ func isRetriableError(err error) bool {
 func (db *Database) retryOperation(ctx context.Context, operationName string, operation func() error) error {
 	var lastErr error
 	for attempt := 0; attempt <= db.MaxRetries; attempt++ {
+		// Check if context is canceled before attempting operation
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("context canceled before %s: %w", operationName, ctx.Err())
+		default:
+		}
+
 		if attempt > 0 {
 			// Calculate delay with exponential backoff
 			delay := time.Duration(float64(db.RetryDelay) * float64(attempt) * db.RetryBackoffFactor)
-			logging.Warn(ctx, fmt.Sprintf("retrying %s in %v (attempt %d/%d)", operationName, delay, attempt, db.MaxRetries))
+
+			// Safely attempt to log, catching any panics from canceled contexts
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						// Context was canceled during logging, silently continue
+						_ = r
+					}
+				}()
+				logging.Warn(ctx, fmt.Sprintf("retrying %s in %v (attempt %d/%d)", operationName, delay, attempt, db.MaxRetries))
+			}()
+
+			// Create a timer for the delay
+			timer := time.NewTimer(delay)
+			defer timer.Stop()
 
 			select {
 			case <-ctx.Done():
 				return fmt.Errorf("context canceled during retry for %s: %w", operationName, ctx.Err())
-			case <-time.After(delay):
-				// Continue with retry
+			case <-timer.C:
+				// Check context again immediately after waking
+				if ctx.Err() != nil {
+					return fmt.Errorf("context canceled during retry for %s: %w", operationName, ctx.Err())
+				}
 			}
 		}
 
 		lastErr = operation()
+
+		// Check if context was canceled during the operation before any logging
+		if ctx.Err() != nil {
+			return fmt.Errorf("context canceled after %s operation: %w", operationName, ctx.Err())
+		}
+
 		if lastErr == nil {
 			if attempt > 0 {
-				logging.Info(ctx, fmt.Sprintf("%s succeeded after %d retries", operationName, attempt))
+				// Safely attempt to log, catching any panics from canceled contexts
+				func() {
+					defer func() {
+						if r := recover(); r != nil {
+							// Context was canceled during logging, silently continue
+							_ = r
+						}
+					}()
+					logging.Info(ctx, fmt.Sprintf("%s succeeded after %d retries", operationName, attempt))
+				}()
 			}
 			return nil
 		}
@@ -72,7 +111,16 @@ func (db *Database) retryOperation(ctx context.Context, operationName string, op
 		}
 
 		if attempt < db.MaxRetries {
-			logging.Debug(ctx, fmt.Sprintf("%s failed (attempt %d/%d): %v", operationName, attempt+1, db.MaxRetries+1, lastErr))
+			// Safely attempt to log, catching any panics from canceled contexts
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						// Context was canceled during logging, silently continue
+						_ = r
+					}
+				}()
+				logging.Debug(ctx, fmt.Sprintf("%s failed (attempt %d/%d): %v", operationName, attempt+1, db.MaxRetries+1, lastErr))
+			}()
 		}
 	}
 

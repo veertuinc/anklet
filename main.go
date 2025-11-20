@@ -457,6 +457,12 @@ func worker(
 				defer wg.Done()
 				pluginCtx, pluginCancel := context.WithCancel(context.Background()) // we don't use workerCtx here as it causes Attrs to race condition and be incorrect
 
+				// Listen for workerCtx cancellation (SIGINT) and cancel pluginCtx
+				go func() {
+					<-workerCtx.Done()
+					pluginCancel()
+				}()
+
 				workerGlobals, err := config.GetWorkerGlobalsFromContext(workerCtx)
 				if err != nil {
 					parentLogger.ErrorContext(pluginCtx, "unable to get globals from context", "error", err)
@@ -584,7 +590,24 @@ func worker(
 					logging.Dev(pluginCtx, "connected to database")
 					// cleanup metrics data when the plugin is stopped (otherwise it's orphaned in the aggregator)
 					if index == 0 {
-						defer metrics.Cleanup(pluginCtx, plugin.Owner, plugin.Name)
+						// Create a separate context for cleanup with its own cancellation
+						cleanupCtx, cleanupCancel := context.WithCancel(context.Background())
+						cleanupCtx = context.WithValue(cleanupCtx, config.ContextKey("logger"), pluginLogger)
+						cleanupCtx = context.WithValue(cleanupCtx, config.ContextKey("database"), databaseClient)
+
+						// Cancel cleanup context when worker context is canceled (SIGINT)
+						go func() {
+							<-workerCtx.Done()
+							cleanupCancel()
+						}()
+
+						// Capture the context values explicitly in the closure
+						capturedCtx := cleanupCtx
+						capturedOwner := plugin.Owner
+						capturedName := plugin.Name
+						defer func() {
+							metrics.Cleanup(capturedCtx, capturedOwner, capturedName)
+						}()
 					}
 				}
 

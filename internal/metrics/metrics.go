@@ -887,7 +887,7 @@ func Cleanup(ctx context.Context, owner string, name string) {
 		logging.Error(ctx, "error getting database client from context", "error", err.Error())
 		return
 	}
-	_, result := databaseContainer.RetryDel(context.Background(), "anklet/metrics/"+owner+"/"+name)
+	_, result := databaseContainer.RetryDel(ctx, "anklet/metrics/"+owner+"/"+name)
 	if result != nil {
 		logging.Error(ctx, "error deleting metrics data from Redis", "error", result.Error())
 	}
@@ -920,8 +920,10 @@ func ExportMetricsToDB(workerCtx context.Context, pluginCtx context.Context, key
 			select {
 			case <-pluginCtx.Done():
 				return
+			case <-workerCtx.Done():
+				return
 			default:
-				if pluginCtx.Err() == nil {
+				if pluginCtx.Err() == nil && workerCtx.Err() == nil {
 					// add last_update
 					var metricsDataMap map[string]any
 					if err := json.Unmarshal(metricsDataJson, &metricsDataMap); err != nil {

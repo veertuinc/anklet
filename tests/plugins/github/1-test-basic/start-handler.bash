@@ -1,16 +1,26 @@
 #!/usr/bin/env bash
 set -eo pipefail
+echo "==========================================="
+echo "START start-handler.bash"
+echo "==========================================="
+# Source the helper functions
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/helpers.bash"
 
-clean() {
-    echo "] Cleaning up handler..."
+if [[ ${CLEAN:-false} == true || "$1" == "--clean" ]]; then
+    echo "]] Cleaning up handler..."
+    clean_anklet "handler"
     exit 0
-}
-[[ ${CLEAN:-false} == true || "$1" == "--clean" ]] && clean
+fi
+echo "]] Cleaning up handler..."
+clean_anklet "handler"
 
-echo "] Starting handler..."
-echo "]] Running tests..."
+echo "]] Starting handler..."
+start_anklet "handler"
 
-sleep 300 # wait for the handler to start and do a single no queue jobs found for the logs
+echo "] Running tests..."
+
+sleep 800 # wait for the handler to start and do a single no queue jobs found for the logs
 
 echo "]] Triggering workflow runs..."
 # # trigger the api call to trigger the workflow run
@@ -20,4 +30,6 @@ echo "]] Triggering workflow runs..."
 # ../wait-workflow-completion.bash "veertuinc" "anklet" "t2-6c14r-1.yml" 3
 
 # wait for the logs of the handler to show the expected output
-
+echo "==========================================="
+echo "END start-handler.bash"
+echo "==========================================="

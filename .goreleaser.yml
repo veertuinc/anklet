@@ -7,7 +7,7 @@ before:
   hooks:
   - make go.lint
   - make go.test
-  - brew install filosottile/musl-cross/musl-cross
+  - bash -c 'if [[ -z "$(command -v musl-gcc)" ]]; then brew install filosottile/musl-cross/musl-cross; fi'
 builds:
 - id: linux-amd64
   env:

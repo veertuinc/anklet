@@ -904,6 +904,12 @@ func cleanup(
 	}
 	cleanupContext = context.WithValue(cleanupContext, config.ContextKey("database"), serviceDatabase)
 	cleanupContext, cancel := context.WithCancel(cleanupContext)
+
+	// Listen for workerCtx cancellation (SIGINT) and cancel cleanupContext
+	go func() {
+		<-workerCtx.Done()
+		cancel()
+	}()
 	defer func() {
 		cancel()
 	}()
