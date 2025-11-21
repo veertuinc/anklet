@@ -44,7 +44,22 @@ func isRetriableError(err error) bool {
 // retryOperation performs an operation with retry logic
 func (db *Database) retryOperation(ctx context.Context, operationName string, operation func() error) error {
 	var lastErr error
-	for attempt := 0; attempt <= db.MaxRetries; attempt++ {
+
+	// Check if context has a deadline (e.g., cleanup/shutdown scenario)
+	// If so, reduce retries to fail faster
+	maxRetries := db.MaxRetries
+	if deadline, hasDeadline := ctx.Deadline(); hasDeadline {
+		timeRemaining := time.Until(deadline)
+		// If we have less than 10 seconds, don't retry at all - just try once
+		if timeRemaining < 10*time.Second {
+			maxRetries = 0
+		} else if timeRemaining < 30*time.Second {
+			// If less than 30 seconds, only retry once
+			maxRetries = 1
+		}
+	}
+
+	for attempt := 0; attempt <= maxRetries; attempt++ {
 		// Check if context is canceled before attempting operation
 		select {
 		case <-ctx.Done():
@@ -56,6 +71,15 @@ func (db *Database) retryOperation(ctx context.Context, operationName string, op
 			// Calculate delay with exponential backoff
 			delay := time.Duration(float64(db.RetryDelay) * float64(attempt) * db.RetryBackoffFactor)
 
+			// If context has a deadline, ensure we don't wait longer than remaining time
+			if deadline, hasDeadline := ctx.Deadline(); hasDeadline {
+				timeRemaining := time.Until(deadline)
+				if delay > timeRemaining {
+					// Not enough time left, fail immediately
+					return fmt.Errorf("insufficient time remaining for retry of %s: %w", operationName, lastErr)
+				}
+			}
+
 			// Safely attempt to log, catching any panics from canceled contexts
 			func() {
 				defer func() {
@@ -64,7 +88,7 @@ func (db *Database) retryOperation(ctx context.Context, operationName string, op
 						_ = r
 					}
 				}()
-				logging.Warn(ctx, fmt.Sprintf("retrying %s in %v (attempt %d/%d)", operationName, delay, attempt, db.MaxRetries))
+				logging.Warn(ctx, fmt.Sprintf("retrying %s in %v (attempt %d/%d)", operationName, delay, attempt, maxRetries))
 			}()
 
 			// Create a timer for the delay
@@ -110,7 +134,7 @@ func (db *Database) retryOperation(ctx context.Context, operationName string, op
 			return lastErr
 		}
 
-		if attempt < db.MaxRetries {
+		if attempt < maxRetries {
 			// Safely attempt to log, catching any panics from canceled contexts
 			func() {
 				defer func() {

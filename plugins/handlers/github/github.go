@@ -903,16 +903,12 @@ func cleanup(
 		return
 	}
 	cleanupContext = context.WithValue(cleanupContext, config.ContextKey("database"), serviceDatabase)
-	cleanupContext, cancel := context.WithCancel(cleanupContext)
 
-	// Listen for workerCtx cancellation (SIGINT) and cancel cleanupContext
-	go func() {
-		<-workerCtx.Done()
-		cancel()
-	}()
-	defer func() {
-		cancel()
-	}()
+	// Use a timeout instead of canceling immediately on SIGINT to allow cleanup operations
+	// (including database access) to complete properly during shutdown
+	cleanupContext, cancel := context.WithTimeout(cleanupContext, 30*time.Second)
+	defer cancel()
+
 	databaseContainer, err := database.GetDatabaseFromContext(cleanupContext)
 	if err != nil {
 		logging.Error(pluginCtx, "error getting database from context", "error", err)
@@ -1013,12 +1009,13 @@ func cleanup(
 				return
 			}
 			if strings.ToUpper(os.Getenv("LOG_LEVEL")) == "DEBUG" || strings.ToUpper(os.Getenv("LOG_LEVEL")) == "DEV" {
-				err = ankaCLI.AnkaCopyOutOfVM(pluginCtx, queuedJob.AnkaVM.Name, "/Users/anka/actions-runner/_diag", "/tmp/"+queuedJob.AnkaVM.Name)
+				err = ankaCLI.AnkaCopyOutOfVM(cleanupContext, queuedJob.AnkaVM.Name, "/Users/anka/actions-runner/_diag", "/tmp/"+queuedJob.AnkaVM.Name)
 				if err != nil {
 					logging.Warn(pluginCtx, "error copying actions runner out of vm", "error", err)
 				}
 			}
-			err = ankaCLI.AnkaDelete(workerCtx, pluginCtx, queuedJob.AnkaVM.Name)
+			// Use cleanupContext to ensure VM deletion completes even on SIGINT
+			err = ankaCLI.AnkaDelete(workerCtx, cleanupContext, queuedJob.AnkaVM.Name)
 			if err != nil {
 				logging.Error(pluginCtx, "error deleting vm", "error", err)
 			}
@@ -2117,7 +2114,12 @@ func Run(
 		wrappedVmJSON, wrappedVmErr = json.Marshal(wrappedVM)
 		if wrappedVmErr != nil {
 			// logging.Error(pluginCtx, "error marshalling vm to json", "error", wrappedVmErr)
-			err = ankaCLI.AnkaDelete(workerCtx, pluginCtx, vm.Name)
+			// Use background context to ensure VM deletion completes even if pluginCtx is canceled
+			deleteCtx := context.Background()
+			if logger, err := logging.GetLoggerFromContext(pluginCtx); err == nil {
+				deleteCtx = context.WithValue(deleteCtx, config.ContextKey("logger"), logger)
+			}
+			err = ankaCLI.AnkaDelete(workerCtx, deleteCtx, vm.Name)
 			if err != nil {
 				logging.Error(pluginCtx, "error deleting vm", "error", err)
 			}
@@ -2126,7 +2128,12 @@ func Run(
 		}
 	}
 	if workerCtx.Err() != nil || pluginCtx.Err() != nil {
-		err = ankaCLI.AnkaDelete(workerCtx, pluginCtx, vm.Name)
+		// Use background context to ensure VM deletion completes even when contexts are canceled
+		deleteCtx := context.Background()
+		if logger, err := logging.GetLoggerFromContext(pluginCtx); err == nil {
+			deleteCtx = context.WithValue(deleteCtx, config.ContextKey("logger"), logger)
+		}
+		err = ankaCLI.AnkaDelete(workerCtx, deleteCtx, vm.Name)
 		if err != nil {
 			logging.Error(pluginCtx, "error deleting vm", "error", err)
 		}

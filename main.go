@@ -590,16 +590,11 @@ func worker(
 					logging.Dev(pluginCtx, "connected to database")
 					// cleanup metrics data when the plugin is stopped (otherwise it's orphaned in the aggregator)
 					if index == 0 {
-						// Create a separate context for cleanup with its own cancellation
-						cleanupCtx, cleanupCancel := context.WithCancel(context.Background())
+						// Create a separate context for cleanup with a timeout to allow cleanup to complete
+						// even when workerCtx is canceled (SIGINT). This prevents database access errors during shutdown.
+						cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 30*time.Second)
 						cleanupCtx = context.WithValue(cleanupCtx, config.ContextKey("logger"), pluginLogger)
 						cleanupCtx = context.WithValue(cleanupCtx, config.ContextKey("database"), databaseClient)
-
-						// Cancel cleanup context when worker context is canceled (SIGINT)
-						go func() {
-							<-workerCtx.Done()
-							cleanupCancel()
-						}()
 
 						// Capture the context values explicitly in the closure
 						capturedCtx := cleanupCtx
@@ -607,6 +602,7 @@ func worker(
 						capturedName := plugin.Name
 						defer func() {
 							metrics.Cleanup(capturedCtx, capturedOwner, capturedName)
+							cleanupCancel() // Clean up resources
 						}()
 					}
 				}
