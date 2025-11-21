@@ -902,12 +902,14 @@ func cleanup(
 		logging.Error(pluginCtx, "error getting database from context", "error", err)
 		return
 	}
-	cleanupContext = context.WithValue(cleanupContext, config.ContextKey("database"), serviceDatabase)
 
-	// Use a timeout instead of canceling immediately on SIGINT to allow cleanup operations
-	// (including database access) to complete properly during shutdown
-	cleanupContext, cancel := context.WithTimeout(cleanupContext, 30*time.Second)
-	defer cancel()
+	// Create a modified database client with 0 retries for fast-fail during cleanup
+	cleanupDb := *serviceDatabase
+	cleanupDb.MaxRetries = 0 // No retries during cleanup - fail immediately if connection issues
+	cleanupContext = context.WithValue(cleanupContext, config.ContextKey("database"), &cleanupDb)
+
+	// No timeout on context - allows Redis pool to create new connections if needed
+	// Fast-fail is achieved via MaxRetries=0 instead
 
 	databaseContainer, err := database.GetDatabaseFromContext(cleanupContext)
 	if err != nil {
@@ -918,7 +920,8 @@ func cleanup(
 	// get the original job with the latest status
 	originalJobJSON, err := databaseContainer.RetryLIndex(cleanupContext, pluginQueueName, 0)
 	if err != nil && err != redis.Nil {
-		logging.Error(pluginCtx, "error getting job from the list", "error", err)
+		// During cleanup, database errors are not fatal - log as warning and skip cleanup
+		logging.Warn(pluginCtx, "unable to get job from database during cleanup, skipping", "error", err)
 		return
 	}
 	if err == redis.Nil {

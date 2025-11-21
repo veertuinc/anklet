@@ -887,11 +887,17 @@ func Cleanup(ctx context.Context, owner string, name string) {
 		logging.Error(ctx, "error getting database client from context", "error", err.Error())
 		return
 	}
-	_, result := databaseContainer.RetryDel(ctx, "anklet/metrics/"+owner+"/"+name)
+	
+	// During cleanup, skip database operations if they fail - they're not critical for shutdown
+	// Use a very short timeout to fail fast if database is having issues
+	cleanupKey := "anklet/metrics/" + owner + "/" + name
+	_, result := databaseContainer.RetryDel(ctx, cleanupKey)
 	if result != nil {
-		logging.Error(ctx, "error deleting metrics data from Redis", "error", result.Error())
+		// Database errors during cleanup are not critical - just log at debug level and continue
+		logging.Dev(ctx, "skipped deleting metrics data from Redis during cleanup (database unavailable)", "key", cleanupKey, "error", result.Error())
+		return
 	}
-	// logging.Dev(ctx, "successfully deleted metrics data from Redis, key: anklet/metrics/"+owner+"/"+name)
+	logging.Dev(ctx, "successfully deleted metrics data from Redis", "key", cleanupKey)
 }
 
 func ExportMetricsToDB(workerCtx context.Context, pluginCtx context.Context, keyEnding string) {
