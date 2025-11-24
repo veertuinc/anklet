@@ -5,7 +5,10 @@ The Github Receiver Plugin is used to receive webhook events from github and sto
 ### What you need:
 
 1. An active database the receiver can access. For help setting up the database, see [Database Setup](https://github.com/veertuinc/anklet/tree/main?tab=readme-ov-file#database-setup). It needs to be the same database as the [Github Handler Plugin](../../handlers/github/README.md).
-1. Some sort of Auth method like a PAT or a Github App for the repo you want to receive webhooks for. They need `Administration`, `Webhooks`, and `Actions` set to `Read and write`.
+1. Some sort of Auth method like a PAT or a Github App for the repo you want to receive webhooks for. They need:
+  - Repo Receiver: `Administration`, `Webhooks`, and `Actions` set to `Read and write`.
+  - Org Receiver: Under `Organization permissions` set `Administration`, `Webhooks`, and `Self-hosted runners` to `Read and write`.
+  - IMPORTANT: Make sure to check your email to verify any permission requests.
 1. A way to receive webhooks. This can be a public URL or IP that points to the server running the Anklet Github Receiver. Github will send the webhook to this endpoint over the internet.
 
 In the `config.yml`, you can define the `github_receiver` plugin as follows:

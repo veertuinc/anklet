@@ -897,16 +897,19 @@ func cleanup(
 		}
 	}()
 
+	// Use existing database client with fast-fail settings for cleanup
+	// The existing client may have healthy pooled connections that don't require new TCP dials
+	// Creating a fresh client requires establishing new connections which can fail during shutdown
 	serviceDatabase, err := database.GetDatabaseFromContext(pluginCtx)
 	if err != nil {
 		logging.Error(pluginCtx, "error getting database from context", "error", err)
 		return
 	}
-
 	// Create a modified database client with 0 retries for fast-fail during cleanup
-	cleanupDb := *serviceDatabase
-	cleanupDb.MaxRetries = 0 // No retries during cleanup - fail immediately if connection issues
-	cleanupContext = context.WithValue(cleanupContext, config.ContextKey("database"), &cleanupDb)
+	cleanupDbCopy := *serviceDatabase
+	cleanupDbCopy.MaxRetries = 0 // No retries during cleanup - fail immediately if connection issues
+	cleanupDb := &cleanupDbCopy
+	cleanupContext = context.WithValue(cleanupContext, config.ContextKey("database"), cleanupDb)
 
 	// No timeout on context - allows Redis pool to create new connections if needed
 	// Fast-fail is achieved via MaxRetries=0 instead
@@ -2027,6 +2030,24 @@ func Run(
 
 	logging.Info(pluginCtx, "vm has enough resources now to run; starting runner")
 
+	// Validate plugin scripts exist before pulling template
+	installRunnerPath := filepath.Join(workerGlobals.PluginsPath, "handlers", "github", "install-runner.bash")
+	registerRunnerPath := filepath.Join(workerGlobals.PluginsPath, "handlers", "github", "register-runner.bash")
+	startRunnerPath := filepath.Join(workerGlobals.PluginsPath, "handlers", "github", "start-runner.bash")
+	_, installRunnerErr := os.Stat(installRunnerPath)
+	_, registerRunnerErr := os.Stat(registerRunnerPath)
+	_, startRunnerErr := os.Stat(startRunnerPath)
+	if installRunnerErr != nil || registerRunnerErr != nil || startRunnerErr != nil {
+		// logging.Error(pluginCtx, "must include install-runner.bash, register-runner.bash, and start-runner.bash in "+globals.PluginsPath+"/handlers/github/", "error", err)
+		pluginGlobals.RetryChannel <- "cancel"
+		err, _ = internalGithub.UpdateJobInDB(pluginCtx, pluginQueueName, &queuedJob)
+		if err != nil {
+			logging.Error(pluginCtx, "error updating job in db", "error", err)
+		}
+		// Don't send to JobChannel here - checkForCompletedJobs handles it via RetryChannel
+		return pluginCtx, fmt.Errorf("must include install-runner.bash, register-runner.bash, and start-runner.bash in %s/handlers/github/", workerGlobals.PluginsPath)
+	}
+
 	// See if VM Template existing already
 	if !pluginConfig.SkipPull {
 		noTemplateTagExistsInRegistryError, ensureSpaceError, genericError := ankaCLI.EnsureVMTemplateExists(workerCtx, pluginCtx, ankaTemplateUUID, ankaTemplateTag)
@@ -2169,24 +2190,6 @@ func Run(
 		return pluginCtx, fmt.Errorf("context canceled after ObtainAnkaVM")
 	}
 
-	// Install runner
-	installRunnerPath := filepath.Join(workerGlobals.PluginsPath, "handlers", "github", "install-runner.bash")
-	registerRunnerPath := filepath.Join(workerGlobals.PluginsPath, "handlers", "github", "register-runner.bash")
-	startRunnerPath := filepath.Join(workerGlobals.PluginsPath, "handlers", "github", "start-runner.bash")
-	_, installRunnerErr := os.Stat(installRunnerPath)
-	_, registerRunnerErr := os.Stat(registerRunnerPath)
-	_, startRunnerErr := os.Stat(startRunnerPath)
-	if installRunnerErr != nil || registerRunnerErr != nil || startRunnerErr != nil {
-		// logging.Error(pluginCtx, "must include install-runner.bash, register-runner.bash, and start-runner.bash in "+globals.PluginsPath+"/handlers/github/", "error", err)
-		pluginGlobals.RetryChannel <- "cancel"
-		err, _ = internalGithub.UpdateJobInDB(pluginCtx, pluginQueueName, &queuedJob)
-		if err != nil {
-			logging.Error(pluginCtx, "error updating job in db", "error", err)
-		}
-		pluginGlobals.JobChannel <- queuedJob
-		return pluginCtx, fmt.Errorf("must include install-runner.bash, register-runner.bash, and start-runner.bash in %s/handlers/github/", workerGlobals.PluginsPath)
-	}
-
 	// Copy runner scripts to VM
 	logging.Debug(pluginCtx, "copying install-runner.bash, register-runner.bash, and start-runner.bash to vm")
 	err = ankaCLI.AnkaCopyIntoVM(workerCtx, pluginCtx,
@@ -2246,7 +2249,7 @@ func Run(
 	if registerRunnerErrTimeout != nil { // retryable
 		logging.Error(pluginCtx, "timeout executing register-runner.bash", "error", registerRunnerErrTimeout)
 		pluginGlobals.RetryChannel <- "timeout_executing_register_runner_bash"
-		pluginGlobals.JobChannel <- internalGithub.QueueJob{Action: "finish"}
+		// Don't send to JobChannel here - checkForCompletedJobs handles it via RetryChannel
 		return pluginCtx, nil
 	}
 	if registerRunnerErr != nil {

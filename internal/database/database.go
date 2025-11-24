@@ -153,9 +153,13 @@ func (db *Database) retryOperation(ctx context.Context, operationName string, op
 
 func NewClient(ctx context.Context, config config.Database) (*Database, error) {
 	// Set default retry configuration if not specified
+	// Use -1 to explicitly request 0 retries (for cleanup operations)
+	// Use 0 or unset to get default of 5 retries (backwards compatible)
 	maxRetries := config.MaxRetries
-	if maxRetries == 0 {
-		maxRetries = 5 // Default to 5 retries
+	if maxRetries < 0 {
+		maxRetries = 0 // -1 means explicitly no retries (fast-fail for cleanup)
+	} else if maxRetries == 0 {
+		maxRetries = 5 // 0 means use defaults (for backwards compatibility with configs)
 	}
 
 	retryDelay := time.Duration(config.RetryDelay) * time.Millisecond

@@ -12,3 +12,6 @@ fi
 clean_anklet "receiver"
 
 start_anklet "receiver"
+
+# check that it started properly
+check_anklet_process

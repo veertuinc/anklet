@@ -887,7 +887,7 @@ func Cleanup(ctx context.Context, owner string, name string) {
 		logging.Error(ctx, "error getting database client from context", "error", err.Error())
 		return
 	}
-	
+
 	// During cleanup, skip database operations if they fail - they're not critical for shutdown
 	// Use a very short timeout to fail fast if database is having issues
 	cleanupKey := "anklet/metrics/" + owner + "/" + name
