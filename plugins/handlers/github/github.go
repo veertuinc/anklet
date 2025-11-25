@@ -849,8 +849,7 @@ func cleanup(
 	pausedQueueName string,
 	onStartRun bool,
 ) {
-
-	// create an idependent copy of the pluginCtx so we can do cleanup even if pluginCtx got "context canceled"
+	// create an independent copy of the pluginCtx so we can do cleanup even if pluginCtx got "context canceled"
 	cleanupContext := context.Background()
 
 	logger, err := logging.GetLoggerFromContext(pluginCtx)
@@ -905,14 +904,12 @@ func cleanup(
 		logging.Error(pluginCtx, "error getting database from context", "error", err)
 		return
 	}
+
 	// Create a modified database client with 0 retries for fast-fail during cleanup
 	cleanupDbCopy := *serviceDatabase
 	cleanupDbCopy.MaxRetries = 0 // No retries during cleanup - fail immediately if connection issues
 	cleanupDb := &cleanupDbCopy
 	cleanupContext = context.WithValue(cleanupContext, config.ContextKey("database"), cleanupDb)
-
-	// No timeout on context - allows Redis pool to create new connections if needed
-	// Fast-fail is achieved via MaxRetries=0 instead
 
 	databaseContainer, err := database.GetDatabaseFromContext(cleanupContext)
 	if err != nil {

@@ -322,6 +322,7 @@ func worker(
 				if !loadedConfig.Metrics.Aggregator {
 					parentLogger.WarnContext(workerCtx, "best effort graceful shutdown, interrupting the job as soon as possible...")
 				}
+
 				workerGlobals.ReturnAllToMainQueue.Store(true)
 				workerCancel()
 			}
@@ -601,7 +602,6 @@ func worker(
 						defer func() {
 							// Create a fresh context for metrics cleanup WITHOUT a deadline
 							// Database client was created with background context so it remains usable
-							// No deadline = allows Redis pool to create new connections if needed
 							metricsCleanupCtx := context.Background()
 							metricsCleanupCtx = context.WithValue(metricsCleanupCtx, config.ContextKey("logger"), capturedLogger)
 

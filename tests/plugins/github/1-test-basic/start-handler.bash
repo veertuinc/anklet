@@ -7,16 +7,39 @@ echo "==========================================="
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/helpers.bash"
 
-if [[ ${CLEAN:-false} == true || "$1" == "--clean" ]]; then
+# Called explicitly via --clean flag - sends SIGINT
+clean() {
     echo "]] Cleaning up handler..."
     clean_anklet "handler"
+}
+
+# Called from trap - just wait, don't send another signal (Ctrl+C already sent it via TTY)
+wait_for_exit() {
+    echo "]] Waiting for handler to exit..."
+    if [[ -f /tmp/anklet-pids ]]; then
+        for pid in $(cat /tmp/anklet-pids); do
+            while ps -p $pid > /dev/null 2>&1; do
+                echo "Waiting for process $pid to exit..."
+                sleep 1
+            done
+            echo "Process $pid exited"
+        done
+        rm -f /tmp/anklet-pids
+    fi
+}
+
+if [[ ${CLEAN_HANDLER:-false} == true || "$1" == "--clean" ]]; then
+    clean
     exit 0
 fi
-echo "]] Cleaning up handler..."
-clean_anklet "handler"
+
+trap 'wait_for_exit' EXIT
+
+clean
 
 echo "]] Starting handler..."
 start_anklet "handler"
+sleep 30
 
 echo "] Running tests..."
 

@@ -129,7 +129,8 @@ func (db *Database) retryOperation(ctx context.Context, operationName string, op
 			return nil
 		}
 
-		if !isRetriableError(lastErr) {
+		isRetriable := isRetriableError(lastErr)
+		if !isRetriable {
 			// logging.Debug(ctx, fmt.Sprintf("%s failed with non-retriable error: %v", operationName, lastErr))
 			return lastErr
 		}
