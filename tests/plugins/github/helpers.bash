@@ -5,9 +5,245 @@ PATH="/usr/local/bin:$PATH" # unable to find anka in path otherwise
 # Helper functions for starting and managing anklet processes
 # This will exist right next to the other bash scripts on the host machine that runs them. Be aware of paths you use.
 
+# Trigger GitHub workflow runs via API
+# Usage: trigger_workflow_runs <owner> <repo> <workflow_id> [run_count]
+# workflow_id: The workflow filename (e.g., "my-workflow.yml")
+# Requires: ANKLET_TEST_TRIGGER_GITHUB_PAT environment variable to be set
+trigger_workflow_runs() {
+    local owner="$1"
+    local repo="$2"
+    local workflow_id="$3"
+    local run_count="${4:-1}"
+
+    if [[ -z "$owner" ]]; then
+        echo "ERROR: owner is required (arg 1)"
+        return 1
+    fi
+    if [[ -z "$repo" ]]; then
+        echo "ERROR: repo is required (arg 2)"
+        return 1
+    fi
+    if [[ -z "$workflow_id" ]]; then
+        echo "ERROR: workflow_id is required (arg 3)"
+        return 1
+    fi
+    if [[ -z "${ANKLET_TEST_TRIGGER_GITHUB_PAT}" ]]; then
+        echo "ERROR: ANKLET_TEST_TRIGGER_GITHUB_PAT environment variable is required"
+        return 1
+    fi
+
+    echo "Triggering workflow runs: owner=$owner repo=$repo workflow_id=$workflow_id count=$run_count"
+
+    for ((i=1; i<=run_count; i++)); do
+        echo "[run $i/$run_count] Triggering workflow $workflow_id"
+        local response
+        response=$(curl -s -w "\n%{http_code}" \
+            -X POST \
+            -H "Authorization: Bearer ${ANKLET_TEST_TRIGGER_GITHUB_PAT}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${owner}/${repo}/actions/workflows/${workflow_id}/dispatches" \
+            -d '{"ref":"main"}')
+        
+        local http_code
+        http_code=$(echo "$response" | tail -n1)
+        local body
+        body=$(echo "$response" | sed '$d')
+        
+        if [[ "$http_code" != "204" ]]; then
+            echo "ERROR: Failed to trigger $workflow_id (HTTP $http_code): $body"
+            return 1
+        fi
+        sleep 1
+    done
+    
+    echo "Workflow trigger complete"
+}
+
+# Wait for workflow runs to complete
+# Usage: wait_for_workflow_runs_to_complete <owner> <repo> <workflow_pattern> [timeout_seconds] [expected_conclusion]
+# expected_conclusion: success, failure, cancelled, neutral, skipped, stale, timed_out, action_required
+#                      If not specified, any completion is accepted (but failure still returns error)
+# Requires: ANKLET_TEST_TRIGGER_GITHUB_PAT environment variable to be set
+wait_for_workflow_runs_to_complete() {
+    sleep 5
+
+    local owner="$1"
+    local repo="$2"
+    local workflow_pattern="$3"
+    local timeout_seconds="${4:-600}"  # Default 10 minutes
+    local expected_conclusion="${5:-}"  # Optional: success, failure, cancelled, etc.
+
+    if [[ -z "$owner" ]]; then
+        echo "ERROR: owner is required (arg 1)"
+        return 1
+    fi
+    if [[ -z "$repo" ]]; then
+        echo "ERROR: repo is required (arg 2)"
+        return 1
+    fi
+    if [[ -z "$workflow_pattern" ]]; then
+        echo "ERROR: workflow_pattern is required (arg 3)"
+        return 1
+    fi
+    if [[ -z "${ANKLET_TEST_TRIGGER_GITHUB_PAT}" ]]; then
+        echo "ERROR: ANKLET_TEST_TRIGGER_GITHUB_PAT environment variable is required"
+        return 1
+    fi
+    
+    # Validate expected_conclusion if provided
+    if [[ -n "$expected_conclusion" ]]; then
+        case "$expected_conclusion" in
+            success|failure|cancelled|neutral|skipped|stale|timed_out|action_required)
+                ;;
+            *)
+                echo "ERROR: Invalid expected_conclusion '$expected_conclusion'. Valid values: success, failure, cancelled, neutral, skipped, stale, timed_out, action_required"
+                return 1
+                ;;
+        esac
+    fi
+
+    local conclusion_msg=""
+    [[ -n "$expected_conclusion" ]] && conclusion_msg=" expecting conclusion=$expected_conclusion"
+    echo "Waiting for workflow runs to complete: owner=$owner repo=$repo pattern=$workflow_pattern timeout=${timeout_seconds}s${conclusion_msg}"
+
+    local start_time
+    start_time=$(date +%s)
+    local poll_interval=10
+    local api_url="https://api.github.com/repos/${owner}/${repo}/actions/runs?per_page=5"
+    
+    echo "[DEBUG] API URL: $api_url"
+
+    while true; do
+        local current_time
+        current_time=$(date +%s)
+        local elapsed=$((current_time - start_time))
+
+        if [[ $elapsed -ge $timeout_seconds ]]; then
+            echo "ERROR: Timeout waiting for workflow runs to complete after ${timeout_seconds}s"
+            return 1
+        fi
+
+        # Get recent workflow runs - use temp file to avoid "argument list too long"
+        local tmp_response="/tmp/workflow_runs_$$.json"
+        local http_code
+        
+        http_code=$(curl -s -w "%{http_code}" \
+            -H "Authorization: Bearer ${ANKLET_TEST_TRIGGER_GITHUB_PAT}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            -o "$tmp_response" \
+            "$api_url")
+
+        echo "[DEBUG] HTTP response code: $http_code"
+
+        if [[ "$http_code" != "200" ]]; then
+            echo "WARNING: Failed to get workflow runs (HTTP $http_code)"
+            cat "$tmp_response" 2>/dev/null || true
+            rm -f "$tmp_response"
+            sleep "$poll_interval"
+            continue
+        fi
+
+        # Debug: Show total runs and workflow paths
+        local total_runs
+        total_runs=$(jq '.workflow_runs | length' "$tmp_response" 2>/dev/null || echo "0")
+        echo "[DEBUG] Total workflow runs returned: $total_runs"
+        
+        local all_paths
+        all_paths=$(jq -r '.workflow_runs[0:10] | .[].path // "null"' "$tmp_response" 2>/dev/null || true)
+        echo "[DEBUG] First 10 workflow paths:"
+        while read -r path; do
+            echo "[DEBUG]   - $path"
+        done <<< "$all_paths"
+        
+        # Debug: Show runs matching the pattern
+        local matching_runs
+        matching_runs=$(jq -r --arg pattern "$workflow_pattern" '
+            [.workflow_runs[] | select(.path | test($pattern))] | length
+        ' "$tmp_response" 2>/dev/null || echo "0")
+        echo "[DEBUG] Runs matching pattern '$workflow_pattern': $matching_runs"
+
+        # Find workflow runs matching our pattern that are in progress or queued
+        local pending_runs
+        pending_runs=$(jq -r --arg pattern "$workflow_pattern" '
+            .workflow_runs[]
+            | select(.path | test($pattern))
+            | select(.status == "in_progress" or .status == "queued" or .status == "pending")
+            | "\(.id) \(.status) \(.name)"
+        ' "$tmp_response" 2>/dev/null || true)
+
+        local pending_count=0
+        if [[ -n "$pending_runs" ]]; then
+            pending_count=$(wc -l <<< "$pending_runs" | tr -d ' ')
+        fi
+        echo "[DEBUG] Pending runs found: $pending_count"
+
+        if [[ -z "$pending_runs" ]]; then
+            echo "All matching workflow runs have completed"
+            
+            # Show final status of recent matching runs
+            local completed_runs
+            completed_runs=$(jq -r --arg pattern "$workflow_pattern" '
+                [.workflow_runs[]
+                | select(.path | test($pattern))]
+                | .[0:5]
+                | .[]
+                | "\(.conclusion // "unknown"): \(.name) (#\(.run_number))"
+            ' "$tmp_response" 2>/dev/null || true)
+            
+            if [[ -n "$completed_runs" ]]; then
+                echo "Recent completed runs:"
+                echo "$completed_runs"
+            fi
+            
+            # Get the most recent matching run's conclusion
+            local actual_conclusion
+            actual_conclusion=$(jq -r --arg pattern "$workflow_pattern" '
+                [.workflow_runs[]
+                | select(.path | test($pattern))]
+                | .[0].conclusion // "unknown"
+            ' "$tmp_response" 2>/dev/null || echo "unknown")
+            
+            echo "[DEBUG] Most recent run conclusion: $actual_conclusion"
+            
+            rm -f "$tmp_response"
+            
+            echo "Waiting 10 seconds to ensure workflow completion is registered..."
+            sleep 10
+            
+            # If expected_conclusion is specified, check it matches
+            if [[ -n "$expected_conclusion" ]]; then
+                if [[ "$actual_conclusion" == "$expected_conclusion" ]]; then
+                    echo "Workflow completed with expected conclusion: $expected_conclusion"
+                    return 0
+                else
+                    echo "ERROR: Expected conclusion '$expected_conclusion' but got '$actual_conclusion'"
+                    return 1
+                fi
+            fi
+            
+            # Default behavior: fail if conclusion is failure
+            if [[ "$actual_conclusion" == "failure" ]]; then
+                echo "WARNING: Workflow run failed"
+                return 1
+            fi
+            
+            return 0
+        fi
+
+        echo "[${elapsed}s] Waiting for runs to complete:"
+        while read -r line; do
+            echo "  - $line"
+        done <<< "$pending_runs"
+
+        rm -f "$tmp_response"
+        sleep "$poll_interval"
+    done
+}
 
 # check if the anklet process is running
 check_anklet_process() {
+    echo "Checking for anklet process..."
+    sleep 3
     if pgrep -f "^/tmp/anklet" > /dev/null; then
         echo "Anklet process is still running"
     else
@@ -160,8 +396,8 @@ clean_anklet() {
             if ps -p $pid > /dev/null 2>&1; then
                 echo "Process info for PID $pid:"
                 ps -p $pid -o pid,ppid,comm,args
-                echo "Sending SIGINT to PID $pid..."
-                kill -SIGINT $pid || true
+                echo "Sending SIGTERM to PID $pid..."
+                kill -SIGTERM $pid || true
                 while ps -p $pid > /dev/null 2>&1; do
                     echo "Waiting for process $pid to exit..."
                     sleep 1

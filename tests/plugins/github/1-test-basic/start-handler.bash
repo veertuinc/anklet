@@ -33,28 +33,33 @@ if [[ ${CLEAN_HANDLER:-false} == true || "$1" == "--clean" ]]; then
     exit 0
 fi
 
-trap 'wait_for_exit' EXIT
+trap 'wait_for_exit' SIGTERM SIGINT
+trap 'clean' ERR
 
 clean
 
 echo "]] Starting handler..."
 start_anklet "handler"
 sleep 30
-
-echo "] Running tests..."
-
 # check that it started properly
 check_anklet_process
 
-sleep 800 # wait for the handler to start and do a single no queue jobs found for the logs
+echo "] Running tests..."
 
 echo "]] Triggering workflow runs..."
-# # trigger the api call to trigger the workflow run
-# ../trigger-workflow-runs.bash "veertuinc" "anklet" 1 "t2-6c14r-1.yml"
+if ! trigger_workflow_runs "veertuinc" "anklet" "t2-6c14r-1.yml" 1; then
+    echo "ERROR: Failed to trigger workflow runs"
+    clean
+    exit 1
+fi
+if ! wait_for_workflow_runs_to_complete "veertuinc" "anklet" "t2-6c14r-1"; then
+    echo "ERROR: Failed to wait for workflow runs to complete"
+    clean
+    exit 1
+fi
 check_anklet_process
 
-# # wait for the workflow to run to finish
-# ../wait-workflow-completion.bash "veertuinc" "anklet" "t2-6c14r-1.yml" 3
+clean
 
 # wait for the logs of the handler to show the expected output
 echo "==========================================="
