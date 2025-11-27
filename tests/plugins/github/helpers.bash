@@ -70,8 +70,8 @@ wait_for_workflow_runs_to_complete() {
     local owner="$1"
     local repo="$2"
     local workflow_pattern="$3"
-    local timeout_seconds="${4:-600}"  # Default 10 minutes
-    local expected_conclusion="${5:-}"  # Optional: success, failure, cancelled, etc.
+    local expected_conclusion="${4:-}"  # Optional: success, failure, cancelled, etc.
+    local timeout_seconds="${5:-600}"  # Default 10 minutes
 
     if [[ -z "$owner" ]]; then
         echo "ERROR: owner is required (arg 1)"
@@ -413,6 +413,435 @@ clean_anklet() {
     # after cleanup completes, using: check_duplicate_keys "user@host"
 }
 
+# Get workflow run logs from GitHub and save to files
+# Usage: get_workflow_run_logs <owner> <repo> <workflow_pattern> [run_index]
+# workflow_pattern: Regex pattern to match workflow path (e.g., "1-test-basic")
+# run_index: Which matching run to get logs for (0 = most recent, default)
+# Outputs: File paths (one per line) to stdout for each job's logs
+# Capture into array (Bash 3.x compatible):
+#   log_files=()
+#   while IFS= read -r line; do log_files+=("$line"); done < <(get_workflow_run_logs ...)
+# Requires: ANKLET_TEST_TRIGGER_GITHUB_PAT environment variable to be set
+# Note: Call cleanup_log_files "${log_files[@]}" when done
+get_workflow_run_logs() {
+    local owner="$1"
+    local repo="$2"
+    local workflow_pattern="$3"
+    local run_index="${4:-0}"
+
+    if [[ -z "$owner" ]]; then
+        echo "ERROR: owner is required (arg 1)" >&2
+        return 1
+    fi
+    if [[ -z "$repo" ]]; then
+        echo "ERROR: repo is required (arg 2)" >&2
+        return 1
+    fi
+    if [[ -z "$workflow_pattern" ]]; then
+        echo "ERROR: workflow_pattern is required (arg 3)" >&2
+        return 1
+    fi
+    if [[ -z "${ANKLET_TEST_TRIGGER_GITHUB_PAT}" ]]; then
+        echo "ERROR: ANKLET_TEST_TRIGGER_GITHUB_PAT environment variable is required" >&2
+        return 1
+    fi
+
+    echo "Getting workflow run logs: owner=$owner repo=$repo pattern=$workflow_pattern run_index=$run_index" >&2
+
+    # Get recent workflow runs
+    local tmp_runs="/tmp/workflow_runs_logs_$$.json"
+    local api_url="https://api.github.com/repos/${owner}/${repo}/actions/runs?per_page=20"
+    
+    local http_code
+    http_code=$(curl -s -w "%{http_code}" \
+        -H "Authorization: Bearer ${ANKLET_TEST_TRIGGER_GITHUB_PAT}" \
+        -H "Accept: application/vnd.github.v3+json" \
+        -o "$tmp_runs" \
+        "$api_url")
+
+    if [[ "$http_code" != "200" ]]; then
+        echo "ERROR: Failed to get workflow runs (HTTP $http_code)" >&2
+        cat "$tmp_runs" >&2 2>/dev/null || true
+        rm -f "$tmp_runs"
+        return 1
+    fi
+
+    # Find the run at the specified index matching our pattern
+    local run_id
+    run_id=$(jq -r --arg pattern "$workflow_pattern" --argjson idx "$run_index" '
+        [.workflow_runs[] | select(.path | test($pattern))]
+        | .[$idx].id // empty
+    ' "$tmp_runs")
+
+    if [[ -z "$run_id" ]]; then
+        echo "ERROR: No workflow run found matching pattern '$workflow_pattern' at index $run_index" >&2
+        rm -f "$tmp_runs"
+        return 1
+    fi
+
+    local run_name
+    run_name=$(jq -r --arg pattern "$workflow_pattern" --argjson idx "$run_index" '
+        [.workflow_runs[] | select(.path | test($pattern))]
+        | .[$idx].name // "unknown"
+    ' "$tmp_runs")
+
+    local run_conclusion
+    run_conclusion=$(jq -r --arg pattern "$workflow_pattern" --argjson idx "$run_index" '
+        [.workflow_runs[] | select(.path | test($pattern))]
+        | .[$idx].conclusion // "unknown"
+    ' "$tmp_runs")
+
+    echo "Found workflow run: id=$run_id name='$run_name' conclusion=$run_conclusion" >&2
+    rm -f "$tmp_runs"
+
+    # Get jobs for this run
+    local tmp_jobs="/tmp/workflow_jobs_$$.json"
+    local jobs_url="https://api.github.com/repos/${owner}/${repo}/actions/runs/${run_id}/jobs"
+    
+    http_code=$(curl -s -w "%{http_code}" \
+        -H "Authorization: Bearer ${ANKLET_TEST_TRIGGER_GITHUB_PAT}" \
+        -H "Accept: application/vnd.github.v3+json" \
+        -o "$tmp_jobs" \
+        "$jobs_url")
+
+    if [[ "$http_code" != "200" ]]; then
+        echo "ERROR: Failed to get jobs for run $run_id (HTTP $http_code)" >&2
+        cat "$tmp_jobs" >&2 2>/dev/null || true
+        rm -f "$tmp_jobs"
+        return 1
+    fi
+
+    # Get all job IDs
+    local job_ids
+    job_ids=$(jq -r '.jobs[].id' "$tmp_jobs")
+
+    if [[ -z "$job_ids" ]]; then
+        echo "ERROR: No jobs found for run $run_id" >&2
+        rm -f "$tmp_jobs"
+        return 1
+    fi
+
+    local job_count
+    job_count=$(jq '.jobs | length' "$tmp_jobs")
+    echo "Found $job_count job(s) in run $run_id" >&2
+
+    # Create logs directory for this run
+    local logs_dir="/tmp/workflow_logs_${run_id}"
+    mkdir -p "$logs_dir"
+
+    # Download logs for each job and save to files
+    while read -r job_id; do
+        local job_name
+        job_name=$(jq -r --argjson jid "$job_id" '.jobs[] | select(.id == $jid) | .name' "$tmp_jobs")
+        
+        # Sanitize job name for filename (replace spaces and special chars with underscores)
+        local safe_job_name
+        safe_job_name=$(echo "$job_name" | tr ' /:' '_' | tr -cd '[:alnum:]_-')
+        
+        local log_file="${logs_dir}/${safe_job_name}_${job_id}.log"
+        
+        echo "Downloading logs for job: id=$job_id name='$job_name' -> $log_file" >&2
+        
+        local log_url="https://api.github.com/repos/${owner}/${repo}/actions/jobs/${job_id}/logs"
+        
+        # GitHub returns a 302 redirect to the actual log content
+        http_code=$(curl -s -w "%{http_code}" -L \
+            -H "Authorization: Bearer ${ANKLET_TEST_TRIGGER_GITHUB_PAT}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            -o "$log_file" \
+            "$log_url")
+
+        if [[ "$http_code" != "200" ]]; then
+            echo "WARNING: Failed to get logs for job $job_id (HTTP $http_code)" >&2
+            rm -f "$log_file"
+            continue
+        fi
+
+        # Output the file path to stdout (for array capture)
+        echo "$log_file"
+        
+    done <<< "$job_ids"
+
+    rm -f "$tmp_jobs"
+    
+    echo "Log retrieval complete. Logs saved to: $logs_dir" >&2
+    return 0
+}
+
+# =============================================================================
+# Log Assertion Functions
+# =============================================================================
+# These functions are designed to work with log file arrays from get_workflow_run_logs
+# All assertion functions return 0 on success, 1 on failure
+
+# Assert that a pattern exists in ANY of the log files
+# Usage: assert_logs_contain <pattern> <log_file1> [log_file2] ...
+# Example: assert_logs_contain "hostname: my-vm" "${log_files[@]}"
+assert_logs_contain() {
+    local pattern="$1"
+    shift
+    local log_files=("$@")
+
+    if [[ -z "$pattern" ]]; then
+        echo "ERROR: pattern is required (arg 1)" >&2
+        return 1
+    fi
+    if [[ ${#log_files[@]} -eq 0 ]]; then
+        echo "ERROR: at least one log file is required" >&2
+        return 1
+    fi
+
+    for log_file in "${log_files[@]}"; do
+        if [[ ! -f "$log_file" ]]; then
+            echo "WARNING: Log file not found: $log_file" >&2
+            continue
+        fi
+        if grep -q "$pattern" "$log_file"; then
+            echo "✓ PASS: Pattern '$pattern' found in $log_file"
+            return 0
+        fi
+    done
+
+    echo "✗ FAIL: Pattern '$pattern' not found in any log file" >&2
+    echo "  Searched files:" >&2
+    for log_file in "${log_files[@]}"; do
+        echo "    - $log_file" >&2
+    done
+    return 1
+}
+
+# Assert that a pattern exists in ALL of the log files
+# Usage: assert_all_logs_contain <pattern> <log_file1> [log_file2] ...
+# Example: assert_all_logs_contain "Runner started" "${log_files[@]}"
+assert_all_logs_contain() {
+    local pattern="$1"
+    shift
+    local log_files=("$@")
+
+    if [[ -z "$pattern" ]]; then
+        echo "ERROR: pattern is required (arg 1)" >&2
+        return 1
+    fi
+    if [[ ${#log_files[@]} -eq 0 ]]; then
+        echo "ERROR: at least one log file is required" >&2
+        return 1
+    fi
+
+    local failed_files=()
+    for log_file in "${log_files[@]}"; do
+        if [[ ! -f "$log_file" ]]; then
+            echo "WARNING: Log file not found: $log_file" >&2
+            failed_files+=("$log_file (not found)")
+            continue
+        fi
+        if ! grep -q "$pattern" "$log_file"; then
+            failed_files+=("$log_file")
+        fi
+    done
+
+    if [[ ${#failed_files[@]} -eq 0 ]]; then
+        echo "✓ PASS: Pattern '$pattern' found in all ${#log_files[@]} log file(s)"
+        return 0
+    fi
+
+    echo "✗ FAIL: Pattern '$pattern' not found in ${#failed_files[@]} log file(s):" >&2
+    for f in "${failed_files[@]}"; do
+        echo "    - $f" >&2
+    done
+    return 1
+}
+
+# Assert that a pattern does NOT exist in ANY of the log files
+# Usage: assert_logs_not_contain <pattern> <log_file1> [log_file2] ...
+# Example: assert_logs_not_contain "ERROR" "${log_files[@]}"
+assert_logs_not_contain() {
+    local pattern="$1"
+    shift
+    local log_files=("$@")
+
+    if [[ -z "$pattern" ]]; then
+        echo "ERROR: pattern is required (arg 1)" >&2
+        return 1
+    fi
+    if [[ ${#log_files[@]} -eq 0 ]]; then
+        echo "ERROR: at least one log file is required" >&2
+        return 1
+    fi
+
+    local found_files=()
+    for log_file in "${log_files[@]}"; do
+        if [[ ! -f "$log_file" ]]; then
+            continue
+        fi
+        if grep -q "$pattern" "$log_file"; then
+            found_files+=("$log_file")
+        fi
+    done
+
+    if [[ ${#found_files[@]} -eq 0 ]]; then
+        echo "✓ PASS: Pattern '$pattern' not found in any log file (as expected)"
+        return 0
+    fi
+
+    echo "✗ FAIL: Pattern '$pattern' unexpectedly found in ${#found_files[@]} log file(s):" >&2
+    for f in "${found_files[@]}"; do
+        echo "    - $f" >&2
+        echo "      Matching lines:" >&2
+        grep "$pattern" "$f" | head -3 | sed 's/^/        /' >&2
+    done
+    return 1
+}
+
+# Assert pattern match count in log files
+# Usage: assert_logs_match_count <pattern> <expected_count> <log_file1> [log_file2] ...
+# Example: assert_logs_match_count "Job completed" 1 "${log_files[@]}"
+assert_logs_match_count() {
+    local pattern="$1"
+    local expected_count="$2"
+    shift 2
+    local log_files=("$@")
+
+    if [[ -z "$pattern" ]]; then
+        echo "ERROR: pattern is required (arg 1)" >&2
+        return 1
+    fi
+    if [[ -z "$expected_count" ]]; then
+        echo "ERROR: expected_count is required (arg 2)" >&2
+        return 1
+    fi
+    if [[ ${#log_files[@]} -eq 0 ]]; then
+        echo "ERROR: at least one log file is required" >&2
+        return 1
+    fi
+
+    local actual_count=0
+    for log_file in "${log_files[@]}"; do
+        if [[ ! -f "$log_file" ]]; then
+            continue
+        fi
+        local file_count
+        file_count=$(grep -c "$pattern" "$log_file" 2>/dev/null || echo "0")
+        actual_count=$((actual_count + file_count))
+    done
+
+    if [[ "$actual_count" -eq "$expected_count" ]]; then
+        echo "✓ PASS: Pattern '$pattern' found $actual_count time(s) (expected $expected_count)"
+        return 0
+    fi
+
+    echo "✗ FAIL: Pattern '$pattern' found $actual_count time(s), expected $expected_count" >&2
+    return 1
+}
+
+# Assert that a specific log file contains a pattern
+# Usage: assert_log_file_contains <log_file> <pattern>
+# Example: assert_log_file_contains "${log_files[0]}" "hostname: my-vm"
+assert_log_file_contains() {
+    local log_file="$1"
+    local pattern="$2"
+
+    if [[ -z "$log_file" ]]; then
+        echo "ERROR: log_file is required (arg 1)" >&2
+        return 1
+    fi
+    if [[ -z "$pattern" ]]; then
+        echo "ERROR: pattern is required (arg 2)" >&2
+        return 1
+    fi
+    if [[ ! -f "$log_file" ]]; then
+        echo "✗ FAIL: Log file not found: $log_file" >&2
+        return 1
+    fi
+
+    if grep -q "$pattern" "$log_file"; then
+        echo "✓ PASS: Pattern '$pattern' found in $(basename "$log_file")"
+        return 0
+    fi
+
+    echo "✗ FAIL: Pattern '$pattern' not found in $(basename "$log_file")" >&2
+    return 1
+}
+
+# Assert that a specific log file does NOT contain a pattern
+# Usage: assert_log_file_not_contains <log_file> <pattern>
+# Example: assert_log_file_not_contains "${log_files[0]}" "FATAL"
+assert_log_file_not_contains() {
+    local log_file="$1"
+    local pattern="$2"
+
+    if [[ -z "$log_file" ]]; then
+        echo "ERROR: log_file is required (arg 1)" >&2
+        return 1
+    fi
+    if [[ -z "$pattern" ]]; then
+        echo "ERROR: pattern is required (arg 2)" >&2
+        return 1
+    fi
+    if [[ ! -f "$log_file" ]]; then
+        echo "✗ FAIL: Log file not found: $log_file" >&2
+        return 1
+    fi
+
+    if grep -q "$pattern" "$log_file"; then
+        echo "✗ FAIL: Pattern '$pattern' unexpectedly found in $(basename "$log_file")" >&2
+        echo "  Matching lines:" >&2
+        grep "$pattern" "$log_file" | head -3 | sed 's/^/    /' >&2
+        return 1
+    fi
+
+    echo "✓ PASS: Pattern '$pattern' not found in $(basename "$log_file") (as expected)"
+    return 0
+}
+
+# Print log file contents for debugging (useful when assertions fail)
+# Usage: print_log_files <log_file1> [log_file2] ...
+# Example: print_log_files "${log_files[@]}"
+print_log_files() {
+    local log_files=("$@")
+
+    if [[ ${#log_files[@]} -eq 0 ]]; then
+        echo "No log files to print"
+        return 0
+    fi
+
+    for log_file in "${log_files[@]}"; do
+        echo "========== $(basename "$log_file") =========="
+        if [[ -f "$log_file" ]]; then
+            cat "$log_file"
+        else
+            echo "(file not found)"
+        fi
+        echo "========== END $(basename "$log_file") =========="
+        echo ""
+    done
+}
+
+# Clean up log files created by get_workflow_run_logs
+# Usage: cleanup_log_files <log_file1> [log_file2] ...
+# Example: cleanup_log_files "${log_files[@]}"
+cleanup_log_files() {
+    local log_files=("$@")
+
+    if [[ ${#log_files[@]} -eq 0 ]]; then
+        return 0
+    fi
+
+    # Get the directory from the first file and remove the whole directory
+    local log_dir
+    log_dir=$(dirname "${log_files[0]}")
+    
+    if [[ "$log_dir" == /tmp/workflow_logs_* ]]; then
+        rm -rf "$log_dir"
+        echo "Cleaned up log directory: $log_dir"
+    else
+        # Fallback: remove individual files
+        rm -f "${log_files[@]}"
+        echo "Cleaned up ${#log_files[@]} log file(s)"
+    fi
+}
+
+# =============================================================================
+
 # Start anklet with nohup, background it, and track PIDs for cleanup
 start_anklet() {
     local service_name="${1:-anklet}"
@@ -422,7 +851,7 @@ start_anklet() {
     export LOG_LEVEL=${LOG_LEVEL:-dev}
     echo "LOG_LEVEL: $LOG_LEVEL"
     nohup /tmp/anklet > /tmp/anklet.log 2>&1 &
-    disown "$!"
+    disown
     
     # Wait a moment to ensure the process starts
     sleep 1

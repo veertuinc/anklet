@@ -1,16 +1,18 @@
 #!/usr/bin/env bash
 set -eo pipefail
+SCRIPT_NAME="$(basename "${BASH_SOURCE[0]}")"
 echo "==========================================="
-echo "START start-handler.bash"
+echo "START ${SCRIPT_NAME}"
 echo "==========================================="
 # Source the helper functions
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/helpers.bash"
 
 # Called explicitly via --clean flag - sends SIGINT
-clean() {
+clean_and_exit() {
     echo "]] Cleaning up handler..."
     clean_anklet "handler"
+    exit 0
 }
 
 # Called from trap - just wait, don't send another signal (Ctrl+C already sent it via TTY)
@@ -28,40 +30,22 @@ wait_for_exit() {
     fi
 }
 
+trap 'wait_for_exit' SIGTERM SIGINT
+
 if [[ ${CLEAN_HANDLER:-false} == true || "$1" == "--clean" ]]; then
-    clean
-    exit 0
+    clean_and_exit
 fi
 
-trap 'wait_for_exit' SIGTERM SIGINT
-trap 'clean' ERR
-
-clean
+clean_anklet "handler"
 
 echo "]] Starting handler..."
 start_anklet "handler"
+# sleep for 30 seconds to ensure the handler is started properly
 sleep 30
 # check that it started properly
 check_anklet_process
 
-echo "] Running tests..."
-
-echo "]] Triggering workflow runs..."
-if ! trigger_workflow_runs "veertuinc" "anklet" "t2-6c14r-1.yml" 1; then
-    echo "ERROR: Failed to trigger workflow runs"
-    clean
-    exit 1
-fi
-if ! wait_for_workflow_runs_to_complete "veertuinc" "anklet" "t2-6c14r-1"; then
-    echo "ERROR: Failed to wait for workflow runs to complete"
-    clean
-    exit 1
-fi
-check_anklet_process
-
-clean
-
 # wait for the logs of the handler to show the expected output
 echo "==========================================="
-echo "END start-handler.bash"
+echo "END ${SCRIPT_NAME}"
 echo "==========================================="
