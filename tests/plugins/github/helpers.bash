@@ -5,6 +5,112 @@ PATH="/usr/local/bin:$PATH" # unable to find anka in path otherwise
 # Helper functions for starting and managing anklet processes
 # This will exist right next to the other bash scripts on the host machine that runs them. Be aware of paths you use.
 
+# =============================================================================
+# Test Report Tracking Functions
+# =============================================================================
+# These functions track test results and generate reports
+# Initialize these in your test.bash before using assertions
+
+TEST_REPORT_FILE="${TEST_REPORT_FILE:-/tmp/test-report.txt}"
+TEST_RESULTS=()
+TEST_PASSED=0
+TEST_FAILED=0
+CURRENT_TEST_NAME=""
+CURRENT_TEST_EXPECTED=""
+CURRENT_TEST_RECORDED=false
+
+# Initialize test report file
+# Usage: init_test_report <test_dir_name>
+init_test_report() {
+    local test_dir_name="$1"
+    TEST_REPORT_FILE="${TEST_REPORT_FILE:-/tmp/test-report-${test_dir_name}.txt}"
+    echo "TEST_REPORT_START" > "$TEST_REPORT_FILE"
+    echo "test_dir=$test_dir_name" >> "$TEST_REPORT_FILE"
+    echo "start_time=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$TEST_REPORT_FILE"
+    echo "---" >> "$TEST_REPORT_FILE"
+}
+
+# Begin a test - call before running workflow
+# Usage: begin_test <test_name> <expected_conclusion>
+begin_test() {
+    CURRENT_TEST_NAME="$1"
+    CURRENT_TEST_EXPECTED="$2"
+    CURRENT_TEST_RECORDED=false
+    echo ""
+    echo "############"
+    echo "# ${CURRENT_TEST_NAME} (expected: ${CURRENT_TEST_EXPECTED})"
+}
+
+# Record test passed (only records once per test)
+# Usage: record_pass
+record_pass() {
+    if [[ "$CURRENT_TEST_RECORDED" == "true" ]]; then
+        return 0
+    fi
+    CURRENT_TEST_RECORDED=true
+    TEST_PASSED=$((TEST_PASSED + 1))
+    echo "PASS|${CURRENT_TEST_NAME}|${CURRENT_TEST_EXPECTED}|" >> "$TEST_REPORT_FILE"
+    echo "✓ PASS: ${CURRENT_TEST_NAME}"
+    TEST_RESULTS+=("PASS|${CURRENT_TEST_NAME}|${CURRENT_TEST_EXPECTED}|")
+    echo "############"
+}
+
+# Record test failed (only records once per test)
+# Usage: record_fail <error_message>
+record_fail() {
+    if [[ "$CURRENT_TEST_RECORDED" == "true" ]]; then
+        return 1
+    fi
+    CURRENT_TEST_RECORDED=true
+    local error_msg="${1:-test failed}"
+    TEST_FAILED=$((TEST_FAILED + 1))
+    echo "FAIL|${CURRENT_TEST_NAME}|${CURRENT_TEST_EXPECTED}|${error_msg}" >> "$TEST_REPORT_FILE"
+    echo "✗ FAIL: ${CURRENT_TEST_NAME} - ${error_msg}"
+    TEST_RESULTS+=("FAIL|${CURRENT_TEST_NAME}|${CURRENT_TEST_EXPECTED}|${error_msg}")
+    echo "############"
+    return 1
+}
+
+# End test with cleanup (always call after assertions)
+# Usage: end_test
+end_test() {
+    check_anklet_process
+    cleanup_log_files "${WORKFLOW_LOG_FILES[@]}"
+}
+
+# Finalize and print test report
+# Usage: finalize_test_report <test_dir_name>
+finalize_test_report() {
+    local test_dir_name="$1"
+    echo "---" >> "$TEST_REPORT_FILE"
+    echo "end_time=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$TEST_REPORT_FILE"
+    echo "total=$((TEST_PASSED + TEST_FAILED))" >> "$TEST_REPORT_FILE"
+    echo "passed=$TEST_PASSED" >> "$TEST_REPORT_FILE"
+    echo "failed=$TEST_FAILED" >> "$TEST_REPORT_FILE"
+    echo "TEST_REPORT_END" >> "$TEST_REPORT_FILE"
+
+    echo ""
+    echo "==========================================="
+    echo "TEST SUMMARY: $test_dir_name"
+    echo "==========================================="
+    echo "Total:  $((TEST_PASSED + TEST_FAILED))"
+    echo "Passed: $TEST_PASSED"
+    echo "Failed: $TEST_FAILED"
+    echo ""
+    echo "Results:"
+    for result in "${TEST_RESULTS[@]}"; do
+        IFS='|' read -r status workflow expected error <<< "$result"
+        if [[ "$status" == "PASS" ]]; then
+            echo "  ✓ ${workflow} (${expected})"
+        else
+            echo "  ✗ ${workflow} (${expected}) - ${error}"
+        fi
+    done
+    echo "==========================================="
+}
+
+# =============================================================================
+
 # Trigger GitHub workflow runs via API
 # Usage: trigger_workflow_runs <owner> <repo> <workflow_id> [run_count]
 # workflow_id: The workflow filename (e.g., "my-workflow.yml")
@@ -575,6 +681,7 @@ get_workflow_run_logs() {
 # All assertion functions return 0 on success, 1 on failure
 
 # Assert that a pattern exists in ANY of the log files
+# Automatically calls record_fail if assertion fails
 # Usage: assert_logs_contain <pattern> <log_file1> [log_file2] ...
 # Example: assert_logs_contain "hostname: my-vm" "${log_files[@]}"
 assert_logs_contain() {
@@ -584,10 +691,12 @@ assert_logs_contain() {
 
     if [[ -z "$pattern" ]]; then
         echo "ERROR: pattern is required (arg 1)" >&2
+        record_fail "assert_logs_contain: pattern is required"
         return 1
     fi
     if [[ ${#log_files[@]} -eq 0 ]]; then
         echo "ERROR: at least one log file is required" >&2
+        record_fail "assert_logs_contain: no log files provided"
         return 1
     fi
 
@@ -597,20 +706,18 @@ assert_logs_contain() {
             continue
         fi
         if grep -q "$pattern" "$log_file"; then
-            echo "✓ PASS: Pattern '$pattern' found in $log_file"
+            echo "✓ Pattern '$pattern' found in $log_file"
             return 0
         fi
     done
 
-    echo "✗ FAIL: Pattern '$pattern' not found in any log file" >&2
-    echo "  Searched files:" >&2
-    for log_file in "${log_files[@]}"; do
-        echo "    - $log_file" >&2
-    done
+    echo "✗ Pattern '$pattern' not found in any log file" >&2
+    record_fail "pattern '$pattern' not found in logs"
     return 1
 }
 
 # Assert that a pattern exists in ALL of the log files
+# Automatically calls record_fail if assertion fails
 # Usage: assert_all_logs_contain <pattern> <log_file1> [log_file2] ...
 # Example: assert_all_logs_contain "Runner started" "${log_files[@]}"
 assert_all_logs_contain() {
@@ -620,10 +727,12 @@ assert_all_logs_contain() {
 
     if [[ -z "$pattern" ]]; then
         echo "ERROR: pattern is required (arg 1)" >&2
+        record_fail "assert_all_logs_contain: pattern is required"
         return 1
     fi
     if [[ ${#log_files[@]} -eq 0 ]]; then
         echo "ERROR: at least one log file is required" >&2
+        record_fail "assert_all_logs_contain: no log files provided"
         return 1
     fi
 
@@ -640,18 +749,20 @@ assert_all_logs_contain() {
     done
 
     if [[ ${#failed_files[@]} -eq 0 ]]; then
-        echo "✓ PASS: Pattern '$pattern' found in all ${#log_files[@]} log file(s)"
+        echo "✓ Pattern '$pattern' found in all ${#log_files[@]} log file(s)"
         return 0
     fi
 
-    echo "✗ FAIL: Pattern '$pattern' not found in ${#failed_files[@]} log file(s):" >&2
+    echo "✗ Pattern '$pattern' not found in ${#failed_files[@]} log file(s):" >&2
     for f in "${failed_files[@]}"; do
         echo "    - $f" >&2
     done
+    record_fail "pattern '$pattern' not found in all logs"
     return 1
 }
 
 # Assert that a pattern does NOT exist in ANY of the log files
+# Automatically calls record_fail if assertion fails
 # Usage: assert_logs_not_contain <pattern> <log_file1> [log_file2] ...
 # Example: assert_logs_not_contain "ERROR" "${log_files[@]}"
 assert_logs_not_contain() {
@@ -661,10 +772,12 @@ assert_logs_not_contain() {
 
     if [[ -z "$pattern" ]]; then
         echo "ERROR: pattern is required (arg 1)" >&2
+        record_fail "assert_logs_not_contain: pattern is required"
         return 1
     fi
     if [[ ${#log_files[@]} -eq 0 ]]; then
         echo "ERROR: at least one log file is required" >&2
+        record_fail "assert_logs_not_contain: no log files provided"
         return 1
     fi
 
@@ -679,20 +792,22 @@ assert_logs_not_contain() {
     done
 
     if [[ ${#found_files[@]} -eq 0 ]]; then
-        echo "✓ PASS: Pattern '$pattern' not found in any log file (as expected)"
+        echo "✓ Pattern '$pattern' not found in any log file (as expected)"
         return 0
     fi
 
-    echo "✗ FAIL: Pattern '$pattern' unexpectedly found in ${#found_files[@]} log file(s):" >&2
+    echo "✗ Pattern '$pattern' unexpectedly found in ${#found_files[@]} log file(s):" >&2
     for f in "${found_files[@]}"; do
         echo "    - $f" >&2
         echo "      Matching lines:" >&2
         grep "$pattern" "$f" | head -3 | sed 's/^/        /' >&2
     done
+    record_fail "pattern '$pattern' unexpectedly found in logs"
     return 1
 }
 
 # Assert pattern match count in log files
+# Automatically calls record_fail if assertion fails
 # Usage: assert_logs_match_count <pattern> <expected_count> <log_file1> [log_file2] ...
 # Example: assert_logs_match_count "Job completed" 1 "${log_files[@]}"
 assert_logs_match_count() {
@@ -703,14 +818,17 @@ assert_logs_match_count() {
 
     if [[ -z "$pattern" ]]; then
         echo "ERROR: pattern is required (arg 1)" >&2
+        record_fail "assert_logs_match_count: pattern is required"
         return 1
     fi
     if [[ -z "$expected_count" ]]; then
         echo "ERROR: expected_count is required (arg 2)" >&2
+        record_fail "assert_logs_match_count: expected_count is required"
         return 1
     fi
     if [[ ${#log_files[@]} -eq 0 ]]; then
         echo "ERROR: at least one log file is required" >&2
+        record_fail "assert_logs_match_count: no log files provided"
         return 1
     fi
 
@@ -725,15 +843,17 @@ assert_logs_match_count() {
     done
 
     if [[ "$actual_count" -eq "$expected_count" ]]; then
-        echo "✓ PASS: Pattern '$pattern' found $actual_count time(s) (expected $expected_count)"
+        echo "✓ Pattern '$pattern' found $actual_count time(s) (expected $expected_count)"
         return 0
     fi
 
-    echo "✗ FAIL: Pattern '$pattern' found $actual_count time(s), expected $expected_count" >&2
+    echo "✗ Pattern '$pattern' found $actual_count time(s), expected $expected_count" >&2
+    record_fail "pattern '$pattern' count mismatch: got $actual_count, expected $expected_count"
     return 1
 }
 
 # Assert that a specific log file contains a pattern
+# Automatically calls record_fail if assertion fails
 # Usage: assert_log_file_contains <log_file> <pattern>
 # Example: assert_log_file_contains "${log_files[0]}" "hostname: my-vm"
 assert_log_file_contains() {
@@ -742,27 +862,32 @@ assert_log_file_contains() {
 
     if [[ -z "$log_file" ]]; then
         echo "ERROR: log_file is required (arg 1)" >&2
+        record_fail "assert_log_file_contains: log_file is required"
         return 1
     fi
     if [[ -z "$pattern" ]]; then
         echo "ERROR: pattern is required (arg 2)" >&2
+        record_fail "assert_log_file_contains: pattern is required"
         return 1
     fi
     if [[ ! -f "$log_file" ]]; then
-        echo "✗ FAIL: Log file not found: $log_file" >&2
+        echo "✗ Log file not found: $log_file" >&2
+        record_fail "log file not found: $log_file"
         return 1
     fi
 
     if grep -q "$pattern" "$log_file"; then
-        echo "✓ PASS: Pattern '$pattern' found in $(basename "$log_file")"
+        echo "✓ Pattern '$pattern' found in $(basename "$log_file")"
         return 0
     fi
 
-    echo "✗ FAIL: Pattern '$pattern' not found in $(basename "$log_file")" >&2
+    echo "✗ Pattern '$pattern' not found in $(basename "$log_file")" >&2
+    record_fail "pattern '$pattern' not found in $(basename "$log_file")"
     return 1
 }
 
 # Assert that a specific log file does NOT contain a pattern
+# Automatically calls record_fail if assertion fails
 # Usage: assert_log_file_not_contains <log_file> <pattern>
 # Example: assert_log_file_not_contains "${log_files[0]}" "FATAL"
 assert_log_file_not_contains() {
@@ -771,25 +896,29 @@ assert_log_file_not_contains() {
 
     if [[ -z "$log_file" ]]; then
         echo "ERROR: log_file is required (arg 1)" >&2
+        record_fail "assert_log_file_not_contains: log_file is required"
         return 1
     fi
     if [[ -z "$pattern" ]]; then
         echo "ERROR: pattern is required (arg 2)" >&2
+        record_fail "assert_log_file_not_contains: pattern is required"
         return 1
     fi
     if [[ ! -f "$log_file" ]]; then
-        echo "✗ FAIL: Log file not found: $log_file" >&2
+        echo "✗ Log file not found: $log_file" >&2
+        record_fail "log file not found: $log_file"
         return 1
     fi
 
     if grep -q "$pattern" "$log_file"; then
-        echo "✗ FAIL: Pattern '$pattern' unexpectedly found in $(basename "$log_file")" >&2
+        echo "✗ Pattern '$pattern' unexpectedly found in $(basename "$log_file")" >&2
         echo "  Matching lines:" >&2
         grep "$pattern" "$log_file" | head -3 | sed 's/^/    /' >&2
+        record_fail "pattern '$pattern' unexpectedly found in $(basename "$log_file")"
         return 1
     fi
 
-    echo "✓ PASS: Pattern '$pattern' not found in $(basename "$log_file") (as expected)"
+    echo "✓ Pattern '$pattern' not found in $(basename "$log_file") (as expected)"
     return 0
 }
 
@@ -838,6 +967,82 @@ cleanup_log_files() {
         rm -f "${log_files[@]}"
         echo "Cleaned up ${#log_files[@]} log file(s)"
     fi
+}
+
+# =============================================================================
+# High-Level Test Helper Functions
+# =============================================================================
+# These functions combine multiple low-level operations for cleaner test files
+
+# Run a workflow and get logs: trigger, wait, get logs
+# Sets the global WORKFLOW_LOG_FILES array with log file paths
+# Usage: run_workflow_and_get_logs <owner> <repo> <workflow_name> <expected_conclusion> [run_count]
+# Example: 
+#   run_workflow_and_get_logs "veertuinc" "anklet" "t2-6c14r-1" "success"
+#   assert_logs_contain "pattern" "${WORKFLOW_LOG_FILES[@]}"
+#   cleanup_log_files "${WORKFLOW_LOG_FILES[@]}"
+# Returns: 0 on success, 1 on failure
+WORKFLOW_LOG_FILES=()
+run_workflow_and_get_logs() {
+    local owner="$1"
+    local repo="$2"
+    local workflow_name="$3"
+    local expected_conclusion="$4"
+    local run_count="${5:-1}"
+
+    # Reset global array
+    WORKFLOW_LOG_FILES=()
+
+    if [[ -z "$owner" ]]; then
+        echo "ERROR: owner is required (arg 1)" >&2
+        return 1
+    fi
+    if [[ -z "$repo" ]]; then
+        echo "ERROR: repo is required (arg 2)" >&2
+        return 1
+    fi
+    if [[ -z "$workflow_name" ]]; then
+        echo "ERROR: workflow_name is required (arg 3)" >&2
+        return 1
+    fi
+    if [[ -z "$expected_conclusion" ]]; then
+        echo "ERROR: expected_conclusion is required (arg 4)" >&2
+        return 1
+    fi
+
+    echo "]] Running workflow: $workflow_name x$run_count (expecting: $expected_conclusion)"
+
+    # Trigger workflow runs
+    echo "]] Triggering workflow runs..."
+    if ! trigger_workflow_runs "$owner" "$repo" "${workflow_name}.yml" "$run_count"; then
+        echo "ERROR: Failed to trigger workflow runs for $workflow_name"
+        return 1
+    fi
+
+    # Wait for workflow runs to complete
+    if ! wait_for_workflow_runs_to_complete "$owner" "$repo" "$workflow_name" "$expected_conclusion"; then
+        echo "ERROR: Failed to wait for workflow runs to complete for $workflow_name"
+        return 1
+    fi
+
+    # Skip log retrieval for cancelled workflows - GitHub doesn't provide logs for cancelled jobs
+    if [[ "$expected_conclusion" == "cancelled" ]]; then
+        echo "]] Workflow $workflow_name completed with expected conclusion: cancelled (no logs available for cancelled jobs)"
+        return 0
+    fi
+
+    # Get workflow run logs into global array (Bash 3.x compatible)
+    while IFS= read -r line; do
+        WORKFLOW_LOG_FILES+=("$line")
+    done < <(get_workflow_run_logs "$owner" "$repo" "$workflow_name")
+
+    if [[ ${#WORKFLOW_LOG_FILES[@]} -eq 0 ]]; then
+        echo "ERROR: No log files retrieved for $workflow_name"
+        return 1
+    fi
+
+    echo "]] Workflow $workflow_name completed, ${#WORKFLOW_LOG_FILES[@]} log file(s) available"
+    return 0
 }
 
 # =============================================================================

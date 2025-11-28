@@ -1,4 +1,4 @@
-# This workflow is used to test a template with too much RAM for the host, causing it to be sent back to the queue
+# This workflow is used to test a template with a larger disk usage, which will take longer to pull to the host
 name: 'm1-6c14-40gb-1'
 on:
   workflow_dispatch:
