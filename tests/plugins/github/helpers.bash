@@ -850,8 +850,20 @@ start_anklet() {
     # Start anklet with nohup and background it
     export LOG_LEVEL=${LOG_LEVEL:-dev}
     echo "LOG_LEVEL: $LOG_LEVEL"
-    nohup /tmp/anklet > /tmp/anklet.log 2>&1 &
-    disown
+    ( 
+        # First fork - creates subshell
+        cd /
+cat > /tmp/setsid.pl 2>&1 <<EOF
+#!/usr/bin/perl -w
+use strict;
+use POSIX qw(setsid);
+fork() && exit(0);
+setsid() or die "setsid failed: $!";
+exec @ARGV;
+EOF
+        chmod +x /tmp/setsid.pl
+        /tmp/setsid.pl nohup /tmp/anklet > /tmp/anklet.log 2>&1 < /dev/null &
+    ) &
     
     # Wait a moment to ensure the process starts
     sleep 1

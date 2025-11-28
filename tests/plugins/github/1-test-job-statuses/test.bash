@@ -10,6 +10,11 @@ source "$SCRIPT_DIR/helpers.bash"
 
 echo "] Running $TEST_DIR_NAME test..."
 
+
+sleep 60
+
+exit 1
+
 ############
 # t2-6c14r-1
 WORKFLOW_NAME="t2-6c14r-1"
