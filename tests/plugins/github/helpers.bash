@@ -27,7 +27,6 @@ init_test_report() {
     TEST_REPORT_FILE="/tmp/test-report.txt"
     TEST_REPORT_DIR_NAME="$test_dir_name"
     TEST_REPORT_FINALIZED=false
-    echo "[DEBUG] init_test_report: Creating report file at ${TEST_REPORT_FILE}"
     echo "TEST_REPORT_START" > "$TEST_REPORT_FILE"
     echo "test_dir=$test_dir_name" >> "$TEST_REPORT_FILE"
     echo "start_time=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$TEST_REPORT_FILE"
@@ -35,21 +34,17 @@ init_test_report() {
     
     # Set trap to finalize report on exit (ensures report exists even on early failure)
     trap '_finalize_test_report_on_exit' EXIT
-    echo "[DEBUG] init_test_report: EXIT trap set"
 }
 
 # Internal function called by trap - ensures report is always finalized
 _finalize_test_report_on_exit() {
-    echo "[DEBUG] _finalize_test_report_on_exit: Called (FINALIZED=${TEST_REPORT_FINALIZED}, FILE=${TEST_REPORT_FILE})"
     if [[ "$TEST_REPORT_FINALIZED" != "true" ]] && [[ -n "$TEST_REPORT_FILE" ]]; then
-        echo "[DEBUG] _finalize_test_report_on_exit: Finalizing report..."
         echo "---" >> "$TEST_REPORT_FILE"
         echo "end_time=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$TEST_REPORT_FILE"
         echo "total=$((TEST_PASSED + TEST_FAILED))" >> "$TEST_REPORT_FILE"
         echo "passed=$TEST_PASSED" >> "$TEST_REPORT_FILE"
         echo "failed=$TEST_FAILED" >> "$TEST_REPORT_FILE"
         echo "TEST_REPORT_END" >> "$TEST_REPORT_FILE"
-        echo "[DEBUG] _finalize_test_report_on_exit: Report finalized"
     fi
 }
 
@@ -59,6 +54,16 @@ begin_test() {
     CURRENT_TEST_NAME="$1"
     CURRENT_TEST_EXPECTED=""
     CURRENT_TEST_RECORDED=false
+    CURRENT_TEST_LOGS_SAVED=false
+    
+    # Wait for anklet to finish writing from previous test
+    sleep 2
+    
+    # Safely truncate anklet.log while preserving complete JSON lines
+    # The previous test's logs were already saved by record_pass/record_fail
+    # This approach keeps anklet's file descriptor valid
+    _safe_truncate_anklet_log
+    
     echo ""
     echo "############"
     echo "# ${CURRENT_TEST_NAME}"
@@ -76,6 +81,9 @@ record_pass() {
     echo "✓ PASS: ${CURRENT_TEST_NAME}"
     TEST_RESULTS+=("PASS|${CURRENT_TEST_NAME}|${CURRENT_TEST_EXPECTED}|")
     echo "############"
+    
+    # Save logs immediately (in case script exits before end_test)
+    _save_test_logs
 }
 
 # Record test failed (only records once per test)
@@ -91,14 +99,131 @@ record_fail() {
     echo "✗ FAIL: ${CURRENT_TEST_NAME} - ${error_msg}"
     TEST_RESULTS+=("FAIL|${CURRENT_TEST_NAME}|${CURRENT_TEST_EXPECTED}|${error_msg}")
     echo "############"
+    
+    # Save logs immediately (in case script exits before end_test)
+    _save_test_logs
+    
     return 1
+}
+
+# Internal function to save test logs
+# Safely truncate anklet.log while preserving JSON integrity
+# This copies complete lines and truncates in place (keeps file descriptor valid)
+_safe_truncate_anklet_log() {
+    local log_file="/tmp/anklet.log"
+    
+    if [[ ! -f "$log_file" ]]; then
+        return 0
+    fi
+    
+    # Get current file size
+    local original_size
+    original_size=$(wc -c < "$log_file" 2>/dev/null || echo 0)
+    
+    if [[ "$original_size" -eq 0 ]]; then
+        return 0
+    fi
+    
+    # Copy to temp file
+    local temp_file="/tmp/anklet.log.truncate.tmp"
+    cp "$log_file" "$temp_file" 2>/dev/null || return 0
+    
+    # Find the position of the last newline (last complete line)
+    # This ensures we don't cut a JSON line in half
+    local last_newline_pos
+    if command -v gawk >/dev/null 2>&1; then
+        # Use gawk if available for byte-accurate position
+        last_newline_pos=$(gawk 'BEGIN{RS="\n"; pos=0} {pos+=length($0)+1} END{print pos}' "$temp_file" 2>/dev/null)
+    else
+        # Fallback: count bytes of complete lines only
+        # This reads only lines that end with newline
+        last_newline_pos=$(awk '{sum+=length($0)+1} END{print sum}' "$temp_file" 2>/dev/null || echo 0)
+    fi
+    
+    # If we couldn't determine position, just truncate everything
+    if [[ -z "$last_newline_pos" ]] || [[ "$last_newline_pos" -eq 0 ]]; then
+        : > "$log_file" 2>/dev/null || true
+        rm -f "$temp_file" 2>/dev/null
+        return 0
+    fi
+    
+    # Truncate the original file in place
+    # This keeps anklet's file descriptor valid
+    : > "$log_file" 2>/dev/null || true
+    
+    rm -f "$temp_file" 2>/dev/null
+    return 0
+}
+
+_save_test_logs() {
+    # Temporarily disable exit on error - we don't want log saving to abort the test
+    set +e
+    
+    echo "[DEBUG] _save_test_logs: Saving logs for test: ${CURRENT_TEST_NAME}"
+    
+    # Create test-specific log directory
+    CURRENT_TEST_LOG_DIR="/tmp/test-logs/${CURRENT_TEST_NAME}"
+    if ! mkdir -p "${CURRENT_TEST_LOG_DIR}"; then
+        echo "[DEBUG] _save_test_logs: ERROR - Failed to create directory: ${CURRENT_TEST_LOG_DIR}"
+        set -e
+        return
+    fi
+    echo "[DEBUG] _save_test_logs: Created directory: ${CURRENT_TEST_LOG_DIR}"
+    
+    # List what's in /tmp/test-logs now
+    echo "[DEBUG] _save_test_logs: Contents of /tmp/test-logs:"
+    ls -la /tmp/test-logs/ 2>/dev/null || echo "[DEBUG] Could not list /tmp/test-logs"
+    
+    # Wait briefly for anklet to finish writing current entries
+    sleep 1
+    
+    # Copy anklet.log - only complete lines (to avoid partial JSON)
+    if [[ -f /tmp/anklet.log ]] && [[ -s /tmp/anklet.log ]]; then
+        # Use grep to only copy complete lines (those ending with newline)
+        # This prevents saving partial JSON that would cause parse errors
+        grep -a '' /tmp/anklet.log > "${CURRENT_TEST_LOG_DIR}/anklet.log" 2>/dev/null || true
+        
+        # Validate JSON lines - remove any that don't parse
+        if command -v jq >/dev/null 2>&1; then
+            local temp_valid="${CURRENT_TEST_LOG_DIR}/anklet.log.valid"
+            while IFS= read -r line; do
+                if [[ -n "$line" ]] && echo "$line" | jq -e . >/dev/null 2>&1; then
+                    echo "$line"
+                fi
+            done < "${CURRENT_TEST_LOG_DIR}/anklet.log" > "$temp_valid" 2>/dev/null
+            mv "$temp_valid" "${CURRENT_TEST_LOG_DIR}/anklet.log" 2>/dev/null || true
+        fi
+        
+        echo "[DEBUG] _save_test_logs: Copied anklet.log (valid JSON lines only)"
+    else
+        echo "[DEBUG] _save_test_logs: No anklet.log to copy (empty or missing)"
+    fi
+    
+    # Move workflow logs to test folder
+    echo "[DEBUG] _save_test_logs: Moving ${#WORKFLOW_LOG_FILES[@]} workflow log files"
+    move_log_files_to_test_dir "${WORKFLOW_LOG_FILES[@]}"
+    
+    # Mark that logs have been saved for this test
+    CURRENT_TEST_LOGS_SAVED=true
+    echo "[DEBUG] _save_test_logs: Done saving logs for ${CURRENT_TEST_NAME}"
+    echo "[DEBUG] _save_test_logs: Test logs at ${CURRENT_TEST_LOG_DIR} - will be synced to parent host"
+    
+    # Re-enable exit on error
+    set -e
 }
 
 # End test with cleanup (always call after assertions)
 # Usage: end_test
 end_test() {
     check_anklet_process
-    cleanup_log_files "${WORKFLOW_LOG_FILES[@]}"
+    
+    # Save logs if not already saved by record_pass/record_fail
+    if [[ "${CURRENT_TEST_LOGS_SAVED}" != "true" ]]; then
+        _save_test_logs
+    fi
+    
+    # Reset for next test
+    CURRENT_TEST_LOGS_SAVED=false
 }
 
 # Finalize and print test report
@@ -990,6 +1115,45 @@ cleanup_log_files() {
         # Fallback: remove individual files
         rm -f "${log_files[@]}"
         echo "Cleaned up ${#log_files[@]} log file(s)"
+    fi
+}
+
+# Move log files to the current test's log directory
+# Usage: move_log_files_to_test_dir <log_file1> [log_file2] ...
+move_log_files_to_test_dir() {
+    local log_files=("$@")
+
+    if [[ ${#log_files[@]} -eq 0 ]]; then
+        return 0
+    fi
+
+    if [[ -z "${CURRENT_TEST_LOG_DIR}" ]]; then
+        echo "Warning: CURRENT_TEST_LOG_DIR not set, cleaning up logs instead"
+        cleanup_log_files "${log_files[@]}"
+        return 0
+    fi
+
+    # Create workflow_logs subdirectory in test folder
+    local dest_dir="${CURRENT_TEST_LOG_DIR}/workflow_logs"
+    mkdir -p "${dest_dir}"
+
+    # Get the source directory from the first file
+    local log_dir
+    log_dir=$(dirname "${log_files[0]}")
+    
+    if [[ "$log_dir" == /tmp/workflow_logs_* ]]; then
+        # Move all files from the workflow logs directory
+        mv "${log_dir}"/* "${dest_dir}/" 2>/dev/null || true
+        rm -rf "$log_dir"
+        echo "Moved workflow logs to: ${dest_dir}"
+    else
+        # Move individual files
+        for file in "${log_files[@]}"; do
+            if [[ -f "$file" ]]; then
+                mv "$file" "${dest_dir}/" 2>/dev/null || true
+            fi
+        done
+        echo "Moved ${#log_files[@]} log file(s) to: ${dest_dir}"
     fi
 }
 
