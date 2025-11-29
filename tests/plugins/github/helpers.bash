@@ -23,22 +23,45 @@ CURRENT_TEST_RECORDED=false
 # Usage: init_test_report <test_dir_name>
 init_test_report() {
     local test_dir_name="$1"
-    TEST_REPORT_FILE="${TEST_REPORT_FILE:-/tmp/test-report-${test_dir_name}.txt}"
+    # Use fixed filename for consistency - host name is added when copying back
+    TEST_REPORT_FILE="/tmp/test-report.txt"
+    TEST_REPORT_DIR_NAME="$test_dir_name"
+    TEST_REPORT_FINALIZED=false
+    echo "[DEBUG] init_test_report: Creating report file at ${TEST_REPORT_FILE}"
     echo "TEST_REPORT_START" > "$TEST_REPORT_FILE"
     echo "test_dir=$test_dir_name" >> "$TEST_REPORT_FILE"
     echo "start_time=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$TEST_REPORT_FILE"
     echo "---" >> "$TEST_REPORT_FILE"
+    
+    # Set trap to finalize report on exit (ensures report exists even on early failure)
+    trap '_finalize_test_report_on_exit' EXIT
+    echo "[DEBUG] init_test_report: EXIT trap set"
+}
+
+# Internal function called by trap - ensures report is always finalized
+_finalize_test_report_on_exit() {
+    echo "[DEBUG] _finalize_test_report_on_exit: Called (FINALIZED=${TEST_REPORT_FINALIZED}, FILE=${TEST_REPORT_FILE})"
+    if [[ "$TEST_REPORT_FINALIZED" != "true" ]] && [[ -n "$TEST_REPORT_FILE" ]]; then
+        echo "[DEBUG] _finalize_test_report_on_exit: Finalizing report..."
+        echo "---" >> "$TEST_REPORT_FILE"
+        echo "end_time=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$TEST_REPORT_FILE"
+        echo "total=$((TEST_PASSED + TEST_FAILED))" >> "$TEST_REPORT_FILE"
+        echo "passed=$TEST_PASSED" >> "$TEST_REPORT_FILE"
+        echo "failed=$TEST_FAILED" >> "$TEST_REPORT_FILE"
+        echo "TEST_REPORT_END" >> "$TEST_REPORT_FILE"
+        echo "[DEBUG] _finalize_test_report_on_exit: Report finalized"
+    fi
 }
 
 # Begin a test - call before running workflow
-# Usage: begin_test <test_name> <expected_conclusion>
+# Usage: begin_test <test_name>
 begin_test() {
     CURRENT_TEST_NAME="$1"
-    CURRENT_TEST_EXPECTED="$2"
+    CURRENT_TEST_EXPECTED=""
     CURRENT_TEST_RECORDED=false
     echo ""
     echo "############"
-    echo "# ${CURRENT_TEST_NAME} (expected: ${CURRENT_TEST_EXPECTED})"
+    echo "# ${CURRENT_TEST_NAME}"
 }
 
 # Record test passed (only records once per test)
@@ -82,6 +105,7 @@ end_test() {
 # Usage: finalize_test_report <test_dir_name>
 finalize_test_report() {
     local test_dir_name="$1"
+    TEST_REPORT_FINALIZED=true
     echo "---" >> "$TEST_REPORT_FILE"
     echo "end_time=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$TEST_REPORT_FILE"
     echo "total=$((TEST_PASSED + TEST_FAILED))" >> "$TEST_REPORT_FILE"
@@ -989,6 +1013,9 @@ run_workflow_and_get_logs() {
     local workflow_name="$3"
     local expected_conclusion="$4"
     local run_count="${5:-1}"
+
+    # Set the expected conclusion for test reporting
+    CURRENT_TEST_EXPECTED="$expected_conclusion"
 
     # Reset global array
     WORKFLOW_LOG_FILES=()

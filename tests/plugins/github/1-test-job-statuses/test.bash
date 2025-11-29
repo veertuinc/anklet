@@ -15,49 +15,49 @@ init_test_report "$TEST_DIR_NAME"
 
 ############
 # t1-cancelled-failure-no-tag-in-registry
-begin_test "t1-cancelled-failure-no-tag-in-registry" "cancelled"
-run_workflow_and_get_logs "veertuinc" "anklet" "t1-cancelled-failure-no-tag-in-registry" "cancelled" && record_pass || record_fail "workflow did not complete as expected"
+begin_test "t1-cancelled-failure-no-tag-in-registry"
+run_workflow_and_get_logs "veertuinc" "anklet" "t1-cancelled-failure-no-tag-in-registry" "SDSS" && record_pass || record_fail "workflow did not complete as expected"
 end_test
 ############
 
 ############
 # t1-cancelled-failure-no-tag
-begin_test "t1-cancelled-failure-no-tag" "cancelled"
+begin_test "t1-cancelled-failure-no-tag"
 run_workflow_and_get_logs "veertuinc" "anklet" "t1-cancelled-failure-no-tag" "cancelled" && record_pass || record_fail "workflow did not complete as expected"
 end_test
 ############
 
 ############
 # t1-cancelled-failure-no-template-in-registry
-begin_test "t1-cancelled-failure-no-template-in-registry" "cancelled"
+begin_test "t1-cancelled-failure-no-template-in-registry"
 run_workflow_and_get_logs "veertuinc" "anklet" "t1-cancelled-failure-no-template-in-registry" "cancelled" && record_pass || record_fail "workflow did not complete as expected"
 end_test
 ############
 
 ############
 # t1-cancelled-failure-no-template-specified
-begin_test "t1-cancelled-failure-no-template-specified" "cancelled"
+begin_test "t1-cancelled-failure-no-template-specified"
 run_workflow_and_get_logs "veertuinc" "anklet" "t1-cancelled-failure-no-template-specified" "cancelled" && record_pass || record_fail "workflow did not complete as expected"
 end_test
 ############
 
 ############
 # t1-cancelled-failure-no-template
-begin_test "t1-cancelled-failure-no-template" "cancelled"
+begin_test "t1-cancelled-failure-no-template"
 run_workflow_and_get_logs "veertuinc" "anklet" "t1-cancelled-failure-no-template" "cancelled" && record_pass || record_fail "workflow did not complete as expected"
 end_test
 ############
 
 ############
 # t1-failure-tag-1-in-vm
-begin_test "t1-failure-tag-1-in-vm" "failure"
+begin_test "t1-failure-tag-1-in-vm"
 run_workflow_and_get_logs "veertuinc" "anklet" "t1-failure-tag-1-in-vm" "failure" && record_pass || record_fail "workflow did not complete as expected"
 end_test
 ############
 
 ############
 # t1-with-tag-1-matrix-nodes-2
-begin_test "t1-with-tag-1-matrix-nodes-2" "success"
+begin_test "t1-with-tag-1-matrix-nodes-2"
 if run_workflow_and_get_logs "veertuinc" "anklet" "t1-with-tag-1-matrix-nodes-2" "success"; then
     # Add assertions here if needed
     record_pass
@@ -69,7 +69,7 @@ end_test
 
 ############
 # t1-with-tag-1
-begin_test "t1-with-tag-1" "success"
+begin_test "t1-with-tag-1"
 if run_workflow_and_get_logs "veertuinc" "anklet" "t1-with-tag-1" "success"; then
     # Add assertions here if needed
     record_pass
@@ -81,7 +81,7 @@ end_test
 
 ############
 # t1-with-tag-2
-begin_test "t1-with-tag-2" "success"
+begin_test "t1-with-tag-2"
 if run_workflow_and_get_logs "veertuinc" "anklet" "t1-with-tag-2" "success"; then
     # Add assertions here if needed
     record_pass
@@ -93,7 +93,7 @@ end_test
 
 ############
 # t1-without-tag
-begin_test "t1-without-tag" "success"
+begin_test "t1-without-tag"
 if run_workflow_and_get_logs "veertuinc" "anklet" "t1-without-tag" "success"; then
     # Add assertions here if needed
     record_pass
@@ -105,7 +105,7 @@ end_test
 
 ############
 # t2-6c14r-1
-begin_test "t2-6c14r-1" "success"
+begin_test "t2-6c14r-1"
 if run_workflow_and_get_logs "veertuinc" "anklet" "t2-6c14r-1" "success"; then
     assert_logs_contain "Ankas-Virtual-Machine.local" "${WORKFLOW_LOG_FILES[@]}"
     assert_logs_contain "butt" "${WORKFLOW_LOG_FILES[@]}"
@@ -118,7 +118,7 @@ end_test
 
 ############
 # t2-6c14r-2-5m-pause
-begin_test "t2-6c14r-2-5m-pause" "success"
+begin_test "t2-6c14r-2-5m-pause"
 if run_workflow_and_get_logs "veertuinc" "anklet" "t2-6c14r-2-5m-pause" "success"; then
     # Add assertions here if needed
     record_pass
@@ -130,7 +130,7 @@ end_test
 
 ############
 # t2-8c14r-1
-begin_test "t2-8c14r-1" "success"
+begin_test "t2-8c14r-1"
 if run_workflow_and_get_logs "veertuinc" "anklet" "t2-8c14r-1" "success"; then
     # Add assertions here if needed
     record_pass
@@ -142,7 +142,7 @@ end_test
 
 ############
 # t2-12c20r-1
-begin_test "t2-12c20r-1" "success"
+begin_test "t2-12c20r-1"
 if run_workflow_and_get_logs "veertuinc" "anklet" "t2-12c20r-1" "success"; then
     # Add assertions here if needed
     record_pass
@@ -154,7 +154,7 @@ end_test
 
 ############
 # t2-12c50r-1
-begin_test "t2-12c50r-1" "success"
+begin_test "t2-12c50r-1"
 if run_workflow_and_get_logs "veertuinc" "anklet" "t2-12c50r-1" "success"; then
     # Add assertions here if needed
     record_pass
@@ -166,7 +166,7 @@ end_test
 
 ############
 # t2-20c20r-1
-begin_test "t2-20c20r-1" "success"
+begin_test "t2-20c20r-1"
 if run_workflow_and_get_logs "veertuinc" "anklet" "t2-20c20r-1" "success"; then
     # Add assertions here if needed
     record_pass
@@ -178,7 +178,7 @@ end_test
 
 ############
 # t2-dual-without-tag
-begin_test "t2-dual-without-tag" "success"
+begin_test "t2-dual-without-tag"
 if run_workflow_and_get_logs "veertuinc" "anklet" "t2-dual-without-tag" "success"; then
     # Add assertions here if needed
     record_pass
