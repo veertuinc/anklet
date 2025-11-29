@@ -16,7 +16,7 @@ init_test_report "$TEST_DIR_NAME"
 ############
 # t1-cancelled-failure-no-tag-in-registry
 begin_test "t1-cancelled-failure-no-tag-in-registry"
-run_workflow_and_get_logs "veertuinc" "anklet" "t1-cancelled-failure-no-tag-in-registry" "SDSS" && record_pass || record_fail "workflow did not complete as expected"
+run_workflow_and_get_logs "veertuinc" "anklet" "t1-cancelled-failure-no-tag-in-registry" "cancelled" && record_pass || record_fail "workflow did not complete as expected"
 end_test
 ############
 
@@ -108,7 +108,6 @@ end_test
 begin_test "t2-6c14r-1"
 if run_workflow_and_get_logs "veertuinc" "anklet" "t2-6c14r-1" "success"; then
     assert_logs_contain "Ankas-Virtual-Machine.local" "${WORKFLOW_LOG_FILES[@]}"
-    assert_logs_contain "butt" "${WORKFLOW_LOG_FILES[@]}"
     record_pass
 else
     record_fail "workflow did not complete as expected"

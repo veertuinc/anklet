@@ -8,8 +8,8 @@ jobs:
       matrix:
         node: ["1", "2"]
     runs-on: [ 
-      "anka-template:d792c6f6-198c-470f-9526-9c998efe7ab4", 
-      "anka-template-tag:vanilla+port-forward-22+brew-git",
+      "anka-template:84266873-da90-4e0d-903b-ed0233471f9f", 
+      "anka-template-tag:6c14r",
       "${{ github.run_id }}-${{ strategy.job-index }}",
     ]
     steps:
