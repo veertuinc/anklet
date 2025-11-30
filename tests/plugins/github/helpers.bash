@@ -82,15 +82,17 @@ record_pass() {
     TEST_RESULTS+=("PASS|${CURRENT_TEST_NAME}|${CURRENT_TEST_EXPECTED}|")
     echo "############"
     
-    # Save logs immediately (in case script exits before end_test)
+    # Save logs immediately
     _save_test_logs
+    
+    return 0
 }
 
 # Record test failed (only records once per test)
 # Usage: record_fail <error_message>
 record_fail() {
     if [[ "$CURRENT_TEST_RECORDED" == "true" ]]; then
-        return 1
+        return 0  # Already recorded, don't fail
     fi
     CURRENT_TEST_RECORDED=true
     local error_msg="${1:-test failed}"
@@ -100,10 +102,12 @@ record_fail() {
     TEST_RESULTS+=("FAIL|${CURRENT_TEST_NAME}|${CURRENT_TEST_EXPECTED}|${error_msg}")
     echo "############"
     
-    # Save logs immediately (in case script exits before end_test)
+    # Save logs immediately
     _save_test_logs
     
-    return 1
+    # Return 0 so script continues to end_test and other tests
+    # The failure is already recorded in TEST_FAILED counter
+    return 0
 }
 
 # Internal function to save test logs
@@ -1163,6 +1167,62 @@ move_log_files_to_test_dir() {
 # These functions combine multiple low-level operations for cleaner test files
 
 # Run a workflow and get logs: trigger, wait, get logs
+# Run a workflow and check anklet.log for expected pattern (ignores GitHub status)
+# Use this for tests where the workflow can't complete due to host resource constraints
+# Usage: run_workflow_and_check_anklet_log <owner> <repo> <workflow_name> <log_pattern>
+# Example: 
+#   run_workflow_and_check_anklet_log "veertuinc" "anklet" "t2-12c20r-1" "not enough resources"
+# Returns: 0 if pattern found in anklet.log, 1 otherwise
+run_workflow_and_check_anklet_log() {
+    local owner="$1"
+    local repo="$2"
+    local workflow_name="$3"
+    local log_pattern="$4"
+
+    # Set expected for test reporting
+    CURRENT_TEST_EXPECTED="anklet_log:${log_pattern}"
+
+    if [[ -z "$owner" ]] || [[ -z "$repo" ]] || [[ -z "$workflow_name" ]] || [[ -z "$log_pattern" ]]; then
+        echo "ERROR: run_workflow_and_check_anklet_log requires: owner, repo, workflow_name, log_pattern" >&2
+        return 1
+    fi
+
+    echo "]] Running workflow: $workflow_name (checking anklet.log for: '$log_pattern')"
+
+    # Trigger workflow
+    echo "]] Triggering workflow..."
+    if ! trigger_workflow_runs "$owner" "$repo" "${workflow_name}.yml" 1; then
+        echo "ERROR: Failed to trigger workflow $workflow_name"
+        return 1
+    fi
+
+    # Wait for workflow to complete (any status) - we don't care about GitHub conclusion
+    # Use a shorter timeout and check anklet.log periodically
+    local max_wait=300  # 5 minutes
+    local wait_interval=10
+    local elapsed=0
+
+    echo "]] Waiting for anklet to process workflow (checking for pattern in logs)..."
+    while [[ $elapsed -lt $max_wait ]]; do
+        sleep $wait_interval
+        elapsed=$((elapsed + wait_interval))
+        
+        # Check if pattern appears in anklet.log
+        if [[ -f /tmp/anklet.log ]] && grep -q "$log_pattern" /tmp/anklet.log 2>/dev/null; then
+            echo "]] Found pattern '$log_pattern' in anklet.log after ${elapsed}s"
+            return 0
+        fi
+        
+        echo "]] Waiting... (${elapsed}s/${max_wait}s)"
+    done
+
+    echo "ERROR: Pattern '$log_pattern' not found in anklet.log after ${max_wait}s"
+    echo "===== anklet.log tail ====="
+    tail -50 /tmp/anklet.log 2>/dev/null || echo "(no log file)"
+    echo "==========================="
+    return 1
+}
+
 # Sets the global WORKFLOW_LOG_FILES array with log file paths
 # Usage: run_workflow_and_get_logs <owner> <repo> <workflow_name> <expected_conclusion> [run_count]
 # Example: 
