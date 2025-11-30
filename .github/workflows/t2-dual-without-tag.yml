@@ -6,7 +6,7 @@ jobs:
   testJob:
     runs-on: [ 
       "${{ github.run_id }}-${{ strategy.job-index }}",
-      "anka-template:d792c6f6-198c-470f-9526-9c998efe7ab4",
+      "anka-template:84266873-da90-4e0d-903b-ed0233471f9f",
     ]
     steps:
       - uses: actions/checkout@v3
@@ -18,7 +18,7 @@ jobs:
   testJob2:
     runs-on: [ 
       "${{ github.run_id }}-${{ strategy.job-index }}",
-      "anka-template:fa990c7f-d540-4c5b-bf72-b886c4692c3a",
+      "anka-template:49faa3fb-8023-42bf-9e3b-80906fd27a50",
     ]
     steps:
       - uses: actions/checkout@v3
