@@ -13,6 +13,17 @@ echo "] Running $TEST_DIR_NAME test..."
 # Initialize test report
 init_test_report "$TEST_DIR_NAME"
 
+# Set up trap to cancel orphaned workflow runs on exit (runs before test report finalization)
+cleanup() {
+    echo ""
+    echo "==========================================="
+    echo "START $TEST_DIR_NAME/test.bash cleanup..."
+    cancel_running_workflow_runs "veertuinc" "anklet" "t1-" "t2-" || echo "WARNING: Some workflow cancellations may have failed"
+    echo "END $TEST_DIR_NAME/test.bash cleanup..."
+    echo "==========================================="
+}
+trap 'cleanup; _finalize_test_report_on_exit' EXIT
+
 ############
 # t1-cancelled-failure-no-tag-in-registry
 begin_test "t1-cancelled-failure-no-tag-in-registry"
@@ -190,7 +201,7 @@ fi
 end_test
 ############
 
-# Finalize and print test report
+# Finalize and print test report (cleanup runs via EXIT trap)
 finalize_test_report "$TEST_DIR_NAME"
 
 echo "==========================================="

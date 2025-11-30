@@ -175,8 +175,8 @@ _save_test_logs() {
     echo "[DEBUG] _save_test_logs: Created directory: ${CURRENT_TEST_LOG_DIR}"
     
     # List what's in /tmp/test-logs now
-    echo "[DEBUG] _save_test_logs: Contents of /tmp/test-logs:"
-    ls -la /tmp/test-logs/ 2>/dev/null || echo "[DEBUG] Could not list /tmp/test-logs"
+    # echo "[DEBUG] _save_test_logs: Contents of /tmp/test-logs:"
+    # ls -la /tmp/test-logs/ 2>/dev/null || echo "[DEBUG] Could not list /tmp/test-logs"
     
     # Wait briefly for anklet to finish writing current entries
     sleep 1
@@ -1293,6 +1293,114 @@ run_workflow_and_get_logs() {
     fi
 
     echo "]] Workflow $workflow_name completed, ${#WORKFLOW_LOG_FILES[@]} log file(s) available"
+    return 0
+}
+
+# =============================================================================
+
+# Cancel all running workflow runs for test workflows
+# Usage: cancel_running_workflow_runs <owner> <repo> [workflow_patterns...]
+# If no patterns provided, uses default test workflow patterns (t1-.*, t2-.*)
+# Requires: ANKLET_TEST_TRIGGER_GITHUB_PAT environment variable to be set
+cancel_running_workflow_runs() {
+    local owner="$1"
+    local repo="$2"
+    shift 2
+    local workflow_patterns=("$@")
+
+    # Default patterns if none provided
+    if [[ ${#workflow_patterns[@]} -eq 0 ]]; then
+        workflow_patterns=("t1-" "t2-")
+    fi
+
+    if [[ -z "$owner" ]]; then
+        echo "ERROR: owner is required (arg 1)" >&2
+        return 1
+    fi
+    if [[ -z "$repo" ]]; then
+        echo "ERROR: repo is required (arg 2)" >&2
+        return 1
+    fi
+    if [[ -z "${ANKLET_TEST_TRIGGER_GITHUB_PAT}" ]]; then
+        echo "ERROR: ANKLET_TEST_TRIGGER_GITHUB_PAT environment variable is required" >&2
+        return 1
+    fi
+
+    echo "Cancelling running workflow runs: owner=$owner repo=$repo patterns=${workflow_patterns[*]}"
+
+    # Get recent workflow runs
+    local tmp_runs="/tmp/workflow_runs_cancel_$$.json"
+    local api_url="https://api.github.com/repos/${owner}/${repo}/actions/runs?per_page=100"
+    
+    local http_code
+    http_code=$(curl -s -w "%{http_code}" \
+        -H "Authorization: Bearer ${ANKLET_TEST_TRIGGER_GITHUB_PAT}" \
+        -H "Accept: application/vnd.github.v3+json" \
+        -o "$tmp_runs" \
+        "$api_url")
+
+    if [[ "$http_code" != "200" ]]; then
+        echo "ERROR: Failed to get workflow runs (HTTP $http_code)" >&2
+        cat "$tmp_runs" >&2 2>/dev/null || true
+        rm -f "$tmp_runs"
+        return 1
+    fi
+
+    # Find running workflow runs matching any of our patterns
+    local cancelled_count=0
+    local failed_count=0
+
+    for pattern in "${workflow_patterns[@]}"; do
+        # Get runs matching this pattern that are still running
+        local running_runs
+        running_runs=$(jq -r --arg pattern "$pattern" '
+            .workflow_runs[]
+            | select(.path | test($pattern))
+            | select(.status == "in_progress" or .status == "queued" or .status == "pending" or .status == "waiting")
+            | "\(.id) \(.name) \(.status)"
+        ' "$tmp_runs" 2>/dev/null || true)
+
+        if [[ -z "$running_runs" ]]; then
+            continue
+        fi
+
+        echo "Found running workflows matching '$pattern':"
+        while IFS=' ' read -r run_id run_name run_status; do
+            if [[ -z "$run_id" ]]; then
+                continue
+            fi
+            
+            echo "  - Cancelling run $run_id ($run_name) [status: $run_status]"
+            
+            # Cancel the workflow run
+            local cancel_url="https://api.github.com/repos/${owner}/${repo}/actions/runs/${run_id}/cancel"
+            local cancel_code
+            cancel_code=$(curl -s -w "%{http_code}" -o /dev/null \
+                -X POST \
+                -H "Authorization: Bearer ${ANKLET_TEST_TRIGGER_GITHUB_PAT}" \
+                -H "Accept: application/vnd.github.v3+json" \
+                "$cancel_url")
+
+            # 202 = accepted, 409 = already completed (not an error)
+            if [[ "$cancel_code" == "202" ]]; then
+                echo "    ✓ Cancelled successfully"
+                cancelled_count=$((cancelled_count + 1))
+            elif [[ "$cancel_code" == "409" ]]; then
+                echo "    - Already completed (no action needed)"
+            else
+                echo "    ✗ Failed to cancel (HTTP $cancel_code)"
+                failed_count=$((failed_count + 1))
+            fi
+        done <<< "$running_runs"
+    done
+
+    rm -f "$tmp_runs"
+
+    echo "Workflow cancellation complete: cancelled=$cancelled_count failed=$failed_count"
+    
+    if [[ $failed_count -gt 0 ]]; then
+        return 1
+    fi
     return 0
 }
 
