@@ -330,7 +330,7 @@ wait_for_workflow_runs_to_complete() {
     local repo="$2"
     local workflow_pattern="$3"
     local expected_conclusion="${4:-}"  # Optional: success, failure, cancelled, etc.
-    local timeout_seconds="${5:-600}"  # Default 10 minutes
+    local timeout_seconds="${5:-1200}"  # Default 20 minutes
 
     if [[ -z "$owner" ]]; then
         echo "ERROR: owner is required (arg 1)"
