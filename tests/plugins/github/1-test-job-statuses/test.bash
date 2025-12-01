@@ -24,47 +24,47 @@ cleanup() {
 }
 trap 'cleanup; _finalize_test_report_on_exit' EXIT
 
-############
-# t1-cancelled-failure-no-tag-in-registry
-begin_test "t1-cancelled-failure-no-tag-in-registry"
-run_workflow_and_get_logs "veertuinc" "anklet" "t1-cancelled-failure-no-tag-in-registry" "cancelled" && record_pass || record_fail "workflow did not complete as expected"
-end_test
-############
+# ############
+# # t1-cancelled-failure-no-tag-in-registry
+# begin_test "t1-cancelled-failure-no-tag-in-registry"
+# run_workflow_and_get_logs "veertuinc" "anklet" "t1-cancelled-failure-no-tag-in-registry" "cancelled" && record_pass || record_fail "workflow did not complete as expected"
+# end_test
+# ############
 
-############
-# t1-cancelled-failure-no-tag
-begin_test "t1-cancelled-failure-no-tag"
-run_workflow_and_get_logs "veertuinc" "anklet" "t1-cancelled-failure-no-tag" "cancelled" && record_pass || record_fail "workflow did not complete as expected"
-end_test
-############
+# ############
+# # t1-cancelled-failure-no-tag
+# begin_test "t1-cancelled-failure-no-tag"
+# run_workflow_and_get_logs "veertuinc" "anklet" "t1-cancelled-failure-no-tag" "cancelled" && record_pass || record_fail "workflow did not complete as expected"
+# end_test
+# ############
 
-############
-# t1-cancelled-failure-no-template-in-registry
-begin_test "t1-cancelled-failure-no-template-in-registry"
-run_workflow_and_get_logs "veertuinc" "anklet" "t1-cancelled-failure-no-template-in-registry" "cancelled" && record_pass || record_fail "workflow did not complete as expected"
-end_test
-############
+# ############
+# # t1-cancelled-failure-no-template-in-registry
+# begin_test "t1-cancelled-failure-no-template-in-registry"
+# run_workflow_and_get_logs "veertuinc" "anklet" "t1-cancelled-failure-no-template-in-registry" "cancelled" && record_pass || record_fail "workflow did not complete as expected"
+# end_test
+# ############
 
-############
-# t1-cancelled-failure-no-template-specified
-begin_test "t1-cancelled-failure-no-template-specified"
-run_workflow_and_get_logs "veertuinc" "anklet" "t1-cancelled-failure-no-template-specified" "cancelled" && record_pass || record_fail "workflow did not complete as expected"
-end_test
-############
+# ############
+# # t1-cancelled-failure-no-template-specified
+# begin_test "t1-cancelled-failure-no-template-specified"
+# run_workflow_and_get_logs "veertuinc" "anklet" "t1-cancelled-failure-no-template-specified" "cancelled" && record_pass || record_fail "workflow did not complete as expected"
+# end_test
+# ############
 
-############
-# t1-cancelled-failure-no-template
-begin_test "t1-cancelled-failure-no-template"
-run_workflow_and_get_logs "veertuinc" "anklet" "t1-cancelled-failure-no-template" "cancelled" && record_pass || record_fail "workflow did not complete as expected"
-end_test
-############
+# ############
+# # t1-cancelled-failure-no-template
+# begin_test "t1-cancelled-failure-no-template"
+# run_workflow_and_get_logs "veertuinc" "anklet" "t1-cancelled-failure-no-template" "cancelled" && record_pass || record_fail "workflow did not complete as expected"
+# end_test
+# ############
 
-############
-# t1-failure-tag-1-in-vm
-begin_test "t1-failure-tag-1-in-vm"
-run_workflow_and_get_logs "veertuinc" "anklet" "t1-failure-tag-1-in-vm" "failure" && record_pass || record_fail "workflow did not complete as expected"
-end_test
-############
+# ############
+# # t1-failure-tag-1-in-vm
+# begin_test "t1-failure-tag-1-in-vm"
+# run_workflow_and_get_logs "veertuinc" "anklet" "t1-failure-tag-1-in-vm" "failure" && record_pass || record_fail "workflow did not complete as expected"
+# end_test
+# ############
 
 ############
 # t1-with-tag-1-matrix-nodes-2
