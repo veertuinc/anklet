@@ -21,15 +21,15 @@ clean_and_exit() {
 # Signal handler - set flag for main loop to handle
 handle_signal() {
     echo ""
-    echo "[DEBUG start-handler.bash] Signal received! Setting TERMINATE_REQUESTED=true"
-    echo "[DEBUG start-handler.bash] Current PID: $$"
-    echo "[DEBUG start-handler.bash] ANKLET_PID: ${ANKLET_PID}"
+    echo "[DEBUG] start-handler.bash] Signal received! Setting TERMINATE_REQUESTED=true"
+    echo "[DEBUG] start-handler.bash] Current PID: $$"
+    echo "[DEBUG] start-handler.bash] ANKLET_PID: ${ANKLET_PID}"
     TERMINATE_REQUESTED=true
 }
 
 # Cleanup function - called on exit
 cleanup_handler() {
-    echo "[DEBUG start-handler.bash] cleanup_handler() called"
+    echo "[DEBUG] start-handler.bash] cleanup_handler() called"
     echo "]] Cleaning up handler..."
     if [[ -n "${ANKLET_PID}" ]] && ps -p "${ANKLET_PID}" > /dev/null 2>&1; then
         echo "]] Sending SIGINT to anklet (PID: ${ANKLET_PID})..."
@@ -94,17 +94,17 @@ echo "]] Created ready file: /tmp/anklet-handler-ready"
 # This keeps the script (and SSH session) alive
 # Check TERMINATE_REQUESTED flag which is set by signal handler
 echo "]] Waiting for anklet process (PID: ${ANKLET_PID})..."
-echo "[DEBUG start-handler.bash] My PID: $$, ANKLET_PID: ${ANKLET_PID}"
+echo "[DEBUG] start-handler.bash] My PID: $$, ANKLET_PID: ${ANKLET_PID}"
 POLL_COUNT=0
 while [[ "${TERMINATE_REQUESTED}" != "true" ]] && ps -p "${ANKLET_PID}" > /dev/null 2>&1; do
     sleep 1
     POLL_COUNT=$((POLL_COUNT + 1))
     if [[ $((POLL_COUNT % 30)) -eq 0 ]]; then
-        echo "[DEBUG start-handler.bash] Still polling... TERMINATE_REQUESTED=${TERMINATE_REQUESTED}, POLL_COUNT=${POLL_COUNT}"
+        echo "[DEBUG] start-handler.bash] Still polling... TERMINATE_REQUESTED=${TERMINATE_REQUESTED}, POLL_COUNT=${POLL_COUNT}"
     fi
 done
 
-echo "[DEBUG start-handler.bash] Exited polling loop. TERMINATE_REQUESTED=${TERMINATE_REQUESTED}"
+echo "[DEBUG] start-handler.bash] Exited polling loop. TERMINATE_REQUESTED=${TERMINATE_REQUESTED}"
 
 if [[ "${TERMINATE_REQUESTED}" == "true" ]]; then
     echo "]] Exiting due to signal..."
