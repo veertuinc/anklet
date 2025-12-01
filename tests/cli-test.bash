@@ -9,6 +9,35 @@ cd $TESTS_DIR/.. # make sure we're in the root
 
 TEST_VM="d792c6f6-198c-470f-9526-9c998efe7ab4"
 TEST_FAILED=0
+LAST_COMMAND=""
+LAST_COMMAND_OUTPUT=""
+
+# Trap ERR to show which command failed
+on_error() {
+    local exit_code=$?
+    local line_no=$1
+    echo ""
+    echo "========================================="
+    echo "ERROR: Command failed with exit code $exit_code"
+    echo "  Line: $line_no"
+    if [[ -n "$LAST_COMMAND" ]]; then
+        echo "  Command: $LAST_COMMAND"
+    fi
+    if [[ -n "$LAST_COMMAND_OUTPUT" ]]; then
+        echo "  Output: $LAST_COMMAND_OUTPUT"
+    fi
+    echo "========================================="
+}
+trap 'on_error $LINENO' ERR
+
+# Run a command and capture output for error reporting
+run_cmd() {
+    LAST_COMMAND="$*"
+    LAST_COMMAND_OUTPUT=$("$@" 2>&1) || {
+        local exit_code=$?
+        return $exit_code
+    }
+}
 
 # Check if a specific test was requested
 SINGLE_TEST=""
@@ -55,8 +84,8 @@ fi
 cleanup() {
     pwd
     echo "] Cleaning up..."
-    rm -rf dist
-    rm -f ~/.config/anklet/config.yml
+    rm -rf dist || true
+    rm -f ~/.config/anklet/config.yml || true
     mv ~/.config/anklet/config.yml.bak ~/.config/anklet/config.yml &> /dev/null || true
     anka delete --yes "${TEST_VM}-1" &> /dev/null || true
     anka delete --yes "${TEST_VM}-2" &> /dev/null || true
@@ -93,6 +122,7 @@ run_test() {
     TIMEOUT=$2
     TEST_NAME=$(basename $TEST_YML | cut -d. -f1)
     TEST_LOG_FILE="/tmp/${TEST_NAME}.log"
+    export LOG_LEVEL=${LOG_LEVEL:-debug}
     TESTS=""
     while IFS= read -r line; do
         TESTS+="$line"$'\n'
@@ -156,7 +186,6 @@ TESTS
     log_contains "ERROR"
     log_contains "plugin not supported"
     log_contains "\"name\":\"RUNNER1\""
-    log_contains "checking for jobs...."
     log_contains "\"name\":\"RUNNER2\""
     log_contains "anklet (and all plugins) shut down"
 TESTS
@@ -165,30 +194,28 @@ TESTS
             run_test cli-test-no-db.yml <<TESTS
     log_contains "ERROR"
     log_contains "error getting database from context"
-    log_does_not_contain "checking for jobs...."
     log_contains "\"name\":\"RUNNER1\""
     log_does_not_contain "\"name\":\"RUNNER2\""
     log_contains "anklet (and all plugins) shut down"
 TESTS
             ;;
         "capacity")
-            anka clone "${TEST_VM}" "${TEST_VM}-1" &> /dev/null
-            anka start "${TEST_VM}-1" &> /dev/null
-            anka clone "${TEST_VM}" "${TEST_VM}-2" &> /dev/null
-            anka start "${TEST_VM}-2" &> /dev/null
+            run_cmd anka clone "${TEST_VM}" "${TEST_VM}-1"
+            run_cmd anka start "${TEST_VM}-1"
+            run_cmd anka clone "${TEST_VM}" "${TEST_VM}-2"
+            run_cmd anka start "${TEST_VM}-2"
             run_test cli-test-capacity.yml <<TESTS
     log_contains "ERROR"
     log_contains "host does not have vm capacity"
     log_contains "anklet (and all plugins) shut down"
 TESTS
-            anka delete --yes "${TEST_VM}-1"
-            anka delete --yes "${TEST_VM}-2"
+            run_cmd anka delete --yes "${TEST_VM}-1"
+            run_cmd anka delete --yes "${TEST_VM}-2"
             ;;
         "start-stop")
             run_test cli-test-start-stop.yml 10 <<TESTS
     log_does_not_contain "ERROR"
     log_contains "starting anklet"
-    log_contains "checking for jobs...."
     log_contains "anklet (and all plugins) shut down"
 TESTS
             ;;

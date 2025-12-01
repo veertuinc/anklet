@@ -776,8 +776,11 @@ func HostHasVmCapacity(pluginCtx context.Context) bool {
 	// check if there are already two VMS running or not
 	runningVMsList, err := ankaCLI.ExecuteParseJson(pluginCtx, "anka", "-j", "list", "-r")
 	if err != nil {
-		logging.Error(pluginCtx, "error executing anka list -r", "err", err)
-		return false
+		// If we can't get the running VM list (e.g., during shutdown or empty output),
+		// assume we have capacity. The actual VM operation will fail with a proper error
+		// if there's no capacity.
+		logging.Debug(pluginCtx, "unable to get running VMs list, assuming capacity available", "err", err)
+		return true
 	}
 	if runningVMsList.Status != "OK" {
 		logging.Error(pluginCtx, "error listing running VMs", "status", runningVMsList.Status, "message", runningVMsList.Message)
@@ -787,8 +790,9 @@ func HostHasVmCapacity(pluginCtx context.Context) bool {
 	if bodySlice, ok := runningVMsList.Body.([]any); ok {
 		runningVMsCount = len(bodySlice)
 	} else {
-		logging.Error(pluginCtx, "unable to parse running VMs list body to []any")
-		return false
+		// Empty or nil body means no running VMs
+		logging.Debug(pluginCtx, "running VMs list body is empty or not a slice, assuming 0 running VMs")
+		runningVMsCount = 0
 	}
 	if runningVMsCount >= 2 {
 		logging.Warn(pluginCtx, "more than 2 VMs are running; unable to run more than 2 at a time due to Apple SLA")

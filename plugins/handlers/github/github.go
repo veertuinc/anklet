@@ -1401,8 +1401,6 @@ func Run(
 	// 	}
 	// }
 
-	// logging.Info(pluginCtx, "checking for jobs....")
-
 	// alreadyNexted := false
 	// pluginGlobals.AlreadyNextedPrepLock = &alreadyNexted // important so the next cleanup doesn't advance the prep lock/index
 

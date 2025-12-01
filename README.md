@@ -109,7 +109,7 @@ plugins:
 1. [Set up the Receiver Plugin.](./plugins/receivers/github/README.md)
 1. [Set up the Handler Plugin.](./plugins/handlers/github/README.md)
 1. Run the binary on the host that has the [Anka CLI installed](https://docs.veertu.com/anka/anka-virtualization-cli/getting-started/installing-the-anka-virtualization-package/) (Anka is not needed if just running an Anklet Receiver).
-    - You can run `anklet` with `LOG_LEVEL=DEBUG` to see more verbose output.
+    - You can run `anklet` with `LOG_LEVEL=DEBUG` to see more verbose JSON output, or `LOG_LEVEL=DEBUG-PRETTY` for colored pretty-printed output.
 1. To stop, send an interrupt signal or ctrl+c. It will attempt a graceful shut down of plugins, sending unfinished jobs back to the queue or waiting until the job is done to prevent orphans.
 
 It is also possible to use ENVs for several of the items in the config. They override anything set in the yml. Here is a list of ENVs that you can use:
@@ -642,7 +642,17 @@ ln -s ~/.config/anklet/repo-receiver-config.yml repo-receiver-config.yml
 
 - **NOTE:** You'll need to change the webhook URL so it points to the public IP of the server running the receiver (for me, that's my ISP's public IP + open port forwarding to my local machine).
 
-The `dev` LOG_LEVEL has colored output with text + pretty printed JSON for easier debugging. Here is an example:
+#### Log Levels
+
+| Level | Description |
+| --- | --- |
+| `INFO` | Default. Standard JSON output with info level messages. |
+| `DEBUG` | JSON output with debug level messages. |
+| `DEBUG-PRETTY` | Colored, pretty-printed output with debug level messages. Best for local development. |
+| `DEV` | Alias for `DEBUG-PRETTY`. |
+| `ERROR` | JSON output with only error level messages. |
+
+The `DEBUG-PRETTY` (or `DEV`) log level has colored output with text + pretty printed JSON for easier debugging. Here is an example:
 
 ```
 [20:45:21.814] INFO: job still in progress {
@@ -671,7 +681,7 @@ The `dev` LOG_LEVEL has colored output with text + pretty printed JSON for easie
 ```
 
 - `LOG_LEVEL=ERROR go run main.go` to see only errors
-- Run each service only once with `LOG_LEVEL=dev go run -ldflags "-X main.runOnce=true" main.go`
+- Run each service only once with `LOG_LEVEL=DEBUG-PRETTY go run -ldflags "-X main.runOnce=true" main.go`
 
 ### Plugins
 
@@ -736,6 +746,83 @@ if err != nil {
 
 See [`internal/metrics/metrics.go`](./internal/metrics/metrics.go) for the full list of functions.
 
+## Testing
+
+Tests are located in the `tests/` directory and are organized into two categories:
+
+### CLI Tests
+
+CLI tests validate Anklet's startup behavior, configuration parsing, and error handling. Run all CLI tests with:
+
+```bash
+./tests/cli-test.bash
+```
+
+Or run a specific test:
+
+```bash
+./tests/cli-test.bash start-stop
+```
+
+**Available CLI tests:**
+
+| Test | Description |
+|------|-------------|
+| `empty` | Validates error handling for empty config files |
+| `no-log-directory` | Validates error when log directory doesn't exist |
+| `no-plugins` | Validates graceful startup with no plugins configured |
+| `no-plugin-name` | Validates error when plugin name is missing |
+| `non-existent-plugin` | Validates error for unknown plugin types |
+| `no-db` | Validates error handling when database is unavailable |
+| `capacity` | Validates VM capacity checking |
+| `start-stop` | Validates clean startup and shutdown cycle |
+
+### Plugin Tests
+
+Plugin tests are end-to-end integration tests that validate receiver and handler plugins against real CI platforms. Tests are located in `tests/plugins/{plugin-name}/`.
+
+Each test directory contains:
+
+- **`manifest.yaml`** - Defines the test environment including required hosts, configurations, and startup scripts
+- **`test.bash`** - The test script that runs assertions against workflow runs and logs
+- **`*.yaml`** - Host-specific Anklet configuration files
+- **`start-*.bash`** - Scripts to start Anklet components on each host
+
+#### Manifest Structure
+
+```yaml
+description: "Test description"
+tests:
+    - name: "Test name"
+      hosts:
+        - name: "receiver"
+          id: "ubuntu-22.04-linux"
+          config: ubuntu-22.04-linux.yaml
+          start: start-receiver.bash
+          cleanup: start-receiver.bash --clean
+
+        - name: "handler"
+          id: "13-L-ARM-macos"
+          config: 13-L-ARM-macos.yaml
+          start: start-handler.bash
+          cleanup: start-handler.bash --clean
+```
+
+#### Test Helper Functions
+
+Tests have access to helper functions for common operations. See [`tests/plugins/AVAILABLE_TEST_FUNCTIONS.md`](./tests/plugins/AVAILABLE_TEST_FUNCTIONS.md) for the complete reference.
+
+#### Example Test
+
+[Example test for github plugin you can review](./tests/plugins/github/1-test-success).
+
+### Unit Tests
+
+Go unit tests can be run with:
+
+```bash
+make go.test
+```
 
 ## Copyright
 

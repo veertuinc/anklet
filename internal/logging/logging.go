@@ -23,7 +23,8 @@ type ContextHandler struct {
 }
 
 func IsDebugEnabled() bool {
-	return strings.ToUpper(os.Getenv("LOG_LEVEL")) == "DEBUG" || strings.ToUpper(os.Getenv("LOG_LEVEL")) == "DEV"
+	logLevel := strings.ToUpper(os.Getenv("LOG_LEVEL"))
+	return logLevel == "DEBUG" || logLevel == "DEBUG-PRETTY" || logLevel == "DEV"
 }
 
 // getCallerSource returns the source information for the actual caller,
@@ -48,25 +49,26 @@ func getCallerSource(skip int) *slog.Source {
 }
 
 func New() *slog.Logger {
-	logLevel := os.Getenv("LOG_LEVEL")
+	logLevel := strings.ToUpper(os.Getenv("LOG_LEVEL"))
 	var options *slog.HandlerOptions
-	if strings.ToUpper(logLevel) == "DEBUG" {
-		// DEBUG uses pretty handler for development readability
+	switch logLevel {
+	case "DEBUG-PRETTY", "DEV":
+		// DEBUG-PRETTY (or DEV alias) uses pretty handler for development readability
 		handler := &ContextHandler{Handler: NewPrettyHandler(&slog.HandlerOptions{
 			Level:       slog.LevelDebug,
 			AddSource:   false, // We handle source manually
 			ReplaceAttr: nil,
 		})}
 		return slog.New(handler)
-	} else if strings.ToUpper(logLevel) == "DEV" {
-		// DEV uses JSON handler for pure JSON output
+	case "DEBUG":
+		// DEBUG uses JSON handler with debug level
 		options = &slog.HandlerOptions{
 			Level:     slog.LevelDebug,
 			AddSource: false, // We handle source manually
 		}
-	} else if strings.ToUpper(logLevel) == "ERROR" {
+	case "ERROR":
 		options = &slog.HandlerOptions{Level: slog.LevelError}
-	} else {
+	default:
 		options = &slog.HandlerOptions{Level: slog.LevelInfo}
 	}
 	handler := &ContextHandler{Handler: slog.NewJSONHandler(os.Stdout, options)}
@@ -208,7 +210,8 @@ func Info(ctx context.Context, message string, args ...any) {
 }
 
 func Dev(ctx context.Context, message string, args ...any) {
-	if strings.ToUpper(os.Getenv("LOG_LEVEL")) == "DEV" {
+	logLevel := strings.ToUpper(os.Getenv("LOG_LEVEL"))
+	if logLevel == "DEV" || logLevel == "DEBUG-PRETTY" {
 		logger, err := GetLoggerFromContext(ctx)
 		if err != nil {
 			panic(err)
