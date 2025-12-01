@@ -30,7 +30,7 @@ wait_for_exit() {
 trap 'wait_for_exit' SIGTERM SIGINT
 
 clean_anklet "receiver"
-start_anklet_backgrounded_but_not_attached "receiver"
+start_anklet_backgrounded_but_not_attached
 # check that it started properly
 check_anklet_process
 echo "==========================================="
