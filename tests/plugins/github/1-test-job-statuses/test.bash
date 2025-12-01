@@ -24,10 +24,15 @@ cleanup() {
 }
 trap 'cleanup; _finalize_test_report_on_exit' EXIT
 
+assert_redis_key_exists "anklet/metrics/veertuinc/GITHUB_HANDLER1"
+assert_redis_key_exists "anklet/metrics/veertuinc/GITHUB_RECEIVER1"
+
 ############
 # t1-cancelled-failure-no-tag-in-registry
 begin_test "t1-cancelled-failure-no-tag-in-registry"
 run_workflow_and_get_logs "veertuinc" "anklet" "t1-cancelled-failure-no-tag-in-registry" "cancelled" && record_pass || record_fail "workflow did not complete as expected"
+assert_redis_key_exists "anklet/metrics/veertuinc/GITHUB_HANDLER1"
+assert_redis_key_exists "anklet/metrics/veertuinc/GITHUB_RECEIVER1"
 end_test
 ############
 
