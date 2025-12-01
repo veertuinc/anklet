@@ -67,9 +67,9 @@ trap 'cleanup; _finalize_test_report_on_exit' EXIT
 # ############
 
 ############
-# t1-with-tag-1-matrix-nodes-2
-begin_test "t1-with-tag-1-matrix-nodes-2"
-if run_workflow_and_get_logs "veertuinc" "anklet" "t1-with-tag-1-matrix-nodes-2" "success"; then
+# t1-with-tag-1
+begin_test "t1-with-tag-1"
+if run_workflow_and_get_logs "veertuinc" "anklet" "t1-with-tag-1" "success"; then
     # Add assertions here if needed
     record_pass
 else
@@ -79,9 +79,9 @@ end_test
 ############
 
 ############
-# t1-with-tag-1
-begin_test "t1-with-tag-1"
-if run_workflow_and_get_logs "veertuinc" "anklet" "t1-with-tag-1" "success"; then
+# t1-with-tag-1-matrix-nodes-2
+begin_test "t1-with-tag-1-matrix-nodes-2"
+if run_workflow_and_get_logs "veertuinc" "anklet" "t1-with-tag-1-matrix-nodes-2" "success"; then
     # Add assertions here if needed
     record_pass
 else

@@ -67,6 +67,12 @@ begin_test() {
     echo ""
     echo "############"
     echo "# ${CURRENT_TEST_NAME}"
+    
+    # List Redis keys at the start of the test for debugging
+    if type list_redis_keys &>/dev/null; then
+        echo "]] Redis keys at test START:"
+        list_redis_keys
+    fi
 }
 
 # Record test passed (only records once per test)
@@ -224,6 +230,12 @@ end_test() {
     # Save logs if not already saved by record_pass/record_fail
     if [[ "${CURRENT_TEST_LOGS_SAVED}" != "true" ]]; then
         _save_test_logs
+    fi
+    
+    # List Redis keys at the end of the test for debugging
+    if type list_redis_keys &>/dev/null; then
+        echo "]] Redis keys at test END:"
+        list_redis_keys
     fi
     
     # Reset for next test
