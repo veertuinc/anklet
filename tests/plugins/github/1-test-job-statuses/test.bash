@@ -69,7 +69,7 @@ trap 'cleanup; _finalize_test_report_on_exit' EXIT
 ############
 # t1-with-tag-1
 begin_test "t1-with-tag-1"
-if run_workflow_and_get_logs "veertuinc" "anklet" "t1-with-tag-1" "success"; then
+if run_workflow_and_get_logs "veertuinc" "anklet" "t1-with-tag-1" "successs"; then
     # Add assertions here if needed
     record_pass
 else
