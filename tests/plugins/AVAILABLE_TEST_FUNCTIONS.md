@@ -65,7 +65,7 @@ finalize_test_report "${TEST_DIR_NAME}"
 | `cancel_running_workflow_runs <owner> <repo> [patterns...]` | Cancel all running workflow runs matching patterns. |
 | `get_workflow_run_logs <owner> <repo> <pattern> [run_index]` | Get workflow run logs and save to files. Outputs file paths to stdout. |
 
-**Note:** These functions require `ANKLET_TEST_TRIGGER_GITHUB_PAT` environment variable to be set.
+**Note:** These functions require `ANKLET_TEST_GITHUB_PAT` environment variable to be set.
 
 ### Examples
 
