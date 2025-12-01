@@ -5,7 +5,10 @@ The Github Receiver Plugin is used to receive webhook events from github and sto
 ### What you need:
 
 1. An active database the receiver can access. For help setting up the database, see [Database Setup](https://github.com/veertuinc/anklet/tree/main?tab=readme-ov-file#database-setup). It needs to be the same database as the [Github Handler Plugin](../../handlers/github/README.md).
-1. Some sort of Auth method like a PAT or a Github App for the repo you want to receive webhooks for. They need `Administration`, `Webhooks`, and `Actions` set to `Read and write`.
+1. Some sort of Auth method like a PAT or a Github App for the repo you want to receive webhooks for. They need:
+  - Repo Receiver: `Administration`, `Webhooks`, and `Actions` set to `Read and write`.
+  - Org Receiver: Under `Organization permissions` set `Administration`, `Webhooks`, and `Self-hosted runners` to `Read and write`.
+  - IMPORTANT: Make sure to check your email to verify any permission requests.
 1. A way to receive webhooks. This can be a public URL or IP that points to the server running the Anklet Github Receiver. Github will send the webhook to this endpoint over the internet.
 
 In the `config.yml`, you can define the `github_receiver` plugin as follows:
@@ -151,3 +154,12 @@ host_disk_usage_percentage 62.637773
 ## Healthcheck
 
 A Healthcheck endpoint is available at `http://{url/ip}:{port}/healthcheck`. It will return a 200 status code and `ok` if the plugin is running.
+
+## FAQS
+
+1. Available `plugin_status` values are: `running`, `in_progress`, `limit_paused`, `idle`, `stopped`.
+  - `running`: The plugin has started and is available to run a job.
+  - `in_progress`: The plugin has picked up a job to run.
+  - `limit_paused`: The plugin is paused because of Github API rate limits. (will continue once the rate limits are reset after the specific github duration)
+  - `idle`: The plugin is idle.
+  - `stopped`: The plugin is stopped.

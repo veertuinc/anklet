@@ -322,6 +322,7 @@ func worker(
 				if !loadedConfig.Metrics.Aggregator {
 					parentLogger.WarnContext(workerCtx, "best effort graceful shutdown, interrupting the job as soon as possible...")
 				}
+
 				workerGlobals.ReturnAllToMainQueue.Store(true)
 				workerCancel()
 			}
@@ -457,6 +458,12 @@ func worker(
 				defer wg.Done()
 				pluginCtx, pluginCancel := context.WithCancel(context.Background()) // we don't use workerCtx here as it causes Attrs to race condition and be incorrect
 
+				// Listen for workerCtx cancellation (SIGINT) and cancel pluginCtx
+				go func() {
+					<-workerCtx.Done()
+					pluginCancel()
+				}()
+
 				workerGlobals, err := config.GetWorkerGlobalsFromContext(workerCtx)
 				if err != nil {
 					parentLogger.ErrorContext(pluginCtx, "unable to get globals from context", "error", err)
@@ -564,7 +571,10 @@ func worker(
 						databaseDatabase = plugin.Database.Database
 					}
 					logging.Dev(pluginCtx, "connecting to database")
-					databaseClient, err := database.NewClient(pluginCtx, config.Database{
+					// Create database client with background context so it remains usable during shutdown
+					// even when pluginCtx is canceled. Operations will still use their own contexts for cancellation.
+					dbCtx := context.WithValue(context.Background(), config.ContextKey("logger"), pluginLogger)
+					databaseClient, err := database.NewClient(dbCtx, config.Database{
 						URL:         databaseURL,
 						Port:        databasePort,
 						User:        databaseUser,
@@ -584,7 +594,24 @@ func worker(
 					logging.Dev(pluginCtx, "connected to database")
 					// cleanup metrics data when the plugin is stopped (otherwise it's orphaned in the aggregator)
 					if index == 0 {
-						defer metrics.Cleanup(pluginCtx, plugin.Owner, plugin.Name)
+						// Capture values needed for cleanup
+						capturedOwner := plugin.Owner
+						capturedName := plugin.Name
+						capturedLogger := pluginLogger
+						capturedDatabase := databaseClient
+						defer func() {
+							// Create a fresh context for metrics cleanup WITHOUT a deadline
+							// Database client was created with background context so it remains usable
+							metricsCleanupCtx := context.Background()
+							metricsCleanupCtx = context.WithValue(metricsCleanupCtx, config.ContextKey("logger"), capturedLogger)
+
+							// Create a modified database client with 0 retries for fast-fail during cleanup
+							cleanupDb := *capturedDatabase
+							cleanupDb.MaxRetries = 0 // No retries during cleanup
+							metricsCleanupCtx = context.WithValue(metricsCleanupCtx, config.ContextKey("database"), &cleanupDb)
+
+							metrics.Cleanup(metricsCleanupCtx, capturedOwner, capturedName)
+						}()
 					}
 				}
 

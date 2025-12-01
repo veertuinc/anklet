@@ -803,8 +803,12 @@ MainLoop:
 						})
 					}
 					if err != nil {
-						// logger.ErrorContext(pluginCtx, "error listing hooks", "error", err)
-						return pluginCtx, fmt.Errorf("error listing hooks: %s", err.Error())
+						logging.Warn(pluginCtx, "error getting hook delivery, skipping check for completed delivery",
+							"error", err,
+							"hook_id", *otherHookDelivery.ID,
+							"workflow_job_id", *workflowJob.ID,
+						)
+						continue
 					}
 					var otherWorkflowJobEventPayload internalGithub.QueueJob
 					err = json.Unmarshal(*otherGottenHookDelivery.Request.RawPayload, &otherWorkflowJobEventPayload)

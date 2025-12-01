@@ -849,8 +849,7 @@ func cleanup(
 	pausedQueueName string,
 	onStartRun bool,
 ) {
-
-	// create an idependent copy of the pluginCtx so we can do cleanup even if pluginCtx got "context canceled"
+	// create an independent copy of the pluginCtx so we can do cleanup even if pluginCtx got "context canceled"
 	cleanupContext := context.Background()
 
 	logger, err := logging.GetLoggerFromContext(pluginCtx)
@@ -897,16 +896,21 @@ func cleanup(
 		}
 	}()
 
+	// Use existing database client with fast-fail settings for cleanup
+	// The existing client may have healthy pooled connections that don't require new TCP dials
+	// Creating a fresh client requires establishing new connections which can fail during shutdown
 	serviceDatabase, err := database.GetDatabaseFromContext(pluginCtx)
 	if err != nil {
 		logging.Error(pluginCtx, "error getting database from context", "error", err)
 		return
 	}
-	cleanupContext = context.WithValue(cleanupContext, config.ContextKey("database"), serviceDatabase)
-	cleanupContext, cancel := context.WithCancel(cleanupContext)
-	defer func() {
-		cancel()
-	}()
+
+	// Create a modified database client with 0 retries for fast-fail during cleanup
+	cleanupDbCopy := *serviceDatabase
+	cleanupDbCopy.MaxRetries = 0 // No retries during cleanup - fail immediately if connection issues
+	cleanupDb := &cleanupDbCopy
+	cleanupContext = context.WithValue(cleanupContext, config.ContextKey("database"), cleanupDb)
+
 	databaseContainer, err := database.GetDatabaseFromContext(cleanupContext)
 	if err != nil {
 		logging.Error(pluginCtx, "error getting database from context", "error", err)
@@ -916,7 +920,8 @@ func cleanup(
 	// get the original job with the latest status
 	originalJobJSON, err := databaseContainer.RetryLIndex(cleanupContext, pluginQueueName, 0)
 	if err != nil && err != redis.Nil {
-		logging.Error(pluginCtx, "error getting job from the list", "error", err)
+		// During cleanup, database errors are not fatal - log as warning and skip cleanup
+		logging.Warn(pluginCtx, "unable to get job from database during cleanup, skipping", "error", err)
 		return
 	}
 	if err == redis.Nil {
@@ -1007,12 +1012,13 @@ func cleanup(
 				return
 			}
 			if strings.ToUpper(os.Getenv("LOG_LEVEL")) == "DEBUG" || strings.ToUpper(os.Getenv("LOG_LEVEL")) == "DEV" {
-				err = ankaCLI.AnkaCopyOutOfVM(pluginCtx, queuedJob.AnkaVM.Name, "/Users/anka/actions-runner/_diag", "/tmp/"+queuedJob.AnkaVM.Name)
+				err = ankaCLI.AnkaCopyOutOfVM(cleanupContext, queuedJob.AnkaVM.Name, "/Users/anka/actions-runner/_diag", "/tmp/"+queuedJob.AnkaVM.Name)
 				if err != nil {
 					logging.Warn(pluginCtx, "error copying actions runner out of vm", "error", err)
 				}
 			}
-			err = ankaCLI.AnkaDelete(workerCtx, pluginCtx, queuedJob.AnkaVM.Name)
+			// Use cleanupContext to ensure VM deletion completes even on SIGINT
+			err = ankaCLI.AnkaDelete(workerCtx, cleanupContext, queuedJob.AnkaVM.Name)
 			if err != nil {
 				logging.Error(pluginCtx, "error deleting vm", "error", err)
 			}
@@ -2021,6 +2027,24 @@ func Run(
 
 	logging.Info(pluginCtx, "vm has enough resources now to run; starting runner")
 
+	// Validate plugin scripts exist before pulling template
+	installRunnerPath := filepath.Join(workerGlobals.PluginsPath, "handlers", "github", "install-runner.bash")
+	registerRunnerPath := filepath.Join(workerGlobals.PluginsPath, "handlers", "github", "register-runner.bash")
+	startRunnerPath := filepath.Join(workerGlobals.PluginsPath, "handlers", "github", "start-runner.bash")
+	_, installRunnerErr := os.Stat(installRunnerPath)
+	_, registerRunnerErr := os.Stat(registerRunnerPath)
+	_, startRunnerErr := os.Stat(startRunnerPath)
+	if installRunnerErr != nil || registerRunnerErr != nil || startRunnerErr != nil {
+		// logging.Error(pluginCtx, "must include install-runner.bash, register-runner.bash, and start-runner.bash in "+globals.PluginsPath+"/handlers/github/", "error", err)
+		pluginGlobals.RetryChannel <- "cancel"
+		err, _ = internalGithub.UpdateJobInDB(pluginCtx, pluginQueueName, &queuedJob)
+		if err != nil {
+			logging.Error(pluginCtx, "error updating job in db", "error", err)
+		}
+		// Don't send to JobChannel here - checkForCompletedJobs handles it via RetryChannel
+		return pluginCtx, fmt.Errorf("must include install-runner.bash, register-runner.bash, and start-runner.bash in %s/handlers/github/", workerGlobals.PluginsPath)
+	}
+
 	// See if VM Template existing already
 	if !pluginConfig.SkipPull {
 		noTemplateTagExistsInRegistryError, ensureSpaceError, genericError := ankaCLI.EnsureVMTemplateExists(workerCtx, pluginCtx, ankaTemplateUUID, ankaTemplateTag)
@@ -2111,7 +2135,12 @@ func Run(
 		wrappedVmJSON, wrappedVmErr = json.Marshal(wrappedVM)
 		if wrappedVmErr != nil {
 			// logging.Error(pluginCtx, "error marshalling vm to json", "error", wrappedVmErr)
-			err = ankaCLI.AnkaDelete(workerCtx, pluginCtx, vm.Name)
+			// Use background context to ensure VM deletion completes even if pluginCtx is canceled
+			deleteCtx := context.Background()
+			if logger, err := logging.GetLoggerFromContext(pluginCtx); err == nil {
+				deleteCtx = context.WithValue(deleteCtx, config.ContextKey("logger"), logger)
+			}
+			err = ankaCLI.AnkaDelete(workerCtx, deleteCtx, vm.Name)
 			if err != nil {
 				logging.Error(pluginCtx, "error deleting vm", "error", err)
 			}
@@ -2120,7 +2149,12 @@ func Run(
 		}
 	}
 	if workerCtx.Err() != nil || pluginCtx.Err() != nil {
-		err = ankaCLI.AnkaDelete(workerCtx, pluginCtx, vm.Name)
+		// Use background context to ensure VM deletion completes even when contexts are canceled
+		deleteCtx := context.Background()
+		if logger, err := logging.GetLoggerFromContext(pluginCtx); err == nil {
+			deleteCtx = context.WithValue(deleteCtx, config.ContextKey("logger"), logger)
+		}
+		err = ankaCLI.AnkaDelete(workerCtx, deleteCtx, vm.Name)
 		if err != nil {
 			logging.Error(pluginCtx, "error deleting vm", "error", err)
 		}
@@ -2151,24 +2185,6 @@ func Run(
 		// logging.Warn(pluginCtx, "context canceled after ObtainAnkaVM")
 		pluginGlobals.RetryChannel <- "context_canceled"
 		return pluginCtx, fmt.Errorf("context canceled after ObtainAnkaVM")
-	}
-
-	// Install runner
-	installRunnerPath := filepath.Join(workerGlobals.PluginsPath, "handlers", "github", "install-runner.bash")
-	registerRunnerPath := filepath.Join(workerGlobals.PluginsPath, "handlers", "github", "register-runner.bash")
-	startRunnerPath := filepath.Join(workerGlobals.PluginsPath, "handlers", "github", "start-runner.bash")
-	_, installRunnerErr := os.Stat(installRunnerPath)
-	_, registerRunnerErr := os.Stat(registerRunnerPath)
-	_, startRunnerErr := os.Stat(startRunnerPath)
-	if installRunnerErr != nil || registerRunnerErr != nil || startRunnerErr != nil {
-		// logging.Error(pluginCtx, "must include install-runner.bash, register-runner.bash, and start-runner.bash in "+globals.PluginsPath+"/handlers/github/", "error", err)
-		pluginGlobals.RetryChannel <- "cancel"
-		err, _ = internalGithub.UpdateJobInDB(pluginCtx, pluginQueueName, &queuedJob)
-		if err != nil {
-			logging.Error(pluginCtx, "error updating job in db", "error", err)
-		}
-		pluginGlobals.JobChannel <- queuedJob
-		return pluginCtx, fmt.Errorf("must include install-runner.bash, register-runner.bash, and start-runner.bash in %s/handlers/github/", workerGlobals.PluginsPath)
 	}
 
 	// Copy runner scripts to VM
@@ -2230,7 +2246,7 @@ func Run(
 	if registerRunnerErrTimeout != nil { // retryable
 		logging.Error(pluginCtx, "timeout executing register-runner.bash", "error", registerRunnerErrTimeout)
 		pluginGlobals.RetryChannel <- "timeout_executing_register_runner_bash"
-		pluginGlobals.JobChannel <- internalGithub.QueueJob{Action: "finish"}
+		// Don't send to JobChannel here - checkForCompletedJobs handles it via RetryChannel
 		return pluginCtx, nil
 	}
 	if registerRunnerErr != nil {

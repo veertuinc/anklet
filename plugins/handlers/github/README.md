@@ -51,6 +51,7 @@ plugins:
 ```
 
 - Your PAT or Github App must have **Actions** and **Administration** Read & Write permissions.
+- To avoid 404s from the Github API, you need to be sure the app is installed on the repos you want to run jobs on.
 - You must define the database in the config.yml file either using the `database` section or the `global_database_*` variables. You can find installation instructions in the anklet main [README.md](../../README.md#database-setup).
 - If you are attempting to register runners for an entire organization, do NOT set `repo` and make sure your Github App has `Self-hosted runners` > `Read and write` permissions.
 - If your Organization level runner is registered and your public repo jobs are not picking it up even though the labels are a perfect match, make sure the Runner groups (likely `Default`) has `Allow public repositories`.
@@ -117,6 +118,44 @@ This means worst case scenario it could make a total of 3 api calls total. Other
 
 ---
 
+## Metrics
+
+#### Key Names and Descriptions
+
+| Key | Description | 
+| ------ | ----------- |
+| total_running_vms | Total number of running VMs |
+| total_successful_runs_since_start | Total number of successful runs since start |
+| total_failed_runs_since_start | Total number of failed runs since start |
+| total_canceled_runs_since_start | Total number of canceled runs since start |
+| plugin_name | Name of the plugin |
+| plugin_plugin_name | Name of the plugin |
+| plugin_owner_name | Name of the owner |
+| plugin_repo_name | Name of the repo |
+| plugin_status | Status of the plugin (running, in_progress, limit_paused, idle, stopped) |
+| plugin_last_successful_run_job_url | Last successful run job url of the plugin |
+| plugin_last_failed_run_job_url | Last failed run job url of the plugin |
+| plugin_last_successful_run | Timestamp of last successful run of the plugin (RFC3339) |
+| plugin_last_failed_run | Timestamp of last failed run of the plugin (RFC3339) |
+| plugin_status_since | Timestamp of when the plugin was last started (RFC3339) |
+| plugin_total_ran_vms | Total number of VMs ran by the plugin |
+| plugin_total_successful_runs_since_start | Total number of successful runs since start |
+| plugin_total_failed_runs_since_start | Total number of failed runs since start |
+| plugin_total_canceled_runs_since_start | Total number of canceled runs since start |
+| host_cpu_count | Total CPU count of the host |
+| host_cpu_used_count | Total in use CPU count of the host |
+| host_cpu_usage_percentage | CPU usage percentage of the host |
+| host_memory_total_bytes | Total memory of the host (bytes) |
+| host_memory_used_bytes | Used memory of the host (bytes) |
+| host_memory_available_bytes | Available memory of the host (bytes) |
+| host_memory_usage_percentage | Memory usage percentage of the host |
+| host_disk_total_bytes | Total disk space of the host (bytes) |
+| host_disk_used_bytes | Used disk space of the host (bytes) |
+| host_disk_available_bytes | Available disk space of the host (bytes) |
+| host_disk_usage_percentage | Disk usage percentage of the host |
+
+---
+
 ## FAQS
 
 1. My Jobs are taking a long time to be picked up.
@@ -130,6 +169,13 @@ Check that:
   3. You're specifying `${{ github.run_id }}-${{ strategy.job-index }}` in your `runs-on` labels. Otherwise, jobs could timeout or fail and cause delays in cleanup, etc.
 
 2. Debug logging can be enabled with `LOG_LEVEL=dev` in the environment. All output of debug logging will be in JSON.
+
+3. Available `plugin_status` values are: `running`, `in_progress`, `limit_paused`, `idle`, `stopped`.
+  - `running`: The plugin has started and is available to run a job.
+  - `in_progress`: The plugin has picked up a job to run.
+  - `limit_paused`: The plugin is paused because of Github API rate limits. (will continue once the rate limits are reset after the specific github duration)
+  - `idle`: The plugin is idle.
+  - `stopped`: The plugin is stopped.
 
 ## Development
 

@@ -44,35 +44,108 @@ func isRetriableError(err error) bool {
 // retryOperation performs an operation with retry logic
 func (db *Database) retryOperation(ctx context.Context, operationName string, operation func() error) error {
 	var lastErr error
-	for attempt := 0; attempt <= db.MaxRetries; attempt++ {
+
+	// Check if context has a deadline (e.g., cleanup/shutdown scenario)
+	// If so, reduce retries to fail faster
+	maxRetries := db.MaxRetries
+	if deadline, hasDeadline := ctx.Deadline(); hasDeadline {
+		timeRemaining := time.Until(deadline)
+		// If we have less than 10 seconds, don't retry at all - just try once
+		if timeRemaining < 10*time.Second {
+			maxRetries = 0
+		} else if timeRemaining < 30*time.Second {
+			// If less than 30 seconds, only retry once
+			maxRetries = 1
+		}
+	}
+
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		// Check if context is canceled before attempting operation
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("context canceled before %s: %w", operationName, ctx.Err())
+		default:
+		}
+
 		if attempt > 0 {
 			// Calculate delay with exponential backoff
 			delay := time.Duration(float64(db.RetryDelay) * float64(attempt) * db.RetryBackoffFactor)
-			logging.Warn(ctx, fmt.Sprintf("retrying %s in %v (attempt %d/%d)", operationName, delay, attempt, db.MaxRetries))
+
+			// If context has a deadline, ensure we don't wait longer than remaining time
+			if deadline, hasDeadline := ctx.Deadline(); hasDeadline {
+				timeRemaining := time.Until(deadline)
+				if delay > timeRemaining {
+					// Not enough time left, fail immediately
+					return fmt.Errorf("insufficient time remaining for retry of %s: %w", operationName, lastErr)
+				}
+			}
+
+			// Safely attempt to log, catching any panics from canceled contexts
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						// Context was canceled during logging, silently continue
+						_ = r
+					}
+				}()
+				logging.Warn(ctx, fmt.Sprintf("retrying %s in %v (attempt %d/%d)", operationName, delay, attempt, maxRetries))
+			}()
+
+			// Create a timer for the delay
+			timer := time.NewTimer(delay)
+			defer timer.Stop()
 
 			select {
 			case <-ctx.Done():
 				return fmt.Errorf("context canceled during retry for %s: %w", operationName, ctx.Err())
-			case <-time.After(delay):
-				// Continue with retry
+			case <-timer.C:
+				// Check context again immediately after waking
+				if ctx.Err() != nil {
+					return fmt.Errorf("context canceled during retry for %s: %w", operationName, ctx.Err())
+				}
 			}
 		}
 
 		lastErr = operation()
+
+		// Check if context was canceled during the operation before any logging
+		if ctx.Err() != nil {
+			return fmt.Errorf("context canceled after %s operation: %w", operationName, ctx.Err())
+		}
+
 		if lastErr == nil {
 			if attempt > 0 {
-				logging.Info(ctx, fmt.Sprintf("%s succeeded after %d retries", operationName, attempt))
+				// Safely attempt to log, catching any panics from canceled contexts
+				func() {
+					defer func() {
+						if r := recover(); r != nil {
+							// Context was canceled during logging, silently continue
+							_ = r
+						}
+					}()
+					logging.Info(ctx, fmt.Sprintf("%s succeeded after %d retries", operationName, attempt))
+				}()
 			}
 			return nil
 		}
 
-		if !isRetriableError(lastErr) {
+		isRetriable := isRetriableError(lastErr)
+		if !isRetriable {
 			// logging.Debug(ctx, fmt.Sprintf("%s failed with non-retriable error: %v", operationName, lastErr))
 			return lastErr
 		}
 
-		if attempt < db.MaxRetries {
-			logging.Debug(ctx, fmt.Sprintf("%s failed (attempt %d/%d): %v", operationName, attempt+1, db.MaxRetries+1, lastErr))
+		if attempt < maxRetries {
+			// Safely attempt to log, catching any panics from canceled contexts
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						// Context was canceled during logging, silently continue
+						_ = r
+					}
+				}()
+				logging.Debug(ctx, fmt.Sprintf("%s failed (attempt %d/%d): %v", operationName, attempt+1, db.MaxRetries+1, lastErr))
+			}()
 		}
 	}
 
@@ -81,9 +154,13 @@ func (db *Database) retryOperation(ctx context.Context, operationName string, op
 
 func NewClient(ctx context.Context, config config.Database) (*Database, error) {
 	// Set default retry configuration if not specified
+	// Use -1 to explicitly request 0 retries (for cleanup operations)
+	// Use 0 or unset to get default of 5 retries (backwards compatible)
 	maxRetries := config.MaxRetries
-	if maxRetries == 0 {
-		maxRetries = 5 // Default to 5 retries
+	if maxRetries < 0 {
+		maxRetries = 0 // -1 means explicitly no retries (fast-fail for cleanup)
+	} else if maxRetries == 0 {
+		maxRetries = 5 // 0 means use defaults (for backwards compatibility with configs)
 	}
 
 	retryDelay := time.Duration(config.RetryDelay) * time.Millisecond

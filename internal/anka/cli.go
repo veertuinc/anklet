@@ -96,18 +96,20 @@ func NewCLI(pluginCtx context.Context) (*Cli, error) {
 }
 
 // DO NOT RUN exec.Command with context or else the cancellation will interrupt things like VM deletion, which we don't want!
+// Note: Critical cleanup operations should use a cleanup context with timeout (not immediately canceled) to ensure completion.
 func (cli *Cli) Execute(pluginCtx context.Context, args ...string) ([]byte, int, error) {
 	if args[2] != "list" { // hide spammy list command
 		logging.Debug(pluginCtx, "executing", "command", strings.Join(args, " "))
 	}
 	done := make(chan error, 1)
-	var cmd *exec.Cmd
 	var combinedOutput bytes.Buffer
 
+	// Create command outside goroutine so we can kill it if needed
+	cmd := exec.Command(args[0], args[1:]...)
+	cmd.Stdout = &combinedOutput
+	cmd.Stderr = &combinedOutput
+
 	go func() {
-		cmd = exec.Command(args[0], args[1:]...)
-		cmd.Stdout = &combinedOutput
-		cmd.Stderr = &combinedOutput
 		err := cmd.Run()
 		done <- err
 	}()
@@ -117,6 +119,13 @@ func (cli *Cli) Execute(pluginCtx context.Context, args ...string) ([]byte, int,
 
 	for {
 		select {
+		case <-pluginCtx.Done():
+			// Context was canceled (e.g., SIGINT received)
+			// Kill the running process to stop immediately
+			if cmd.Process != nil {
+				_ = cmd.Process.Kill()
+			}
+			return nil, 0, fmt.Errorf("context canceled during command execution: %w", pluginCtx.Err())
 		case <-ticker.C:
 			logging.Info(pluginCtx, fmt.Sprintf("execution of command %v is still in progress...", args))
 		case err := <-done:
@@ -138,13 +147,14 @@ func (cli *Cli) ExecuteWithTimeout(
 		logging.Debug(pluginCtx, "executing", "command", strings.Join(args, " "))
 	}
 	done := make(chan error, 1)
-	var cmd *exec.Cmd
 	var combinedOutput bytes.Buffer
 
+	// Create command outside goroutine so we can kill it if needed
+	cmd := exec.Command(args[0], args[1:]...)
+	cmd.Stdout = &combinedOutput
+	cmd.Stderr = &combinedOutput
+
 	go func() {
-		cmd = exec.Command(args[0], args[1:]...)
-		cmd.Stdout = &combinedOutput
-		cmd.Stderr = &combinedOutput
 		err := cmd.Run()
 		done <- err
 	}()
@@ -156,7 +166,18 @@ func (cli *Cli) ExecuteWithTimeout(
 
 	for {
 		select {
+		case <-pluginCtx.Done():
+			// Context was canceled (e.g., SIGINT received)
+			// Kill the running process to stop immediately
+			if cmd.Process != nil {
+				_ = cmd.Process.Kill()
+			}
+			return nil, 0, nil, fmt.Errorf("context canceled during command execution: %w", pluginCtx.Err())
 		case <-timeout:
+			// Kill the process on timeout
+			if cmd.Process != nil {
+				_ = cmd.Process.Kill()
+			}
 			return nil, 0, nil, fmt.Errorf("execution of command %v timed out", args)
 		case <-ticker.C:
 			logging.Info(pluginCtx, fmt.Sprintf("execution of command %v is still in progress...", args))
