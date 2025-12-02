@@ -1108,7 +1108,9 @@ func cleanup(
 				cleaningQueuedJob.Action = "queued"
 				// don't increment attempts if the job is not enough resources for this host
 				// else we'll accidentally send a cancellation for a job that may run elsewhere
-				if reason != "not_enough_host_resources" {
+				// also don't increment attempts if a pull is already running on this host
+				// this allows single-host environments to retry indefinitely while waiting for the pull to complete
+				if reason != "not_enough_host_resources" && reason != "pull_already_running_on_host" {
 					cleaningQueuedJob.Attempts++
 				}
 				cleaningJobJSON, err := json.Marshal(cleaningQueuedJob)
@@ -2055,8 +2057,14 @@ func Run(
 		if genericError != nil {
 			// DO NOT RETURN AN ERROR TO MAIN. It will cause the other job on this node to be cancelled.
 			logging.Warn(pluginCtx, "problem ensuring vm template exists on host", "error", genericError)
-			workerGlobals.IncrementQueueTargetIndex()                                   // prevent trying to run this job again on this host
-			pluginGlobals.RetryChannel <- "problem_ensuring_vm_template_exists_on_host" // return to queue so another node can pick it up
+			workerGlobals.IncrementQueueTargetIndex() // prevent trying to run this job again on this host
+			// use a specific reason for pull already running so we don't increment attempts
+			// this allows single-host environments to retry indefinitely while waiting for the pull to complete
+			if strings.Contains(genericError.Error(), "a pull is already running on this host") {
+				pluginGlobals.RetryChannel <- "pull_already_running_on_host"
+			} else {
+				pluginGlobals.RetryChannel <- "problem_ensuring_vm_template_exists_on_host" // return to queue so another node can pick it up
+			}
 			return pluginCtx, nil
 		}
 		// if the template doesn't exist in the registry, we can't ever run the VM (use submitted wrong template or tag)
