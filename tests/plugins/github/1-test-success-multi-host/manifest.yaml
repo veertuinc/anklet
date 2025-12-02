@@ -13,6 +13,7 @@ tests:
           config: 13-L-ARM-macos.yaml
           start: start-handler.bash
           cleanup: start-handler.bash --clean
+          test: test-13-L-ARM.bash
 
         - name: "handler-8-8"
           id: "8-L-ARM-macos"

@@ -24,14 +24,17 @@ cleanup() {
 }
 trap 'cleanup; _finalize_test_report_on_exit' EXIT
 
-assert_redis_key_exists "anklet/metrics/veertuinc/GITHUB_HANDLER1"
+assert_redis_key_exists "anklet/metrics/veertuinc/GITHUB_HANDLER_13_L_ARM_MACOS"
+assert_redis_key_exists "anklet/metrics/veertuinc/GITHUB_HANDLER_8_L_ARM_MACOS"
 assert_redis_key_exists "anklet/metrics/veertuinc/GITHUB_RECEIVER1"
 
 ############
 # t2-dual-without-tag
 begin_test "t2-6c14r-1"
 if run_workflow_and_get_logs "veertuinc" "anklet" "t2-6c14r-1" "success"; then
-    # Add assertions here if needed
+    assert_logs_contain "queued job found" /tmp/anklet.log
+    assert_logs_contain "GITHUB_HANDLER_13_L_ARM_MACOS" /tmp/anklet.log
+    assert_logs_contain "GITHUB_HANDLER_8_L_ARM_MACOS" /tmp/anklet.log
     record_pass
 else
     record_fail "workflow did not complete as expected"
