@@ -61,7 +61,7 @@ fi
 clean_anklet "handler"
 
 echo "]] Starting handler (foreground, attached)..."
-export LOG_LEVEL=${LOG_LEVEL:-dev}
+export LOG_LEVEL=${LOG_LEVEL:-debug}
 echo "LOG_LEVEL: $LOG_LEVEL"
 
 # Run anklet in the foreground and stay attached to it
