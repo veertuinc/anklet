@@ -216,6 +216,7 @@ TESTS
             run_test cli-test-start-stop.yml 10 <<TESTS
     log_does_not_contain "ERROR"
     log_contains "starting anklet"
+    log_contains "starting github plugin"
     log_contains "anklet (and all plugins) shut down"
 TESTS
             ;;
