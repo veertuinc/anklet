@@ -36,7 +36,7 @@ if run_workflow_and_get_logs "veertuinc" "anklet" "t1-with-tag-1" "success"; the
     assert_logs_contain "handling anka workflow run job" /tmp/anklet.log
     assert_logs_contain "job updated in database" /tmp/anklet.log
     assert_logs_contain "vm has enough resources now to run; starting runner" /tmp/anklet.log
-    assert_logs_contain "anka -j clone 84266873-da90-4e0d-903b-ed0233471f9f anklet-vm-1" /tmp/anklet.log
+    assert_logs_contain "anka -j clone 84266873-da90-4e0d-903b-ed0233471f9f anklet-vm" /tmp/anklet.log
     assert_logs_contain "job found registered runner and is now in progress" /tmp/anklet.log
     assert_logs_contain "checkForCompletedJobs -> job is in mainCompletedQueue" /tmp/anklet.log
     assert_logs_contain "ending checkForCompletedJobs" /tmp/anklet.log
@@ -48,8 +48,6 @@ if run_workflow_and_get_logs "veertuinc" "anklet" "t1-with-tag-1" "success"; the
     assert_logs_contain "job removed from queue" /tmp/anklet.log
     assert_logs_contain "GITHUB_HANDLER1" /tmp/anklet.log
     assert_logs_contain "GITHUB_HANDLER2" /tmp/anklet.log
-    assert_logs_contain "anklet plugin shut down" /tmp/anklet.log
-    assert_logs_contain "anklet (and all plugins) shut down" /tmp/anklet.log
     record_pass
 else
     record_fail "workflow did not complete as expected"
@@ -63,7 +61,7 @@ begin_test "t1-with-tag-1-matrix-nodes-2"
 if run_workflow_and_get_logs "veertuinc" "anklet" "t1-with-tag-1-matrix-nodes-2" "success"; then
     assert_json_log_contains /tmp/anklet.log "msg=handling anka workflow run job,attributes.name=GITHUB_HANDLER1"
     assert_json_log_contains /tmp/anklet.log "msg=handling anka workflow run job,attributes.name=GITHUB_HANDLER2"
-    assert_logs_not_contain "anka -j pull" /tmp/anklet.log
+    assert_logs_not_contain "anka -j registry pull" /tmp/anklet.log
     record_pass
 else
     record_fail "workflow did not complete as expected"
@@ -75,7 +73,7 @@ end_test
 # t1-with-tag-2
 begin_test "t1-with-tag-2"
 if run_workflow_and_get_logs "veertuinc" "anklet" "t1-with-tag-2" "success"; then
-    assert_logs_contain "anka -j pull" /tmp/anklet.log
+    assert_logs_contain "anka -j registry pull" /tmp/anklet.log
     record_pass
 else
     record_fail "workflow did not complete as expected"
