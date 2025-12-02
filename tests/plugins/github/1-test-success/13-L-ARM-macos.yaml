@@ -2,3 +2,5 @@
 plugins:
   - name: GITHUB_HANDLER1
     plugin: github
+  - name: GITHUB_HANDLER2
+    plugin: github
