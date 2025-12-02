@@ -119,7 +119,7 @@ log_does_not_contain() {
 
 run_test() {
     TEST_YML=$1
-    TIMEOUT=$2
+    STARTUP_DELAY=${2:-2}
     TEST_NAME=$(basename $TEST_YML | cut -d. -f1)
     TEST_LOG_FILE="/tmp/${TEST_NAME}.log"
     export LOG_LEVEL=${LOG_LEVEL:-debug}
@@ -129,15 +129,16 @@ run_test() {
     done
     echo "]] Running ${TEST_NAME} (log: ${TEST_LOG_FILE})"
     ln -s ${TESTS_DIR}/$TEST_YML ~/.config/anklet/config.yml
-    if [[ $TIMEOUT =~ ^[0-9]+$ ]]; then
-        $BINARY > $TEST_LOG_FILE 2>&1 &
-        BINARY_PID=$!
-        sleep $TIMEOUT
-        kill -SIGQUIT $BINARY_PID
-        wait $BINARY_PID
-    else
-        $BINARY > $TEST_LOG_FILE 2>&1 || true
+    $BINARY > $TEST_LOG_FILE 2>&1 &
+    BINARY_PID=$!
+    echo "]]] Waiting ${STARTUP_DELAY}s for initialization..."
+    sleep $STARTUP_DELAY
+    # If process is still running after delay, send SIGINT to trigger graceful shutdown
+    if ps -p $BINARY_PID > /dev/null 2>&1; then
+        kill -SIGINT $BINARY_PID 2>/dev/null || true
     fi
+    # Wait for process to exit before checking logs
+    wait $BINARY_PID 2>/dev/null || true
     eval "${TESTS}"
     rm -f ~/.config/anklet/config.yml
 }
@@ -182,7 +183,7 @@ TESTS
 TESTS
             ;;
         "non-existent-plugin")
-            run_test cli-test-non-existent-plugin.yml <<TESTS
+            run_test cli-test-non-existent-plugin.yml 20 <<TESTS
     log_contains "ERROR"
     log_contains "plugin not supported"
     log_contains "\"name\":\"RUNNER1\""
@@ -204,7 +205,7 @@ TESTS
             run_cmd anka start "${TEST_VM}-1"
             run_cmd anka clone "${TEST_VM}" "${TEST_VM}-2"
             run_cmd anka start "${TEST_VM}-2"
-            run_test cli-test-capacity.yml <<TESTS
+            run_test cli-test-capacity.yml 20 <<TESTS
     log_contains "ERROR"
     log_contains "host does not have vm capacity"
     log_contains "anklet (and all plugins) shut down"
@@ -213,7 +214,8 @@ TESTS
             run_cmd anka delete --yes "${TEST_VM}-2"
             ;;
         "start-stop")
-            run_test cli-test-start-stop.yml 10 <<TESTS
+            # Second param = seconds to wait for initialization before sending SIGINT
+            run_test cli-test-start-stop.yml 25 <<TESTS
     log_does_not_contain "ERROR"
     log_contains "starting anklet"
     log_contains "starting github plugin"
@@ -233,23 +235,19 @@ run_single_test() {
     run_test_case "$test_name"
 }
 
-# Build the binary only if we have valid tests to run
-build_binary() {
-    echo "] Building binary..."
-    goreleaser --snapshot --clean
-
-    # find the binary
-    BINARY="$(ls -1 dist/anklet_*_$(uname | tr A-Z a-z)_$(arch))"
-    echo "] Using binary: $BINARY"
-}
+# Binary is pre-built and copied by start-core-tests.bash
+BINARY="/tmp/anklet"
+if [[ ! -x "$BINARY" ]]; then
+    echo "ERROR: Binary not found at $BINARY (should be built by start-core-tests.bash)"
+    exit 1
+fi
+echo "] Using binary: $BINARY"
 
 # Run tests based on the SINGLE_TEST variable
 if [[ -n "$SINGLE_TEST" ]]; then
-    build_binary
     run_single_test "$SINGLE_TEST"
 else
     echo "] Running all tests..."
-    build_binary
 
     run_test_case "empty"
     run_test_case "no-log-directory"

@@ -1,22 +1,24 @@
 ---
-global_database_url: 127.0.0.1
+work_dir: /tmp/
+pid_file_dir: /tmp/
+global_database_url: 10.8.100.100
 global_database_port: 6379
 global_database_user:
 global_database_password:
 global_database_database: 0
-global_private_key: ~/anklet-private-key.pem
+global_private_key: /tmp/private-key.pem
 plugins:
   - name: RUNNER1
     plugin: github
     app_id: 949431
     installation_id: 52970581
-    owner: mycompanyone
+    owner: veertuinc
     registry_url: http://anka.registry:8089
     sleep_interval: 5
   - name: RUNNER2
-    plugin: github2
+    plugin: github
     app_id: 949431
     installation_id: 52970581
-    owner: mycompanytwo
+    owner: veertuinc
     registry_url: http://anka.registry:8089
-    sleep_interval: 10
+    sleep_interval: 5
