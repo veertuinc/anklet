@@ -46,7 +46,7 @@ start_anklet_backgrounded_but_attached "receiver"
 # Start anklet on handler (remote)
 ###############################################################################
 echo "] Starting anklet on handler-8-16..."
-start_anklet_on_host "handler-8-16"
+start_anklet_on_host_background "handler-8-16"
 
 # Wait for anklet to fully initialize and register with Redis
 echo "] Waiting for anklet to register with Redis..."

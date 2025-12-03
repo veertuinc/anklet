@@ -12,8 +12,9 @@ These functions allow a "tester" host to orchestrate and check other hosts in mu
 | -------- | ----------- |
 | `ssh_to_host <host_name> <command>` | Execute a command on a remote host by name. |
 | `scp_to_host <host_name> <local_path> <remote_path>` | Copy a file to a remote host by name. |
-| `start_anklet_on_host <host_name>` | Start anklet on a remote host (backgrounded). |
-| `stop_anklet_on_host <host_name>` | Stop anklet on a remote host (graceful SIGINT, then SIGKILL if needed). |
+| `start_anklet_on_host <host_name>` | Start anklet on a remote host (SSH stays connected, blocking call). |
+| `start_anklet_on_host_background <host_name>` | Start anklet on a remote host with SSH kept alive in background. Use this to avoid macOS network bug. |
+| `stop_anklet_on_host <host_name>` | Stop anklet on a remote host (graceful SIGINT, then SIGKILL if needed). Also kills SSH session. |
 | `get_anklet_log_from_host <host_name> [dest_file]` | Get anklet.log from a remote host and save locally. |
 | `check_remote_log_contains <host_name> <pattern>` | Check if remote host's anklet.log contains pattern (returns true/false). |
 | `assert_remote_log_contains <host_name> <pattern>` | Assert that remote host's anklet.log contains pattern (prints PASS/FAIL). |
@@ -25,9 +26,9 @@ These functions allow a "tester" host to orchestrate and check other hosts in mu
 # List all configured hosts
 list_all_hosts
 
-# Start anklet on handlers
-start_anklet_on_host "handler-8-16"
-start_anklet_on_host "handler-8-8"
+# Start anklet on handlers (background keeps SSH alive to avoid macOS network bug)
+start_anklet_on_host_background "handler-8-16"
+start_anklet_on_host_background "handler-8-8"
 
 # Execute command on remote host
 ssh_to_host "handler-8-16" "ls -la /tmp"
