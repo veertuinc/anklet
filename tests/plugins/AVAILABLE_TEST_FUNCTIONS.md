@@ -238,7 +238,8 @@ cleanup_log_files "${WORKFLOW_LOG_FILES[@]}"
 | Function | Description |
 | -------- | ----------- |
 | `run_workflow_and_get_logs <owner> <repo> <workflow_name> <expected_conclusion> [run_count]` | Run workflow, wait for completion, get logs. Sets `WORKFLOW_LOG_FILES` array. |
-| `run_workflow_and_check_anklet_log <owner> <repo> <workflow_name> <log_pattern>` | Run workflow and check anklet.log for pattern (ignores GitHub status). |
+| `run_workflow_and_check_anklet_log <owner> <repo> <workflow_name> <log_pattern>` | Run workflow and check local anklet.log for pattern (ignores GitHub status). |
+| `run_workflow_with_timeout_and_check_remote_log <owner> <repo> <workflow_name> <host_name> <log_pattern> [timeout_seconds]` | Run workflow with timeout, check remote anklet.log for pattern, cancel on timeout. Default timeout: 120s. |
 
 ### Examples
 
@@ -253,9 +254,17 @@ run_workflow_and_get_logs "veertuinc" "anklet" "t1-should-fail" "failure"
 assert_logs_contain "Expected error message" "${WORKFLOW_LOG_FILES[@]}"
 record_pass
 
-# Check anklet.log for specific pattern (useful when workflow can't complete)
+# Check local anklet.log for specific pattern (useful when workflow can't complete)
 run_workflow_and_check_anklet_log "veertuinc" "anklet" "t2-resource-test" "not enough resources"
 record_pass
+
+# Check REMOTE anklet.log with timeout (for resource-constrained tests on remote handlers)
+# Triggers workflow, polls remote log, cancels workflow on timeout or when pattern found
+if run_workflow_with_timeout_and_check_remote_log "veertuinc" "anklet" "t2-12c20r-1" "handler-8-16" "not enough resources" 120; then
+    record_pass
+else
+    record_fail "expected resource error not found"
+fi
 ```
 
 ---

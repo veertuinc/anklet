@@ -71,9 +71,8 @@ end_test
 # t2-12c20r-1 (resource-constrained)
 begin_test "t2-12c20r-1"
 # This workflow requires more resources than the host has available
-# Trigger workflow and check handler's log for resource error
-if run_workflow_and_get_logs "veertuinc" "anklet" "t2-12c20r-1" "failure"; then
-    assert_remote_log_contains "handler-8-16" "host does not have enough resources to run vm"
+# Trigger workflow, check handler's log for resource error with 120s timeout
+if run_workflow_with_timeout_and_check_remote_log "veertuinc" "anklet" "t2-12c20r-1" "handler-8-16" "host does not have enough resources to run vm" 60; then
     record_pass
 else
     record_fail "expected resource error not found"
@@ -84,8 +83,7 @@ end_test
 ############
 # t2-12c50r-1 (resource-constrained)
 begin_test "t2-12c50r-1"
-if run_workflow_and_get_logs "veertuinc" "anklet" "t2-12c50r-1" "failure"; then
-    assert_remote_log_contains "handler-8-16" "host does not have enough resources to run vm"
+if run_workflow_with_timeout_and_check_remote_log "veertuinc" "anklet" "t2-12c50r-1" "handler-8-16" "host does not have enough resources to run vm" 60; then
     record_pass
 else
     record_fail "expected resource error not found"
@@ -96,8 +94,7 @@ end_test
 ############
 # t2-20c20r-1 (resource-constrained)
 begin_test "t2-20c20r-1"
-if run_workflow_and_get_logs "veertuinc" "anklet" "t2-20c20r-1" "failure"; then
-    assert_remote_log_contains "handler-8-16" "host does not have enough resources to run vm"
+if run_workflow_with_timeout_and_check_remote_log "veertuinc" "anklet" "t2-20c20r-1" "handler-8-16" "host does not have enough resources to run vm" 60; then
     record_pass
 else
     record_fail "expected resource error not found"
