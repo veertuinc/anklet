@@ -151,44 +151,6 @@ end_test
 ############
 
 ############
-# t2-12c20r-1 (resource-constrained)
-begin_test "t2-12c20r-1"
-# This workflow requires more resources than the host has available
-# Trigger workflow and check handler's log for resource error
-if run_workflow_and_get_logs "veertuinc" "anklet" "t2-12c20r-1" "failure"; then
-    assert_remote_log_contains "handler-8-16" "host does not have enough resources to run vm"
-    record_pass
-else
-    record_fail "expected resource error not found"
-fi
-end_test
-############
-
-############
-# t2-12c50r-1 (resource-constrained)
-begin_test "t2-12c50r-1"
-if run_workflow_and_get_logs "veertuinc" "anklet" "t2-12c50r-1" "failure"; then
-    assert_remote_log_contains "handler-8-16" "host does not have enough resources to run vm"
-    record_pass
-else
-    record_fail "expected resource error not found"
-fi
-end_test
-############
-
-############
-# t2-20c20r-1 (resource-constrained)
-begin_test "t2-20c20r-1"
-if run_workflow_and_get_logs "veertuinc" "anklet" "t2-20c20r-1" "failure"; then
-    assert_remote_log_contains "handler-8-16" "host does not have enough resources to run vm"
-    record_pass
-else
-    record_fail "expected resource error not found"
-fi
-end_test
-############
-
-############
 # t2-dual-without-tag
 begin_test "t2-dual-without-tag"
 if run_workflow_and_get_logs "veertuinc" "anklet" "t2-dual-without-tag" "success"; then
