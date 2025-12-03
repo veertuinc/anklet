@@ -88,7 +88,8 @@ clean_anklet "my-anklet"
 | Function | Description |
 | -------- | ----------- |
 | `init_test_report <test_dir_name>` | Initialize test report file for a test directory. |
-| `begin_test <test_name>` | Begin a new test - call before running workflow. |
+| `begin_test <test_name> [expected_status]` | Begin a new test. Optional expected_status for display in report. |
+| `set_test_expected <status>` | Set expected status for current test (auto-set by workflow helpers). |
 | `record_pass` | Record that the current test passed (only records once per test). |
 | `record_fail <error_message>` | Record that the current test failed with an error message. |
 | `end_test` | End test with cleanup - always call after assertions. |
