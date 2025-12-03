@@ -4,16 +4,72 @@ These functions are available to `test.bash` files via `/tmp/redis-functions.bas
 
 ---
 
-## Anklet Process Functions
+## Remote Host Operation Functions
+
+These functions allow a "tester" host to orchestrate and check other hosts in multi-host tests. They require `ALL_HOSTS` to be set (format: `"name:user@host|name2:user@host2"`) and `ANKLET_SSH_KEY_PATH` to point to a valid SSH key.
+
+| Function | Description |
+| -------- | ----------- |
+| `ssh_to_host <host_name> <command>` | Execute a command on a remote host by name. |
+| `scp_to_host <host_name> <local_path> <remote_path>` | Copy a file to a remote host by name. |
+| `start_anklet_on_host <host_name>` | Start anklet on a remote host (backgrounded). |
+| `stop_anklet_on_host <host_name>` | Stop anklet on a remote host (graceful SIGINT, then SIGKILL if needed). |
+| `get_anklet_log_from_host <host_name> [dest_file]` | Get anklet.log from a remote host and save locally. |
+| `check_remote_log_contains <host_name> <pattern>` | Check if remote host's anklet.log contains pattern (returns true/false). |
+| `assert_remote_log_contains <host_name> <pattern>` | Assert that remote host's anklet.log contains pattern (prints PASS/FAIL). |
+| `list_all_hosts` | List all configured hosts from `ALL_HOSTS`. |
+
+### Examples
+
+```bash
+# List all configured hosts
+list_all_hosts
+
+# Start anklet on handlers
+start_anklet_on_host "handler-8-16"
+start_anklet_on_host "handler-8-8"
+
+# Execute command on remote host
+ssh_to_host "handler-8-16" "ls -la /tmp"
+
+# Copy file to remote host
+scp_to_host "handler-8-16" "/local/config.yml" "/tmp/config.yml"
+
+# Check if a handler processed a job (returns true/false, no output)
+if check_remote_log_contains "handler-8-16" "queued job found"; then
+    echo "Handler processed a job"
+fi
+
+# Assert remote log contains pattern (prints PASS/FAIL)
+assert_remote_log_contains "handler-8-16" "GITHUB_HANDLER_13_L_ARM_MACOS"
+
+# Get anklet.log from remote host
+get_anklet_log_from_host "handler-8-16" "/tmp/handler-8-16.log"
+
+# Stop anklet when done
+stop_anklet_on_host "handler-8-16"
+stop_anklet_on_host "handler-8-8"
+```
+
+---
+
+## Anklet Process Functions (Local)
+
+These functions control anklet running on the **local** host (where the test script runs).
 
 | Function | Description |
 | -------- | ----------- |
 | `check_anklet_process` | Checks that the anklet process is running. Exits with error if not running. |
 | `clean_anklet [service_name]` | Cleans up anklet processes tracked in `/tmp/anklet-pids`. |
+| `start_anklet_backgrounded_but_attached <service_name>` | Start anklet backgrounded but attached to terminal. |
+| `start_anklet_backgrounded_but_not_attached <service_name>` | Start anklet fully backgrounded (detached). |
 
 ### Examples
 
 ```bash
+# Start anklet locally (for single-host tests where tester IS the handler)
+start_anklet_backgrounded_but_attached "anklet"
+
 # Check anklet is running
 check_anklet_process
 

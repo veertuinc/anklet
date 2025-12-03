@@ -235,10 +235,10 @@ run_single_test() {
     run_test_case "$test_name"
 }
 
-# Binary is pre-built and copied by start-core-tests.bash
+# Binary is pre-built and copied by run.bash
 BINARY="/tmp/anklet"
 if [[ ! -x "$BINARY" ]]; then
-    echo "ERROR: Binary not found at $BINARY (should be built by start-core-tests.bash)"
+    echo "ERROR: Binary not found at $BINARY (should be built by run.bash)"
     exit 1
 fi
 echo "] Using binary: $BINARY"
