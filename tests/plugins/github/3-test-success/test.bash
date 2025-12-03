@@ -66,13 +66,13 @@ begin_test "t1-with-tag-1"
 if run_workflow_and_get_logs "veertuinc" "anklet" "t1-with-tag-1" "success"; then
     # Check handler's anklet.log for expected entries
     assert_remote_log_contains "handler-8-16" "queued job found"
-    assert_remote_log_contains "handler-8-16" "checkForCompletedJobs -> queued job found in pluginQueue"
     assert_remote_log_contains "handler-8-16" "handling anka workflow run job"
-    assert_remote_log_contains "handler-8-16" "job updated in database"
     assert_remote_log_contains "handler-8-16" "vm has enough resources now to run; starting runner"
     assert_remote_log_contains "handler-8-16" "job found registered runner and is now in progress"
-    assert_remote_log_contains "handler-8-16" "successfully deleted vm"
-    assert_remote_log_contains "handler-8-16" "job removed from queue"
+    assert_remote_log_contains "handler-8-16" "cleanup | WorkflowJobPayload | queuedJob"
+    assert_remote_log_contains "handler-8-16" "cleanup | anka.VM | queuedJob"
+    assert_remote_log_contains "handler-8-16" "job is still in progress"
+    assert_remote_log_contains "handler-8-16" "job completed"
     assert_remote_log_contains "handler-8-16" "GITHUB_HANDLER1"
     record_pass
 else
@@ -155,7 +155,7 @@ end_test
 begin_test "t2-12c20r-1"
 # This workflow requires more resources than the host has available
 # Trigger workflow and check handler's log for resource error
-if run_workflow_and_get_logs "veertuinc" "anklet" "t2-12c20r-1" "failure" 120; then
+if run_workflow_and_get_logs "veertuinc" "anklet" "t2-12c20r-1" "failure"; then
     assert_remote_log_contains "handler-8-16" "host does not have enough resources to run vm"
     record_pass
 else
@@ -167,7 +167,7 @@ end_test
 ############
 # t2-12c50r-1 (resource-constrained)
 begin_test "t2-12c50r-1"
-if run_workflow_and_get_logs "veertuinc" "anklet" "t2-12c50r-1" "failure" 120; then
+if run_workflow_and_get_logs "veertuinc" "anklet" "t2-12c50r-1" "failure"; then
     assert_remote_log_contains "handler-8-16" "host does not have enough resources to run vm"
     record_pass
 else
@@ -179,7 +179,7 @@ end_test
 ############
 # t2-20c20r-1 (resource-constrained)
 begin_test "t2-20c20r-1"
-if run_workflow_and_get_logs "veertuinc" "anklet" "t2-20c20r-1" "failure" 120; then
+if run_workflow_and_get_logs "veertuinc" "anklet" "t2-20c20r-1" "failure"; then
     assert_remote_log_contains "handler-8-16" "host does not have enough resources to run vm"
     record_pass
 else

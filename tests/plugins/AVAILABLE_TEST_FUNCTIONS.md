@@ -8,13 +8,15 @@ These functions are available to `test.bash` files via `/tmp/redis-functions.bas
 
 These functions allow a "tester" host to orchestrate and check other hosts in multi-host tests. They require `ALL_HOSTS` to be set (format: `"name:user@host|name2:user@host2"`) and `ANKLET_SSH_KEY_PATH` to point to a valid SSH key.
 
+**⚠️ macOS Network Bug:** On macOS, when a process is started via SSH and the SSH session disconnects, the process loses its network interface context and cannot reach local network addresses (like Redis). See [go-macos-redis-client-network-bug-repro](https://github.com/NorseGaud/go-macos-redis-client-network-bug-repro). Always use `start_anklet_on_host_background` to keep SSH sessions alive.
+
 | Function | Description |
 | -------- | ----------- |
 | `ssh_to_host <host_name> <command>` | Execute a command on a remote host by name. |
 | `scp_to_host <host_name> <local_path> <remote_path>` | Copy a file to a remote host by name. |
-| `start_anklet_on_host <host_name>` | Start anklet on a remote host (SSH stays connected, blocking call). |
-| `start_anklet_on_host_background <host_name>` | Start anklet on a remote host with SSH kept alive in background. Use this to avoid macOS network bug. |
-| `stop_anklet_on_host <host_name>` | Stop anklet on a remote host (graceful SIGINT, then SIGKILL if needed). Also kills SSH session. |
+| `start_anklet_on_host <host_name>` | Start anklet on a remote host (SSH stays connected, blocking call). Caller can background with `&`. |
+| `start_anklet_on_host_background <host_name>` | **Recommended.** Start anklet on a remote host with SSH kept alive in background. Stores SSH PID in `/tmp/anklet-ssh-<host>.pid`. |
+| `stop_anklet_on_host <host_name>` | Stop anklet on a remote host (graceful SIGINT, waits up to 30s, then SIGKILL). Also kills the background SSH session. |
 | `get_anklet_log_from_host <host_name> [dest_file]` | Get anklet.log from a remote host and save locally. |
 | `check_remote_log_contains <host_name> <pattern>` | Check if remote host's anklet.log contains pattern (returns true/false). |
 | `assert_remote_log_contains <host_name> <pattern>` | Assert that remote host's anklet.log contains pattern (prints PASS/FAIL). |
