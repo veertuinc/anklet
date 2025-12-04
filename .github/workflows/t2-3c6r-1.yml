@@ -1,0 +1,20 @@
+name: 't2-3c6r-1'
+on:
+  workflow_dispatch:
+
+jobs:
+  t2-6c14r-1:
+    runs-on: [ 
+      "${{ github.run_id }}-${{ strategy.job-index }}",
+      "anka-template:84266873-da90-4e0d-903b-ed0233471f9f", 
+      "anka-template-tag:3c6r",
+    ]
+    steps:
+      - uses: actions/checkout@v3
+      - run: |
+          ls -laht
+          sw_vers
+          hostname
+          echo "123"
+          sysctl -n hw.ncpu
+      - run: whoami

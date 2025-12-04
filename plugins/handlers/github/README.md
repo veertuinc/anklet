@@ -104,6 +104,10 @@ However, there are more complex failures that happen with the registration of th
 
 ---
 
+# Handling of different sized Templates
+
+In https://github.com/veertuinc/anklet/issues/51 and v0.14.1, we added support for using differently sized templates/tags. If there are two different plugins for a host, and the first plugin is using too many resources for its job, the incoming job on the second plugin waits for the available resources. While it's waiting, if another host has enough resources to run it, it will pick it up and release the "second plugin" from its paused state to try another job from the DB.
+
 ## API LIMITS
 
 The following logic consumes [API limits](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api?apiVersion=2022-11-28). Should you run out, all processing will pause until the limits are reset after the specific github duration and then resume where it left off.
