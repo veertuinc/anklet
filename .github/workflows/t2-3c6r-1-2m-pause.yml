@@ -1,9 +1,9 @@
-name: 't2-3c6r-1-2m-pause'
+name: 't2-3c6r-1-90s-pause'
 on:
   workflow_dispatch:
 
 jobs:
-  t2-3c6r-1-2m-pause:
+  t2-3c6r-1-90s-pause:
     runs-on: [ 
       "${{ github.run_id }}-${{ strategy.job-index }}",
       "anka-template:84266873-da90-4e0d-903b-ed0233471f9f", 
@@ -17,5 +17,5 @@ jobs:
           hostname
           echo "123"
           sysctl -n hw.ncpu
-          sleep 120
+          sleep 90
       - run: whoami
