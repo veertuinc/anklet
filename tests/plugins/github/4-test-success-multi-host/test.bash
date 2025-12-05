@@ -58,7 +58,6 @@ echo "] Starting anklet ONLY on handler-8-8 (8GB RAM)..."
 start_anklet_on_host_background "handler-8-8"
 sleep 5
 assert_redis_key_exists "anklet/metrics/veertuinc/GITHUB_HANDLER1_8_L_ARM_MACOS"
-assert_redis_key_exists "anklet/metrics/veertuinc/GITHUB_HANDLER2_8_L_ARM_MACOS"
 
 # Step 2: Trigger workflow that needs 14GB RAM (more than 8GB host has)
 echo "] Triggering t2-6c14r-1 workflow (requires 14GB RAM)..."
