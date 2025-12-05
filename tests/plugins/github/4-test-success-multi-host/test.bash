@@ -179,6 +179,9 @@ while ! check_remote_log_contains "handler-8-8" "queued job found"; do
 done
 echo "] ✓ handler-8-8 picked up a job"
 
+# need some time for the job to be picked up by handler-8-8 and the next job to be paused
+sleep 10
+
 # Step 3: Start handler-8-16 (13-L-ARM config)
 echo "] Starting handler-8-16 (should pick up paused job)..."
 start_anklet_on_host_background "handler-8-16"
