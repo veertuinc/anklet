@@ -7,7 +7,7 @@ set -eo pipefail
 TESTS_DIR=$(cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd)
 cd $TESTS_DIR/.. # make sure we're in the root
 
-TEST_VM="d792c6f6-198c-470f-9526-9c998efe7ab4"
+TEST_VM="84266873-da90-4e0d-903b-ed0233471f9f"
 TEST_FAILED=0
 LAST_COMMAND=""
 LAST_COMMAND_OUTPUT=""
