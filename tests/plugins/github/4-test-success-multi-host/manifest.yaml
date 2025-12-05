@@ -1,4 +1,4 @@
-description: "Github Actions multi-host test"
+description: "Github Actions basic test"
 tests:
     - name: "Starts Properly"
       hosts:
