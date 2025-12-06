@@ -12,6 +12,8 @@ These are templates available in our internal Anka Registry.
 ### `84266873-da90-4e0d-903b-ed0233471f9f`
 
 | Tag Name | Size |
+| 2c4r | 28.14 GiB |
+| 3c6r | 28.14 GiB |
 | 6c14r-40gb | 68.94 GiB |
 | 8c14r	| 28.14 GiB |
 | 6c14r	| 28.14 GiB |
