@@ -798,14 +798,10 @@ tests:
         - name: "receiver"
           id: "ubuntu-22.04-linux"
           config: ubuntu-22.04-linux.yaml
-          start: start-receiver.bash
-          cleanup: start-receiver.bash --clean
 
         - name: "handler"
           id: "13-L-ARM-macos"
           config: 13-L-ARM-macos.yaml
-          start: start-handler.bash
-          cleanup: start-handler.bash --clean
 ```
 
 #### Test Helper Functions
