@@ -10,7 +10,8 @@ import (
 	"time"
 
 	"github.com/bradleyfalzon/ghinstallation/v2"
-	"github.com/gofri/go-github-ratelimit/github_ratelimit"
+	github_ratelimit "github.com/gofri/go-github-ratelimit/v2/github_ratelimit"
+	"github.com/gofri/go-github-ratelimit/v2/github_ratelimit/github_secondary_ratelimit"
 	"github.com/google/go-github/v74/github"
 	"github.com/veertuinc/anklet/internal/config"
 	"github.com/veertuinc/anklet/internal/logging"
@@ -75,11 +76,15 @@ func AuthenticateAndReturnGitHubClient(
 		httpTransport = http.DefaultTransport.(*http.Transport)
 	}
 	if rateLimiter == nil {
-		rateLimiter, err = github_ratelimit.NewRateLimitWaiterClient(httpTransport)
-		if err != nil {
-			logging.Error(ctx, "error creating github_ratelimit.NewRateLimitWaiterClient", "err", err)
-			return nil, err
-		}
+		rateLimiter = github_ratelimit.NewClient(
+			httpTransport,
+			github_secondary_ratelimit.WithLimitDetectedCallback(func(cbCtx *github_secondary_ratelimit.CallbackContext) {
+				logging.Warn(ctx, "GitHub secondary rate limit detected, sleeping until reset",
+					"resetTime", cbCtx.ResetTime,
+					"totalSleepTime", cbCtx.TotalSleepTime,
+				)
+			}),
+		)
 	}
 	if privateKey != "" {
 		// support private key in a file or as text

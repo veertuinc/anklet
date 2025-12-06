@@ -17,7 +17,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/gofri/go-github-ratelimit/github_ratelimit"
+	github_ratelimit "github.com/gofri/go-github-ratelimit/v2/github_ratelimit"
+	"github.com/gofri/go-github-ratelimit/v2/github_ratelimit/github_secondary_ratelimit"
 	"github.com/veertuinc/anklet/internal/anka"
 	"github.com/veertuinc/anklet/internal/config"
 	"github.com/veertuinc/anklet/internal/database"
@@ -239,11 +240,15 @@ func main() {
 		}
 	}
 	if githubPluginExists {
-		rateLimiter, err := github_ratelimit.NewRateLimitWaiterClient(httpTransport)
-		if err != nil {
-			parentLogger.ErrorContext(parentCtx, "error creating github_ratelimit.NewRateLimitWaiterClient", "err", err)
-			os.Exit(1)
-		}
+		rateLimiter := github_ratelimit.NewClient(
+			httpTransport,
+			github_secondary_ratelimit.WithLimitDetectedCallback(func(ctx *github_secondary_ratelimit.CallbackContext) {
+				parentLogger.WarnContext(parentCtx, "GitHub secondary rate limit detected, sleeping until reset",
+					slog.Time("resetTime", *ctx.ResetTime),
+					slog.Duration("totalSleepTime", *ctx.TotalSleepTime),
+				)
+			}),
+		)
 		parentCtx = context.WithValue(parentCtx, config.ContextKey("rateLimiter"), rateLimiter)
 	}
 
