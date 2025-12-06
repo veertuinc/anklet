@@ -8,6 +8,7 @@ Veertu Inc provides a small amount of ARM64/Silicon hardware for testing purpose
 |--------------------|----------|------|--------|
 | 13-L-ARM-macos     | 8        | 16   | 512GB  |
 | 13-R-ARM-macos     | 8        | 16   | 512GB  |
+| 8-L-ARM-macos      | 8        | 8    | 512GB  |
 | 12-L-ARM-macos     | 8        | 16   | 512GB  |
 | 12-R-ARM-macos     | 8        | 16   | 512GB  |
 
