@@ -779,30 +779,15 @@ Or run a specific test:
 
 ### Plugin Tests
 
-Plugin tests are end-to-end integration tests that validate receiver and handler plugins against real CI platforms. Tests are located in `tests/plugins/{plugin-name}/`.
+Plugin tests are end-to-end integration tests that validate receiver and handler plugins against real CI platforms. Tests are located in `tests/plugins/{plugin-name}/`. They run on Veertu infrastructure and require the Veertu team to run manually.
 
 Each test directory contains:
 
 - **`manifest.yaml`** - Defines the test environment including required hosts, configurations, and startup scripts
 - **`test.bash`** - The test script that runs assertions against workflow runs and logs
 - **`*.yaml`** - Host-specific Anklet configuration files
-- **`start-*.bash`** - Scripts to start Anklet components on each host
 
-#### Manifest Structure
-
-```yaml
-description: "Test description"
-tests:
-    - name: "Test name"
-      hosts:
-        - name: "receiver"
-          id: "ubuntu-22.04-linux"
-          config: ubuntu-22.04-linux.yaml
-
-        - name: "handler"
-          id: "13-L-ARM-macos"
-          config: 13-L-ARM-macos.yaml
-```
+You can find an example test in [tests/plugins/github/1-test-success](./tests/plugins/github/1-test-success).
 
 #### Test Helper Functions
 
