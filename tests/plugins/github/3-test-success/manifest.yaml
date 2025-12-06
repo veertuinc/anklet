@@ -1,6 +1,6 @@
-description: "Github Actions basic test"
+description: "Github Actions success tests"
 tests:
-    - name: "Starts Properly"
+    - name: "Single host success test"
       hosts:
         - name: "receiver"
           id: "ubuntu-22.04-linux"

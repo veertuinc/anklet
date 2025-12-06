@@ -1,6 +1,6 @@
 description: "Github Actions failures test"
 tests:
-    - name: "Starts Properly"
+    - name: "Single host failure tests"
       hosts:
         - name: "receiver"
           id: "ubuntu-22.04-linux"

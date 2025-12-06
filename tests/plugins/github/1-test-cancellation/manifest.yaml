@@ -1,6 +1,6 @@
 description: "Github Actions cancellation test"
 tests:
-    - name: "Starts Properly"
+    - name: "Single host cancellation test"
       hosts:
         - name: "receiver"
           id: "ubuntu-22.04-linux"
