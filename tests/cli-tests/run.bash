@@ -7,7 +7,8 @@ set -eo pipefail
 TESTS_DIR=$(cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd)
 cd $TESTS_DIR/.. # make sure we're in the root
 
-TEST_VM="84266873-da90-4e0d-903b-ed0233471f9f"
+TEST_VM_ID="84266873-da90-4e0d-903b-ed0233471f9f"
+TEST_VM_NAME="${TEST_VM_ID}"
 TEST_FAILED=0
 LAST_COMMAND=""
 LAST_COMMAND_OUTPUT=""
@@ -76,10 +77,91 @@ if ! anka version &> /dev/null; then
     echo "ERROR: Anka CLI not found"
     exit 1
 fi
-if ! anka show $TEST_VM &> /dev/null; then
-    echo "ERROR: VM $TEST_VM not found"
-    exit 1
-fi
+detect_registry_url() {
+    if [[ -n "${ANKA_REGISTRY_URL:-}" ]]; then
+        echo "${ANKA_REGISTRY_URL}"
+        return 0
+    fi
+    if [[ -n "${ANKLET_TEST_REGISTRY_URL:-}" ]]; then
+        echo "${ANKLET_TEST_REGISTRY_URL}"
+        return 0
+    fi
+
+    local config_file="${TESTS_DIR}/cli-test-start-stop.yml"
+    if [[ -f "${config_file}" ]]; then
+        local url_line
+        url_line=$(grep -E "^[[:space:]]*registry_url:" "${config_file}" | head -n 1 || true)
+        if [[ -n "${url_line}" ]]; then
+            echo "${url_line#*:}" | xargs
+            return 0
+        fi
+    fi
+
+    return 1
+}
+
+resolve_template_name_from_registry() {
+    local registry_url="$1"
+    local vm_id="$2"
+    local vm_json
+    local vm_name=""
+
+    if ! command -v curl >/dev/null 2>&1; then
+        return 1
+    fi
+
+    vm_json="$(curl -fsSL "${registry_url}/registry/vm?id=${vm_id}" 2>/dev/null || true)"
+    if [[ -z "${vm_json}" ]]; then
+        return 1
+    fi
+
+    if command -v python3 >/dev/null 2>&1; then
+        vm_name="$(python3 - <<'PY'
+import json,sys
+data=json.load(sys.stdin)
+print(data.get("name",""))
+PY
+<<< "${vm_json}")"
+    fi
+
+    if [[ -z "${vm_name}" ]]; then
+        vm_name="$(echo "${vm_json}" | sed -n 's/.*"name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)"
+    fi
+
+    echo "${vm_name}"
+}
+
+ensure_template_present() {
+    if anka show "${TEST_VM_NAME}" &> /dev/null; then
+        return 0
+    fi
+
+    local registry_url
+    registry_url="$(detect_registry_url || true)"
+    if [[ -z "${registry_url}" ]]; then
+        echo "ERROR: VM ${TEST_VM_ID} not found and no registry URL provided" >&2
+        echo "Set ANKA_REGISTRY_URL or ANKLET_TEST_REGISTRY_URL to enable auto-pull" >&2
+        exit 1
+    fi
+
+    local resolved_name
+    resolved_name="$(resolve_template_name_from_registry "${registry_url}" "${TEST_VM_ID}")"
+    if [[ -z "${resolved_name}" ]]; then
+        echo "ERROR: Failed to resolve template name for ${TEST_VM_ID} from ${registry_url}" >&2
+        exit 1
+    fi
+
+    TEST_VM_NAME="${resolved_name}"
+    echo "] Pulling template ${TEST_VM_NAME} from registry..."
+    anka registry -a "${registry_url}" pull "${TEST_VM_NAME}"
+
+    if ! anka show "${TEST_VM_NAME}" &> /dev/null; then
+        echo "ERROR: Template ${TEST_VM_NAME} not found after pull" >&2
+        exit 1
+    fi
+}
+
+ensure_template_present
 
 cleanup() {
     pwd
@@ -87,8 +169,8 @@ cleanup() {
     rm -rf dist || true
     rm -f ~/.config/anklet/config.yml || true
     mv ~/.config/anklet/config.yml.bak ~/.config/anklet/config.yml &> /dev/null || true
-    anka delete --yes "${TEST_VM}-1" &> /dev/null || true
-    anka delete --yes "${TEST_VM}-2" &> /dev/null || true
+    anka delete --yes "${TEST_VM_NAME}-1" &> /dev/null || true
+    anka delete --yes "${TEST_VM_NAME}-2" &> /dev/null || true
     echo "] DONE"
 }
 trap cleanup EXIT
@@ -201,17 +283,17 @@ TESTS
 TESTS
             ;;
         "capacity")
-            run_cmd anka clone "${TEST_VM}" "${TEST_VM}-1"
-            run_cmd anka start "${TEST_VM}-1"
-            run_cmd anka clone "${TEST_VM}" "${TEST_VM}-2"
-            run_cmd anka start "${TEST_VM}-2"
+            run_cmd anka clone "${TEST_VM_NAME}" "${TEST_VM_NAME}-1"
+            run_cmd anka start "${TEST_VM_NAME}-1"
+            run_cmd anka clone "${TEST_VM_NAME}" "${TEST_VM_NAME}-2"
+            run_cmd anka start "${TEST_VM_NAME}-2"
             run_test cli-test-capacity.yml 20 <<TESTS
     log_contains "ERROR"
     log_contains "host does not have vm capacity"
     log_contains "anklet (and all plugins) shut down"
 TESTS
-            run_cmd anka delete --yes "${TEST_VM}-1"
-            run_cmd anka delete --yes "${TEST_VM}-2"
+            run_cmd anka delete --yes "${TEST_VM_NAME}-1"
+            run_cmd anka delete --yes "${TEST_VM_NAME}-2"
             ;;
         "start-stop")
             # Second param = seconds to wait for initialization before sending SIGINT
