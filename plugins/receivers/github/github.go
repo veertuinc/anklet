@@ -612,6 +612,7 @@ func Run(
 	}
 
 	logging.Info(pluginCtx, "processing hooks scheduled for redelivery", "total_to_redeliver", len(toRedeliver))
+	redeliveryRequested := false
 
 MainLoop:
 	for i := len(toRedeliver) - 1; i >= 0; i-- { // make sure we process/redeliver queued before completed
@@ -879,6 +880,7 @@ MainLoop:
 			})
 		}
 		// err doesn't matter here and it will always throw "job scheduled on GitHub side; try again later"
+		redeliveryRequested = true
 		logging.Info(pluginCtx, "hook redelivery requested successfully",
 			"redelivery", redelivery,
 			"hookDelivery", map[string]any{
@@ -900,8 +902,10 @@ MainLoop:
 		"total_hooks_checked", len(toRedeliver),
 	)
 
-	logging.Info(pluginCtx, "sleeping for 1 minute to allow handlers to process jobs")
-	time.Sleep(1 * time.Minute)
+	if redeliveryRequested {
+		logging.Info(pluginCtx, "sleeping for 1 minute to allow handlers to process jobs")
+		time.Sleep(1 * time.Minute)
+	}
 
 	// Clean up in_progress queue AFTER redelivery processing completes
 	// This ensures any in_progress webhooks have a chance to be redelivered first
