@@ -32,6 +32,7 @@ plugins:
     installation_id: 52970581
     # repo: anklet # Optional; if you want to receive webhooks for a specific repo and not at the org level
     owner: veertuinc
+    # queue_name: shared_queue # Optional; override the queue namespace (defaults to owner). Useful for multiple orgs sharing a queue.
     # skip_redeliver: true # Optional; if you want to skip redelivering undelivered webhooks on startup
     # redeliver_hours: 24 # Optional; default is 24 hours
     #database:

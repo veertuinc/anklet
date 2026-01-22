@@ -78,6 +78,7 @@ type Plugin struct {
 	Token                      string   `yaml:"token"`
 	Repo                       string   `yaml:"repo"`
 	Owner                      string   `yaml:"owner"`
+	QueueName                  string   `yaml:"queue_name"` // Optional: override queue namespace (defaults to Owner)
 	Database                   Database `yaml:"database"`
 	RegistryURL                string   `yaml:"registry_url"`
 	SkipPull                   bool     `yaml:"skip_pull"`
@@ -94,6 +95,15 @@ type Plugin struct {
 	RegistrationTimeoutSeconds int      `yaml:"registration_timeout_seconds"`
 	TemplateDiskBuffer         float64  `yaml:"template_disk_buffer"` // Plugin-specific disk buffer percentage (e.g., 10.0 for 10%)
 	JobRetryAttempts           int      `yaml:"job_retry_attempts"`   // Maximum number of retry attempts for failed jobs
+}
+
+// GetQueueOwner returns QueueName if set, otherwise returns Owner.
+// This allows multiple organizations to share a single queue namespace.
+func (p Plugin) GetQueueOwner() string {
+	if p.QueueName != "" {
+		return p.QueueName
+	}
+	return p.Owner
 }
 
 func LoadConfig(configPath string) (Config, error) {
