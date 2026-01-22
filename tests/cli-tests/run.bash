@@ -3,7 +3,7 @@
 # If test_name is provided, run only that test. Otherwise, run all tests.
 # Available test names: empty, no-log-directory, no-plugins, no-plugin-name,
 #                      non-existent-plugin, no-db, capacity, start-stop
-set -eo pipefail
+set -exo pipefail
 TESTS_DIR=$(cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd)
 cd $TESTS_DIR/.. # make sure we're in the root
 
@@ -110,7 +110,7 @@ resolve_template_name_from_registry() {
         return 1
     fi
 
-    vm_json="$(curl -fsSL "${registry_url}/registry/vm?id=${vm_id}" 2>/dev/null || true)"
+    vm_json="$(curl -fsSL "${registry_url}/registry/vm?id=${vm_id}" 2>&1)"
     if [[ -z "${vm_json}" ]]; then
         return 1
     fi
@@ -148,6 +148,7 @@ ensure_template_present() {
     resolved_name="$(resolve_template_name_from_registry "${registry_url}" "${TEST_VM_ID}")"
     if [[ -z "${resolved_name}" ]]; then
         echo "ERROR: Failed to resolve template name for ${TEST_VM_ID} from ${registry_url}" >&2
+        echo "Check registry reachability and VM ID. Try: curl -fsSL \"${registry_url}/registry/vm?id=${TEST_VM_ID}\"" >&2
         exit 1
     fi
 
