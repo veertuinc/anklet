@@ -92,7 +92,7 @@ Each organization needs its own webhook configured in GitHub pointing to its res
 
 ### Redis Database
 
-Both instances can share the same Redis database. However, by default, job queues are namespaced by owner (e.g., `anklet/jobs/github/queued/org1` vs `anklet/jobs/github/queued/org2`), so there are no conflicts.
+Both instances can share the same Redis database (see below). However, by default, job queues are namespaced by owner (e.g., `anklet/jobs/github/queued/org1` vs `anklet/jobs/github/queued/org2`), so there are no conflicts.
 
 ### Anka CLI
 
