@@ -1532,17 +1532,17 @@ func Run(
 				continue
 			}
 
-		logging.Info(pluginCtx, "paused job found to run", "pausedQueuedJob", pausedQueuedJob)
+			logging.Info(pluginCtx, "paused job found to run", "pausedQueuedJob", pausedQueuedJob)
 
-		pluginCtx = logging.AppendCtx(pluginCtx, slog.String("wasPausedOn", pausedQueuedJob.PausedOn))
+			pluginCtx = logging.AppendCtx(pluginCtx, slog.String("wasPausedOn", pausedQueuedJob.PausedOn))
 
-		// pull the workflow job from the currently paused host's queue and put it in the current queue instead
-		originalHostJob, err := internalGithub.GetJobFromQueueByKeyAndValue(
-			pluginCtx,
-			"anklet/jobs/github/queued/"+queueOwner+"/{"+pausedQueuedJob.PausedOn+"}",
-			"workflow_job.id",
-			strconv.FormatInt(*pausedQueuedJob.WorkflowJob.ID, 10),
-		)
+			// pull the workflow job from the currently paused host's queue and put it in the current queue instead
+			originalHostJob, err := internalGithub.GetJobFromQueueByKeyAndValue(
+				pluginCtx,
+				"anklet/jobs/github/queued/"+queueOwner+"/{"+pausedQueuedJob.PausedOn+"}",
+				"workflow_job.id",
+				strconv.FormatInt(*pausedQueuedJob.WorkflowJob.ID, 10),
+			)
 			if err != nil {
 				return pluginCtx, fmt.Errorf("error getting job from paused host's queue: %s", err.Error())
 			}
@@ -1567,12 +1567,12 @@ func Run(
 			}
 			// make sure it hasn't started running on the other host
 			if queuedJob.Action != "paused" {
-			logging.Info(pluginCtx, "job is running on the other host, so we can't run it anymore")
-			pluginGlobals.JobChannel <- internalGithub.QueueJob{Action: "finish"}
-			return pluginCtx, nil
-		}
-		// remove it from the old host queue
-		_, err = databaseContainer.RetryLRem(pluginCtx, "anklet/jobs/github/queued/"+queueOwner+"/{"+pausedQueuedJob.PausedOn+"}", 1, originalHostJob)
+				logging.Info(pluginCtx, "job is running on the other host, so we can't run it anymore")
+				pluginGlobals.JobChannel <- internalGithub.QueueJob{Action: "finish"}
+				return pluginCtx, nil
+			}
+			// remove it from the old host queue
+			_, err = databaseContainer.RetryLRem(pluginCtx, "anklet/jobs/github/queued/"+queueOwner+"/{"+pausedQueuedJob.PausedOn+"}", 1, originalHostJob)
 			if err != nil {
 				logging.Error(pluginCtx, "error removing job from old host's queue", "error", err)
 				return pluginCtx, fmt.Errorf("error removing job from old host's queue: %s", err.Error())
@@ -1582,14 +1582,14 @@ func Run(
 			break
 		}
 
-	// don't hold on to paused jobs
-	if pausedQueuedJobString != "" {
-		// Check if job status has changed to completed/failed before putting back
-		pausedJob, parseErr, typeErr := database.Unwrap[internalGithub.QueueJob](pausedQueuedJobString)
-		shouldPutBack := true
-		if parseErr == nil && typeErr == nil && pausedJob.WorkflowJob.ID != nil {
-			// Check the current job status in the original host's queue
-			currentJobJSON, err := internalGithub.GetJobJSONFromQueueByID(pluginCtx, *pausedJob.WorkflowJob.ID, "anklet/jobs/github/queued/"+queueOwner+"/{"+pausedJob.PausedOn+"}")
+		// don't hold on to paused jobs
+		if pausedQueuedJobString != "" {
+			// Check if job status has changed to completed/failed before putting back
+			pausedJob, parseErr, typeErr := database.Unwrap[internalGithub.QueueJob](pausedQueuedJobString)
+			shouldPutBack := true
+			if parseErr == nil && typeErr == nil && pausedJob.WorkflowJob.ID != nil {
+				// Check the current job status in the original host's queue
+				currentJobJSON, err := internalGithub.GetJobJSONFromQueueByID(pluginCtx, *pausedJob.WorkflowJob.ID, "anklet/jobs/github/queued/"+queueOwner+"/{"+pausedJob.PausedOn+"}")
 				if err == nil && currentJobJSON != "" {
 					currentJob, currentParseErr, currentTypeErr := database.Unwrap[internalGithub.QueueJob](currentJobJSON)
 					if currentParseErr == nil && currentTypeErr == nil && currentJob.WorkflowJob.Status != nil {
@@ -1639,6 +1639,26 @@ func Run(
 			queuedJob, err, typeErr = database.Unwrap[internalGithub.QueueJob](queuedJobString)
 			if err != nil || typeErr != nil {
 				return pluginCtx, fmt.Errorf("error unmarshalling job: %s", err.Error())
+			}
+
+			// Check if this job belongs to this handler's organization
+			// If queue_name is used for shared queues, only process jobs matching this handler's owner
+			if queuedJob.Repository.Owner != nil && *queuedJob.Repository.Owner != pluginConfig.Owner {
+				logging.Debug(pluginCtx, "skipping job from different organization",
+					"jobOwner", *queuedJob.Repository.Owner,
+					"handlerOwner", pluginConfig.Owner,
+				)
+				// Push job back to end of main queue for another handler to pick up
+				_, err = databaseContainer.RetryRPush(pluginCtx, mainQueueName, queuedJobString)
+				if err != nil {
+					logging.Error(pluginCtx, "error pushing job back to main queue", "error", err)
+				}
+				// Increment index to skip this job on next iteration
+				workerGlobals.IncrementQueueTargetIndex()
+				// Free up other plugins and return to let another handler pick it up
+				workerGlobals.Plugins[pluginConfig.Plugin][pluginConfig.Name].Preparing.Store(false)
+				pluginGlobals.JobChannel <- internalGithub.QueueJob{Action: "finish"}
+				return pluginCtx, nil
 			}
 		}
 

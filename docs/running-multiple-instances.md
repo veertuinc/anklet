@@ -131,12 +131,19 @@ plugins:
     owner: org2
     queue_name: shared_queue  # Both orgs write to the same queue
     # ... other config
+
+  - name: HANDLER_ORG2
+    plugin: github
+    owner: org2
+    queue_name: shared_queue
+    # ... other config
 ```
 
 With this configuration:
 - Both receivers write jobs to `anklet/jobs/github/queued/shared_queue`
-- Any handler configured with `queue_name: shared_queue` can pick up jobs from either organization
-- The `owner` field is still used for GitHub API calls (authentication, runner registration)
+- Handlers automatically filter jobs by organization - each handler only processes jobs matching its configured `owner`
+- Jobs from other organizations are pushed back to the queue for the appropriate handler to pick up
+- The `owner` field is used for GitHub API calls (authentication, runner registration) and job filtering
 
 ## Optional: Additional Separation
 

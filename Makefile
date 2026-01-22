@@ -43,7 +43,7 @@ go.lint:
 
 go.test:
 	go mod tidy
-	# go test -v *
+	go test -v ./...
 
 #cross-compile-check:	@ Check compilation for all target platforms without building
 cross-compile-check:

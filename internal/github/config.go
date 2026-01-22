@@ -83,6 +83,7 @@ type QueueJob struct {
 
 type Repository struct {
 	Name       *string `json:"name"`
+	Owner      *string `json:"owner"`
 	Visibility *string `json:"visibility"`
 	Private    *bool   `json:"private"`
 }

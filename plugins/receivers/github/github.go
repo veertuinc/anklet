@@ -151,6 +151,7 @@ func Run(
 				Action: *workflowJob.Action,
 				Repository: internalGithub.Repository{
 					Name:       workflowJob.Repo.Name,
+					Owner:      workflowJob.Repo.Owner.Login,
 					Visibility: workflowJob.Repo.Visibility,
 					Private:    workflowJob.Repo.Private,
 				},
@@ -228,10 +229,10 @@ func Run(
 				if workflowJob.WorkflowJob.Conclusion != nil && *workflowJob.WorkflowJob.Conclusion == "cancelled" {
 					return
 				}
-			// store in_progress so we can know if the registration failed
-			if exists_in_array_partial(simplifiedWorkflowJobEvent.WorkflowJob.Labels, []string{"anka-template"}) {
-				// make sure it doesn't already exist
-				inProgressQueueName := "anklet/jobs/github/in_progress/" + queueOwner
+				// store in_progress so we can know if the registration failed
+				if exists_in_array_partial(simplifiedWorkflowJobEvent.WorkflowJob.Labels, []string{"anka-template"}) {
+					// make sure it doesn't already exist
+					inProgressQueueName := "anklet/jobs/github/in_progress/" + queueOwner
 					inQueueJobJSON, err := internalGithub.GetJobJSONFromQueueByID(pluginCtx, *simplifiedWorkflowJobEvent.WorkflowJob.ID, inProgressQueueName)
 					if err != nil {
 						logging.Error(webhookCtx, "error searching in queue", "error", err)
@@ -255,10 +256,10 @@ func Run(
 					}
 				}
 			} else if *workflowJob.Action == "completed" {
-			if exists_in_array_partial(simplifiedWorkflowJobEvent.WorkflowJob.Labels, []string{"anka-template"}) {
-				queues := []string{}
-				// get all keys from database for the main queue and service queues as well as completed
-				queuedKeys, err := databaseContainer.RetryKeys(pluginCtx, "anklet/jobs/github/queued/"+queueOwner+"*")
+				if exists_in_array_partial(simplifiedWorkflowJobEvent.WorkflowJob.Labels, []string{"anka-template"}) {
+					queues := []string{}
+					// get all keys from database for the main queue and service queues as well as completed
+					queuedKeys, err := databaseContainer.RetryKeys(pluginCtx, "anklet/jobs/github/queued/"+queueOwner+"*")
 					if err != nil {
 						logging.Error(webhookCtx, "error getting list of queued keys (completed)", "error", err)
 						return
@@ -288,8 +289,8 @@ func Run(
 							break
 						}
 					}
-				if inAQueue { // only add completed if it's in a queue
-					completedQueueName := "anklet/jobs/github/completed/" + queueOwner
+					if inAQueue { // only add completed if it's in a queue
+						completedQueueName := "anklet/jobs/github/completed/" + queueOwner
 						inCompletedQueueJobJSON, err := internalGithub.GetJobJSONFromQueueByID(pluginCtx, *simplifiedWorkflowJobEvent.WorkflowJob.ID, completedQueueName)
 						if err != nil {
 							logging.Error(webhookCtx, "error searching in queue", "error", err)
@@ -761,8 +762,8 @@ MainLoop:
 			)
 			_, err = databaseContainer.RetryLRem(pluginCtx, inCompletedListKey, 1, allCompletedJobs[inCompletedListKey][inCompletedIndex])
 			if err != nil {
-			// logger.ErrorContext(pluginCtx, "error removing completedJob from anklet/jobs/github/completed/"+queueOwner, "error", err, "completedJob", allCompletedJobs[inCompletedListKey][inCompletedIndex])
-			return pluginCtx, fmt.Errorf("error removing completedJob from anklet/jobs/github/completed/"+queueOwner+": %s", err.Error())
+				// logger.ErrorContext(pluginCtx, "error removing completedJob from anklet/jobs/github/completed/"+queueOwner, "error", err, "completedJob", allCompletedJobs[inCompletedListKey][inCompletedIndex])
+				return pluginCtx, fmt.Errorf("error removing completedJob from anklet/jobs/github/completed/"+queueOwner+": %s", err.Error())
 			}
 			continue
 		}
