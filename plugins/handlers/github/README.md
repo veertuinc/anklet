@@ -30,6 +30,7 @@ plugins:
     registration: repo
     # repo: anklet # Optional; only needed if registering a specific runner for a repo, otherwise it will be an org level runner.
     owner: veertuinc
+    # queue_name: shared_queue # Optional; override the queue namespace (defaults to owner). Useful for multiple orgs sharing a queue.
     registry_url: http://anka.registry:8089 # Optional; use `skip_pull` to skip pulling the template.
     # skip_pull: true # Optional; skips pulling the template from the Anka Build Cloud Registry
     runner_group: macOS # requires Enterprise github

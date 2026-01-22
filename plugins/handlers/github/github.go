@@ -1272,13 +1272,14 @@ func Run(
 		return pluginCtx, fmt.Errorf("error getting database from context: %s", err.Error())
 	}
 
-	mainQueueName := "anklet/jobs/github/queued/" + pluginConfig.Owner
-	mainCompletedQueueName := "anklet/jobs/github/completed/" + pluginConfig.Owner
+	queueOwner := pluginConfig.GetQueueOwner()
+	mainQueueName := "anklet/jobs/github/queued/" + queueOwner
+	mainCompletedQueueName := "anklet/jobs/github/completed/" + queueOwner
 	// hash tag needed for avoiding "CROSSSLOT Keys in request don't hash to the same slot"
-	pluginQueueName := "anklet/jobs/github/queued/" + pluginConfig.Owner + "/" + "{" + pluginConfig.Name + "}"
-	pluginCompletedQueueName := "anklet/jobs/github/completed/" + pluginConfig.Owner + "/" + pluginConfig.Name
-	mainInProgressQueueName := "anklet/jobs/github/in_progress/" + pluginConfig.Owner
-	pausedQueueName := "anklet/jobs/github/paused/" + pluginConfig.Owner
+	pluginQueueName := "anklet/jobs/github/queued/" + queueOwner + "/" + "{" + pluginConfig.Name + "}"
+	pluginCompletedQueueName := "anklet/jobs/github/completed/" + queueOwner + "/" + pluginConfig.Name
+	mainInProgressQueueName := "anklet/jobs/github/in_progress/" + queueOwner
+	pausedQueueName := "anklet/jobs/github/paused/" + queueOwner
 
 	if workerCtx.Err() != nil || pluginCtx.Err() != nil {
 		logging.Warn(pluginCtx, "context canceled before checking for jobs")
@@ -1418,7 +1419,7 @@ func Run(
 	// always get -1 so we get the eldest job in the queue
 	queuedJobString, err = databaseContainer.RetryLIndex(pluginCtx, pluginQueueName, -1)
 	if err != nil && err != redis.Nil {
-		// logging.Error(pluginCtx, "error getting last object from anklet/jobs/github/queued/"+pluginConfig.Owner+"/"+pluginConfig.Name, "error", err)
+		// logging.Error(pluginCtx, "error getting last object from anklet/jobs/github/queued/"+queueOwner+"/"+pluginConfig.Name, "error", err)
 		return pluginCtx, fmt.Errorf("error getting last object from %s", pluginQueueName)
 	}
 	if queuedJobString != "" {
@@ -1470,7 +1471,7 @@ func Run(
 					pausedJob, parseErr, typeErr := database.Unwrap[internalGithub.QueueJob](pausedQueuedJobString)
 					if parseErr == nil && typeErr == nil && pausedJob.WorkflowJob.ID != nil {
 						// Check the current job status in the original host's queue
-						currentJobJSON, err := internalGithub.GetJobJSONFromQueueByID(pluginCtx, *pausedJob.WorkflowJob.ID, "anklet/jobs/github/queued/"+pluginConfig.Owner+"/{"+pausedJob.PausedOn+"}")
+						currentJobJSON, err := internalGithub.GetJobJSONFromQueueByID(pluginCtx, *pausedJob.WorkflowJob.ID, "anklet/jobs/github/queued/"+queueOwner+"/{"+pausedJob.PausedOn+"}")
 						if err == nil && currentJobJSON != "" {
 							currentJob, currentParseErr, currentTypeErr := database.Unwrap[internalGithub.QueueJob](currentJobJSON)
 							if currentParseErr == nil && currentTypeErr == nil && currentJob.WorkflowJob.Status != nil {
@@ -1538,7 +1539,7 @@ func Run(
 			// pull the workflow job from the currently paused host's queue and put it in the current queue instead
 			originalHostJob, err := internalGithub.GetJobFromQueueByKeyAndValue(
 				pluginCtx,
-				"anklet/jobs/github/queued/"+pluginConfig.Owner+"/{"+pausedQueuedJob.PausedOn+"}",
+				"anklet/jobs/github/queued/"+queueOwner+"/{"+pausedQueuedJob.PausedOn+"}",
 				"workflow_job.id",
 				strconv.FormatInt(*pausedQueuedJob.WorkflowJob.ID, 10),
 			)
@@ -1571,7 +1572,7 @@ func Run(
 				return pluginCtx, nil
 			}
 			// remove it from the old host queue
-			_, err = databaseContainer.RetryLRem(pluginCtx, "anklet/jobs/github/queued/"+pluginConfig.Owner+"/{"+pausedQueuedJob.PausedOn+"}", 1, originalHostJob)
+			_, err = databaseContainer.RetryLRem(pluginCtx, "anklet/jobs/github/queued/"+queueOwner+"/{"+pausedQueuedJob.PausedOn+"}", 1, originalHostJob)
 			if err != nil {
 				logging.Error(pluginCtx, "error removing job from old host's queue", "error", err)
 				return pluginCtx, fmt.Errorf("error removing job from old host's queue: %s", err.Error())
@@ -1588,7 +1589,7 @@ func Run(
 			shouldPutBack := true
 			if parseErr == nil && typeErr == nil && pausedJob.WorkflowJob.ID != nil {
 				// Check the current job status in the original host's queue
-				currentJobJSON, err := internalGithub.GetJobJSONFromQueueByID(pluginCtx, *pausedJob.WorkflowJob.ID, "anklet/jobs/github/queued/"+pluginConfig.Owner+"/{"+pausedJob.PausedOn+"}")
+				currentJobJSON, err := internalGithub.GetJobJSONFromQueueByID(pluginCtx, *pausedJob.WorkflowJob.ID, "anklet/jobs/github/queued/"+queueOwner+"/{"+pausedJob.PausedOn+"}")
 				if err == nil && currentJobJSON != "" {
 					currentJob, currentParseErr, currentTypeErr := database.Unwrap[internalGithub.QueueJob](currentJobJSON)
 					if currentParseErr == nil && currentTypeErr == nil && currentJob.WorkflowJob.Status != nil {
@@ -1639,6 +1640,26 @@ func Run(
 			if err != nil || typeErr != nil {
 				return pluginCtx, fmt.Errorf("error unmarshalling job: %s", err.Error())
 			}
+
+			// Check if this job belongs to this handler's organization
+			// If queue_name is used for shared queues, only process jobs matching this handler's owner
+			if queuedJob.Repository.Owner != nil && *queuedJob.Repository.Owner != pluginConfig.Owner {
+				logging.Debug(pluginCtx, "skipping job from different organization",
+					"jobOwner", *queuedJob.Repository.Owner,
+					"handlerOwner", pluginConfig.Owner,
+				)
+				// Push job back to end of main queue for another handler to pick up
+				_, err = databaseContainer.RetryRPush(pluginCtx, mainQueueName, queuedJobString)
+				if err != nil {
+					logging.Error(pluginCtx, "error pushing job back to main queue", "error", err)
+				}
+				// Increment index to skip this job on next iteration
+				workerGlobals.IncrementQueueTargetIndex()
+				// Free up other plugins and return to let another handler pick it up
+				workerGlobals.Plugins[pluginConfig.Plugin][pluginConfig.Name].Preparing.Store(false)
+				pluginGlobals.JobChannel <- internalGithub.QueueJob{Action: "finish"}
+				return pluginCtx, nil
+			}
 		}
 
 		_, err = databaseContainer.RetryRPush(pluginCtx, pluginQueueName, queuedJobString)
@@ -1647,14 +1668,14 @@ func Run(
 			return pluginCtx, fmt.Errorf("error pushing job to plugin queue: %s", err.Error())
 		}
 
-		// queuedJobString, err = databaseContainer.Client.LIndex(pluginCtx, "anklet/jobs/github/queued/"+pluginConfig.Owner, globals.QueueIndex).Result()
+		// queuedJobString, err = databaseContainer.Client.LIndex(pluginCtx, "anklet/jobs/github/queued/"+queueOwner, globals.QueueIndex).Result()
 		// if err == nil {
 		// 	// Remove the job at the specific index
-		// 	_, err = databaseContainer.Client.LSet(pluginCtx, "anklet/jobs/github/queued/"+pluginConfig.Owner, globals.QueueIndex, "TO_BE_REMOVED").Result()
+		// 	_, err = databaseContainer.Client.LSet(pluginCtx, "anklet/jobs/github/queued/"+queueOwner, globals.QueueIndex, "TO_BE_REMOVED").Result()
 		// 	if err != nil {
 		// 		return pluginCtx, fmt.Errorf("error setting job at index to TO_BE_REMOVED: %s", err.Error())
 		// 	}
-		// 	_, err = databaseContainer.Client.LRem(pluginCtx, "anklet/jobs/github/queued/"+pluginConfig.Owner, 1, "TO_BE_REMOVED").Result()
+		// 	_, err = databaseContainer.Client.LRem(pluginCtx, "anklet/jobs/github/queued/"+queueOwner, 1, "TO_BE_REMOVED").Result()
 		// 	if err != nil {
 		// 		logging.Error(pluginCtx, "error removing job from main queue", "error", err)
 		// 		return pluginCtx, fmt.Errorf("error removing job from main queue: %s", err.Error())
@@ -1672,7 +1693,7 @@ func Run(
 		// 	globals.ResetQueueIndex()
 		// 	return pluginCtx, fmt.Errorf("error getting queued jobs: %s", err.Error())
 		// }
-		// databaseContainer.Client.RPush(pluginCtx, "anklet/jobs/github/queued/"+pluginConfig.Owner+"/"+pluginConfig.Name, queuedJobString)
+		// databaseContainer.Client.RPush(pluginCtx, "anklet/jobs/github/queued/"+queueOwner+"/"+pluginConfig.Name, queuedJobString)
 	}
 
 	logging.Info(
