@@ -101,12 +101,7 @@ func Run(
 		return pluginCtx, fmt.Errorf("error authenticating github client: %s", err.Error())
 	}
 
-	// clean up in_progress queue if it exists
 	queueOwner := pluginConfig.GetQueueOwner()
-	_, err = databaseContainer.RetryDel(pluginCtx, "anklet/jobs/github/in_progress/"+queueOwner)
-	if err != nil {
-		return pluginCtx, fmt.Errorf("error deleting in_progress queue: %s", err.Error())
-	}
 
 	server := &http.Server{Addr: ":" + pluginConfig.Port}
 	http.HandleFunc("/healthcheck", func(w http.ResponseWriter, r *http.Request) {
@@ -904,6 +899,16 @@ MainLoop:
 	logging.Info(pluginCtx, "finished processing hooks for redelivery",
 		"total_hooks_checked", len(toRedeliver),
 	)
+
+	logging.Info(pluginCtx, "sleeping for 1 minute to allow handlers to process jobs")
+	time.Sleep(1 * time.Minute)
+
+	// Clean up in_progress queue AFTER redelivery processing completes
+	// This ensures any in_progress webhooks have a chance to be redelivered first
+	_, err = databaseContainer.RetryDel(pluginCtx, "anklet/jobs/github/in_progress/"+queueOwner)
+	if err != nil {
+		return pluginCtx, fmt.Errorf("error deleting in_progress queue: %s", err.Error())
+	}
 
 	err = metrics.UpdatePlugin(workerCtx, pluginCtx, metrics.PluginBase{
 		Status:      "running",
