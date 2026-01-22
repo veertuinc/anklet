@@ -45,7 +45,7 @@ plugins:
 Some things to note:
 
 - If you leave off `repo`, the receiver will be an organization level receiver.
-- The receiver must come FIRST in the `plugins:` list. Do not place it after other plugins.
+- The receiver must come FIRST in the `plugins:` list. Do not place it after other plugins. This is required because the receiver clears the `in_progress` queue on startup and must be listening for webhooks, processing them if there is a completed item that came in while it was down, before handlers begin processing jobs.
 - **IMPORTANT**: On first start, it will scan for failed webhook deliveries for the past 24 hours and send a re-delivery request for each one. This is to ensure that all webhooks are delivered and processed and nothing in your plugins are orphaned or database. Avoid excessive restarts or else you'll eat up your API limits quickly. You can use `skip_redeliver: true` to disable this behavior.
 
 Once configured, you can run Anklet and, if everything is configured properly, you should see logs like this:
