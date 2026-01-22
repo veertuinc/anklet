@@ -11,5 +11,5 @@ plugins:
     app_id: 949431
     installation_id: 52970581
     owner: mycompanyone
-    registry_url: http://anka.registry:8089
+    registry_url: http://registry.veertu.dev:8083
     sleep_interval: 5
