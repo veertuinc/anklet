@@ -1,0 +1,8 @@
+# Note: Don't specify any credentials for the plugin. We will inject them into the config for you.
+plugins:
+  - name: GITHUB_HANDLER1_8_L_ARM_MACOS
+    plugin: github
+    queue_name: shared_queue
+  - name: GITHUB_HANDLER2_8_L_ARM_MACOS
+    plugin: github
+    queue_name: shared_queue
