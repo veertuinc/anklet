@@ -155,6 +155,8 @@ If we want to override the sleep_interval, we can set the following ENVs:
 GITHUB_HANDLER1_SLEEP_INTERVAL=5
 ```
 
+This will override the sleep_interval in the plugin config to 5.
+
 The plugin `name` from your config is normalized for use as an env prefix: uppercased, and any non-alphanumeric characters (hyphens, dots, spaces, etc.) are replaced with `_`.
 
 | Plugin name in config | Env prefix |
