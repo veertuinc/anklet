@@ -27,6 +27,7 @@ plugins:
     hook_id: 4897477123
     port: 54321
     # secret: 12345
+    token: github_pat_XXX
     # private_key: /Users/{YOUR USER HERE}/private-key.pem
     app_id: 949431
     installation_id: 52970581
