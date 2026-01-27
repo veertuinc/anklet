@@ -2,4 +2,4 @@
 plugins:
   - name: GITHUB_HANDLER_13_L_ARM_MACOS
     plugin: github
-    queue_name: shared_queue
+    queue_name: will-be-overridden-by-env
