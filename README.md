@@ -137,18 +137,36 @@ It is also possible to use ENVs for several of the items in the config. They ove
 | ANKLET_GLOBAL_RECEIVER_SECRET | Secret to use for receiver plugin (ex: "my-secret") |
 | ANKLET_GLOBAL_TEMPLATE_DISK_BUFFER | Disk buffer (how much disk space to leave free on the host) percentage for templates (ex: 10.0 for 10%) |
 
-You can also override plugin settings per plugin using envs based on the plugin name:
+You can also set or override plugin settings per plugin using envs based on the plugin name:
+
+Let's say that you have:
+
+```yaml
+plugins:
+  - name: GITHUB_HANDLER1
+    plugin: github
+    owner: veertuinc
+    sleep_interval: 999
+```
+
+If we want to override the sleep_interval, we can set the following ENVs:
 
 ```
-<PLUGIN_NAME>_TOKEN=github_pat_XXX
+GITHUB_HANDLER1_SLEEP_INTERVAL=5
 ```
 
-`PLUGIN_NAME` is uppercased and any non-alphanumeric characters are replaced with `_`. For example, `GITHUB_HANDLER1_8_L_ARM_MACOS_TOKEN`.
+The plugin `name` from your config is normalized for use as an env prefix: uppercased, and any non-alphanumeric characters (hyphens, dots, spaces, etc.) are replaced with `_`.
+
+| Plugin name in config | Env prefix |
+|----------------------|------------|
+| `GITHUB_HANDLER1` | `GITHUB_HANDLER1` |
+| `github-handler-1` | `GITHUB_HANDLER_1` |
+| `handler.v2.test` | `HANDLER_V2_TEST` |
 
 Per-plugin envs are dynamic and map to yaml keys:
 
-- `<PLUGIN_NAME>_<YAML_KEY>` (e.g., `GITHUB_HANDLER1_8_L_ARM_MACOS_TOKEN`)
-- For nested database fields: `<PLUGIN_NAME>_DATABASE_<YAML_KEY>` (e.g., `GITHUB_HANDLER1_8_L_ARM_MACOS_DATABASE_URL`)
+- `<PLUGIN_NAME>_<YAML_KEY>` (e.g., `GITHUB_HANDLER1_TOKEN`)
+- For nested database fields: `<PLUGIN_NAME>_DATABASE_<YAML_KEY>` (e.g., `GITHUB_HANDLER1_DATABASE_URL`)
 
 ### Database Setup
 
