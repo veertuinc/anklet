@@ -55,8 +55,10 @@ assert_redis_key_exists "anklet/metrics/veertuinc/GITHUB_RECEIVER1"
 begin_test "shared-queue-name-basic" "success"
 
 # Step 1: Start both handlers
-echo "] Starting anklet on handler-8-16..."
-start_anklet_on_host_background "handler-8-16"
+# Note: handler-8-16's config has queue_name: will-be-overridden-by-env
+# We use per-plugin env override to set it to shared_queue
+echo "] Starting anklet on handler-8-16 (with QUEUE_NAME env override)..."
+start_anklet_on_host_background "handler-8-16" "GITHUB_HANDLER_13_L_ARM_MACOS_QUEUE_NAME=shared_queue"
 sleep 5
 assert_redis_key_exists "anklet/metrics/veertuinc/GITHUB_HANDLER_13_L_ARM_MACOS"
 

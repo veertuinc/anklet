@@ -103,6 +103,7 @@ pid_file_dir: /tmp/
 # global_database_password: ""
 # global_database_database: 0
 # global_private_key: /Users/{YOUR USER HERE}/.private-key.pem # If you use the same key for all your plugins, you can set it here.
+# global_token: github_pat_XXX # If you use the same token for all your plugins, you can set it here.
 # plugins_path: ~/.config/anklet/plugins/ # This sets the location where scripts used by plugins are stored; we don't recommend changing this.
 plugins:
 ```
@@ -132,9 +133,42 @@ It is also possible to use ENVs for several of the items in the config. They ove
 | ANKLET_GLOBAL_DATABASE_TLS_ENABLED | Whether to use TLS for the database connection (ex: true) |
 | ANKLET_GLOBAL_DATABASE_TLS_INSECURE | Whether to skip TLS certificate verification for the database connection (ex: true) |
 | ANKLET_GLOBAL_PRIVATE_KEY | Absolute path to private key for anklet (ex: /Users/myUser/.private-key.pem) |
+| ANKLET_GLOBAL_TOKEN | GitHub token for all plugins (ex: github_pat_XXX) |
 | ANKLET_GLOBAL_RECEIVER_SECRET | Secret to use for receiver plugin (ex: "my-secret") |
 | ANKLET_GLOBAL_TEMPLATE_DISK_BUFFER | Disk buffer (how much disk space to leave free on the host) percentage for templates (ex: 10.0 for 10%) |
 
+You can also set or override plugin settings per plugin using envs based on the plugin name:
+
+Let's say that you have:
+
+```yaml
+plugins:
+  - name: GITHUB_HANDLER1
+    plugin: github
+    owner: veertuinc
+    sleep_interval: 999
+```
+
+If we want to override the sleep_interval, we can set the following ENVs:
+
+```
+GITHUB_HANDLER1_SLEEP_INTERVAL=5
+```
+
+This will override the sleep_interval in the plugin config to 5.
+
+The plugin `name` from your config is normalized for use as an env prefix: uppercased, and any non-alphanumeric characters (hyphens, dots, spaces, etc.) are replaced with `_`.
+
+| Plugin name in config | Env prefix |
+|----------------------|------------|
+| `GITHUB_HANDLER1` | `GITHUB_HANDLER1` |
+| `github-handler-1` | `GITHUB_HANDLER_1` |
+| `handler.v2.test` | `HANDLER_V2_TEST` |
+
+Per-plugin envs are dynamic and map to yaml keys:
+
+- `<PLUGIN_NAME>_<YAML_KEY>` (e.g., `GITHUB_HANDLER1_TOKEN`)
+- For nested database fields: `<PLUGIN_NAME>_DATABASE_<YAML_KEY>` (e.g., `GITHUB_HANDLER1_DATABASE_URL`)
 
 ### Database Setup
 

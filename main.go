@@ -524,6 +524,10 @@ func worker(
 					logging.Dev(pluginCtx, "using global private key")
 					plugin.PrivateKey = loadedConfig.GlobalPrivateKey
 				}
+				if plugin.Token == "" && loadedConfig.GlobalToken != "" {
+					logging.Dev(pluginCtx, "using global token")
+					plugin.Token = loadedConfig.GlobalToken
+				}
 
 				// keep this here or the changes to plugin don't get set in the pluginCtx
 				pluginCtx = context.WithValue(pluginCtx, config.ContextKey("plugin"), plugin)
