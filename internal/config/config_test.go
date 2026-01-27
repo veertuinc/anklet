@@ -1,7 +1,6 @@
 package config
 
 import (
-	"os"
 	"testing"
 )
 
@@ -224,19 +223,10 @@ func TestApplyPluginEnvOverrides(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Clear relevant env vars before test
-			for k := range tt.envVars {
-				os.Unsetenv(k)
-			}
-			// Set test env vars
+			// Set test env vars using t.Setenv (automatically cleaned up after test)
 			for k, v := range tt.envVars {
-				os.Setenv(k, v)
+				t.Setenv(k, v)
 			}
-			defer func() {
-				for k := range tt.envVars {
-					os.Unsetenv(k)
-				}
-			}()
 
 			plugin := tt.plugin
 			err := applyPluginEnvOverrides(&plugin, tt.pluginPrefix)
@@ -288,17 +278,9 @@ func TestApplyPluginEnvOverrides_BoolFields(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			for k := range tt.envVars {
-				os.Unsetenv(k)
-			}
 			for k, v := range tt.envVars {
-				os.Setenv(k, v)
+				t.Setenv(k, v)
 			}
-			defer func() {
-				for k := range tt.envVars {
-					os.Unsetenv(k)
-				}
-			}()
 
 			plugin := Plugin{Name: "TEST_PLUGIN"}
 			err := applyPluginEnvOverrides(&plugin, tt.pluginPrefix)
@@ -331,17 +313,9 @@ func TestApplyPluginEnvOverrides_FloatFields(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			for k := range tt.envVars {
-				os.Unsetenv(k)
-			}
 			for k, v := range tt.envVars {
-				os.Setenv(k, v)
+				t.Setenv(k, v)
 			}
-			defer func() {
-				for k := range tt.envVars {
-					os.Unsetenv(k)
-				}
-			}()
 
 			plugin := Plugin{Name: "TEST_PLUGIN"}
 			err := applyPluginEnvOverrides(&plugin, tt.pluginPrefix)
@@ -380,17 +354,9 @@ func TestApplyPluginEnvOverrides_InvalidValues(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			for k := range tt.envVars {
-				os.Unsetenv(k)
-			}
 			for k, v := range tt.envVars {
-				os.Setenv(k, v)
+				t.Setenv(k, v)
 			}
-			defer func() {
-				for k := range tt.envVars {
-					os.Unsetenv(k)
-				}
-			}()
 
 			plugin := Plugin{Name: "TEST_PLUGIN"}
 			err := applyPluginEnvOverrides(&plugin, tt.pluginPrefix)
