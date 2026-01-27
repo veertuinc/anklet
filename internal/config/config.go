@@ -1,14 +1,16 @@
 package config
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"reflect"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"context"
+	"unicode"
 
 	"gopkg.in/yaml.v2"
 )
@@ -23,6 +25,7 @@ type Config struct {
 	WorkDir                          string   `yaml:"work_dir"`
 	Metrics                          Metrics  `yaml:"metrics"`
 	GlobalPrivateKey                 string   `yaml:"global_private_key"`
+	GlobalToken                      string   `yaml:"global_token"`
 	PluginsPath                      string   `yaml:"plugins_path"`
 	GlobalDatabaseURL                string   `yaml:"global_database_url"`
 	GlobalDatabasePort               int      `yaml:"global_database_port"`
@@ -188,6 +191,10 @@ func LoadInEnvs(config Config) (Config, error) {
 	if envGlobalPrivateKey != "" {
 		config.GlobalPrivateKey = envGlobalPrivateKey
 	}
+	envGlobalToken := os.Getenv("ANKLET_GLOBAL_TOKEN")
+	if envGlobalToken != "" {
+		config.GlobalToken = envGlobalToken
+	}
 
 	envGlobalDatabaseURL := os.Getenv("ANKLET_GLOBAL_DATABASE_URL")
 	if envGlobalDatabaseURL != "" {
@@ -256,6 +263,16 @@ func LoadInEnvs(config Config) (Config, error) {
 		}
 	}
 
+	for i := range config.Plugins {
+		pluginEnvPrefix := normalizePluginEnvPrefix(config.Plugins[i].Name)
+		if pluginEnvPrefix == "" {
+			continue
+		}
+		if err := applyPluginEnvOverrides(&config.Plugins[i], pluginEnvPrefix); err != nil {
+			return Config{}, err
+		}
+	}
+
 	// pidFileDir := os.Getenv("ANKLET_PID_FILE_DIR")
 	// if pidFileDir != "" {
 	// 	config.PidFileDir = pidFileDir
@@ -265,6 +282,115 @@ func LoadInEnvs(config Config) (Config, error) {
 	// 	config.Log.FileDir = logFileDir
 	// }
 	return config, nil
+}
+
+func normalizePluginEnvPrefix(name string) string {
+	if name == "" {
+		return ""
+	}
+	upper := strings.ToUpper(name)
+	var builder strings.Builder
+	builder.Grow(len(upper))
+	for _, ch := range upper {
+		if unicode.IsLetter(ch) || unicode.IsDigit(ch) || ch == '_' {
+			builder.WriteRune(ch)
+		} else {
+			builder.WriteRune('_')
+		}
+	}
+	return builder.String()
+}
+
+func applyPluginEnvOverrides(plugin *Plugin, pluginEnvPrefix string) error {
+	pluginValue := reflect.ValueOf(plugin).Elem()
+	pluginType := pluginValue.Type()
+
+	for _, env := range os.Environ() {
+		parts := strings.SplitN(env, "=", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		envKey := parts[0]
+		envValue := parts[1]
+		if !strings.HasPrefix(envKey, pluginEnvPrefix+"_") {
+			continue
+		}
+		suffix := strings.TrimPrefix(envKey, pluginEnvPrefix+"_")
+
+		if strings.HasPrefix(suffix, "DATABASE_") {
+			databaseField, ok := pluginType.FieldByName("Database")
+			if ok {
+				if err := setStructFieldByEnvKey(
+					pluginValue.FieldByName("Database"),
+					databaseField.Type,
+					strings.TrimPrefix(suffix, "DATABASE_"),
+					envValue,
+				); err != nil {
+					return err
+				}
+			}
+			continue
+		}
+
+		if err := setStructFieldByEnvKey(pluginValue, pluginType, suffix, envValue); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func setStructFieldByEnvKey(target reflect.Value, targetType reflect.Type, envKey string, envValue string) error {
+	if !target.IsValid() {
+		return nil
+	}
+	for i := 0; i < targetType.NumField(); i++ {
+		field := targetType.Field(i)
+		yamlTag := field.Tag.Get("yaml")
+		if yamlTag == "" || yamlTag == "-" {
+			continue
+		}
+		if normalizeEnvKey(yamlTag) != envKey {
+			continue
+		}
+		fieldValue := target.Field(i)
+		if !fieldValue.CanSet() {
+			return nil
+		}
+		return setValueFromString(fieldValue, envValue)
+	}
+	return nil
+}
+
+func normalizeEnvKey(value string) string {
+	return strings.ToUpper(strings.ReplaceAll(value, "-", "_"))
+}
+
+func setValueFromString(fieldValue reflect.Value, rawValue string) error {
+	switch fieldValue.Kind() {
+	case reflect.String:
+		fieldValue.SetString(rawValue)
+	case reflect.Bool:
+		fieldValue.SetBool(rawValue == "true")
+	case reflect.Int:
+		parsed, err := strconv.Atoi(rawValue)
+		if err != nil {
+			return err
+		}
+		fieldValue.SetInt(int64(parsed))
+	case reflect.Int64:
+		parsed, err := strconv.ParseInt(rawValue, 10, 64)
+		if err != nil {
+			return err
+		}
+		fieldValue.SetInt(parsed)
+	case reflect.Float64:
+		parsed, err := strconv.ParseFloat(rawValue, 64)
+		if err != nil {
+			return err
+		}
+		fieldValue.SetFloat(parsed)
+	}
+	return nil
 }
 
 func GetPluginFromContext(ctx context.Context) (Plugin, error) {
