@@ -688,8 +688,6 @@ func (s *Server) Start(parentCtx context.Context, soloReceiver bool) {
 func (s *Server) handlePrometheusMetrics(ctx context.Context, soloReceiver bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		metricsData := ctx.Value(config.ContextKey("metrics")).(*MetricsDataLock)
-		// metricsData.RLock()
-		// defer metricsData.RUnlock()
 		w.Header().Set("Content-Type", "text/plain")
 		if !soloReceiver {
 			_, err := fmt.Fprintf(w, "total_running_vms %d\n", metricsData.TotalRunningVMs)
