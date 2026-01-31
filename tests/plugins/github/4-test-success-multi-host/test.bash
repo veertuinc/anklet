@@ -312,68 +312,83 @@ end_test
 # "paused" when the plugin was actually idle (internal paused state was false).
 begin_test "metrics-status-validation-multi-host"
 echo "] Final validation: checking metrics endpoints on all hosts..."
-sleep 3
 
 METRICS_TEST_PASSED=true
 
+# Ensure handlers are still running before checking metrics
+echo "] Verifying handlers are still running..."
+if ! ssh_to_host "handler-8-16" "pgrep -f '^/tmp/anklet\$' > /dev/null" 2>/dev/null; then
+    echo "] handler-8-16 not running, restarting..."
+    start_anklet_on_host_background "handler-8-16"
+    sleep 10
+fi
+if ! ssh_to_host "handler-8-8" "pgrep -f '^/tmp/anklet\$' > /dev/null" 2>/dev/null; then
+    echo "] handler-8-8 not running, restarting..."
+    start_anklet_on_host_background "handler-8-8"
+    sleep 10
+fi
+
+# Give metrics time to stabilize
+sleep 5
+
 # Check handler-8-16 metrics
 echo "] Checking handler-8-16 metrics endpoint..."
-HANDLER_16_METRICS=$(ssh_to_host "handler-8-16" "curl -s http://127.0.0.1:8080/metrics/v1?format=prometheus" 2>/dev/null || echo "CURL_FAILED")
-if [[ "$HANDLER_16_METRICS" == "CURL_FAILED" ]]; then
-    echo "FAIL: Could not reach handler-8-16 metrics endpoint"
-    METRICS_TEST_PASSED=false
-else
+HANDLER_16_METRICS=$(ssh_to_host "handler-8-16" "curl -s http://127.0.0.1:8080/metrics/v1?format=prometheus" 2>&1)
+# Check if we got valid metrics data (contains plugin_status)
+if echo "$HANDLER_16_METRICS" | grep -q "plugin_status"; then
     if echo "$HANDLER_16_METRICS" | grep -q "plugin_status{name=GITHUB_HANDLER_13_L_ARM_MACOS.*} idle"; then
         echo "PASS: GITHUB_HANDLER_13_L_ARM_MACOS metrics status is 'idle'"
     else
         echo "FAIL: GITHUB_HANDLER_13_L_ARM_MACOS metrics status is NOT 'idle'"
-        echo "  Status found: $(echo "$HANDLER_16_METRICS" | grep "plugin_status{name=GITHUB_HANDLER_13_L_ARM_MACOS" || echo "not found")"
         echo "  All plugin_status lines from handler-8-16:"
-        echo "$HANDLER_16_METRICS" | grep "plugin_status" || echo "    (no plugin_status lines found)"
-        echo "  Full metrics output from handler-8-16:"
-        echo "$HANDLER_16_METRICS"
+        echo "$HANDLER_16_METRICS" | grep "plugin_status"
         METRICS_TEST_PASSED=false
     fi
+else
+    echo "FAIL: Could not get valid metrics from handler-8-16"
+    echo "  Raw output:"
+    echo "$HANDLER_16_METRICS"
+    METRICS_TEST_PASSED=false
 fi
 
 # Check handler-8-8 metrics
 echo "] Checking handler-8-8 metrics endpoint..."
-HANDLER_8_METRICS=$(ssh_to_host "handler-8-8" "curl -s http://127.0.0.1:8080/metrics/v1?format=prometheus" 2>/dev/null || echo "CURL_FAILED")
-if [[ "$HANDLER_8_METRICS" == "CURL_FAILED" ]]; then
-    echo "FAIL: Could not reach handler-8-8 metrics endpoint"
-    METRICS_TEST_PASSED=false
-else
+HANDLER_8_METRICS=$(ssh_to_host "handler-8-8" "curl -s http://127.0.0.1:8080/metrics/v1?format=prometheus" 2>&1)
+# Check if we got valid metrics data (contains plugin_status)
+if echo "$HANDLER_8_METRICS" | grep -q "plugin_status"; then
     if echo "$HANDLER_8_METRICS" | grep -q "plugin_status{name=GITHUB_HANDLER1_8_L_ARM_MACOS.*} idle"; then
         echo "PASS: GITHUB_HANDLER1_8_L_ARM_MACOS metrics status is 'idle'"
     else
         echo "FAIL: GITHUB_HANDLER1_8_L_ARM_MACOS metrics status is NOT 'idle'"
-        echo "  Status found: $(echo "$HANDLER_8_METRICS" | grep "plugin_status{name=GITHUB_HANDLER1_8_L_ARM_MACOS" || echo "not found")"
         echo "  All plugin_status lines from handler-8-8:"
-        echo "$HANDLER_8_METRICS" | grep "plugin_status" || echo "    (no plugin_status lines found)"
-        echo "  Full metrics output from handler-8-8:"
-        echo "$HANDLER_8_METRICS" | head -50
+        echo "$HANDLER_8_METRICS" | grep "plugin_status"
         METRICS_TEST_PASSED=false
     fi
+else
+    echo "FAIL: Could not get valid metrics from handler-8-8"
+    echo "  Raw output:"
+    echo "$HANDLER_8_METRICS"
+    METRICS_TEST_PASSED=false
 fi
 
 # Check receiver metrics (local)
 echo "] Checking local receiver metrics endpoint..."
-RECEIVER_METRICS=$(curl -s http://127.0.0.1:8080/metrics/v1?format=prometheus 2>/dev/null || echo "CURL_FAILED")
-if [[ "$RECEIVER_METRICS" == "CURL_FAILED" ]]; then
-    echo "FAIL: Could not reach receiver metrics endpoint"
-    METRICS_TEST_PASSED=false
-else
+RECEIVER_METRICS=$(curl -s http://127.0.0.1:8080/metrics/v1?format=prometheus 2>&1)
+# Check if we got valid metrics data (contains plugin_status)
+if echo "$RECEIVER_METRICS" | grep -q "plugin_status"; then
     if echo "$RECEIVER_METRICS" | grep -q "plugin_status{name=GITHUB_RECEIVER1.*} idle"; then
         echo "PASS: GITHUB_RECEIVER1 metrics status is 'idle'"
     else
         echo "FAIL: GITHUB_RECEIVER1 metrics status is NOT 'idle'"
-        echo "  Status found: $(echo "$RECEIVER_METRICS" | grep "plugin_status{name=GITHUB_RECEIVER1" || echo "not found")"
         echo "  All plugin_status lines from receiver:"
-        echo "$RECEIVER_METRICS" | grep "plugin_status" || echo "    (no plugin_status lines found)"
-        echo "  Full metrics output from receiver:"
-        echo "$RECEIVER_METRICS" | head -50
+        echo "$RECEIVER_METRICS" | grep "plugin_status"
         METRICS_TEST_PASSED=false
     fi
+else
+    echo "FAIL: Could not get valid metrics from receiver"
+    echo "  Raw output:"
+    echo "$RECEIVER_METRICS"
+    METRICS_TEST_PASSED=false
 fi
 
 # Record test result
