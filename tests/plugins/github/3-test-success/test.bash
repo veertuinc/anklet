@@ -74,7 +74,22 @@ if run_workflow_and_get_logs "veertuinc" "anklet" "t1-with-tag-1" "success"; the
     assert_remote_log_contains "handler-8-16" "job is still in progress"
     assert_remote_log_contains "handler-8-16" "job completed"
     assert_remote_log_contains "handler-8-16" "GITHUB_HANDLER1"
-    record_pass
+    
+    # Verify metrics endpoint shows correct status after job completion
+    # This validates the fix for the data race bug where metrics showed "paused" 
+    # when the plugin was actually idle (internal paused state was false)
+    echo "] Verifying handler metrics endpoint shows 'idle' status..."
+    sleep 2 # Allow metrics to update after job completion
+    HANDLER_METRICS=$(ssh_to_host "handler-8-16" "curl -s http://127.0.0.1:8080/metrics/v1?format=prometheus")
+    if echo "$HANDLER_METRICS" | grep -q "plugin_status{name=GITHUB_HANDLER1.*} idle"; then
+        echo "PASS: Handler GITHUB_HANDLER1 metrics status is 'idle'"
+        record_pass
+    else
+        echo "FAIL: Handler GITHUB_HANDLER1 metrics status is NOT 'idle'"
+        echo "Metrics output:"
+        echo "$HANDLER_METRICS" | grep "plugin_status" || echo "(no plugin_status found)"
+        record_fail "metrics endpoint did not show expected 'idle' status for GITHUB_HANDLER1"
+    fi
 else
     record_fail "workflow did not complete as expected"
 fi
@@ -157,6 +172,69 @@ if run_workflow_and_get_logs "veertuinc" "anklet" "t2-dual-without-tag" "success
     record_pass
 else
     record_fail "workflow did not complete as expected"
+fi
+end_test
+############
+
+############
+# metrics-status-validation
+# This test validates the fix for the metrics data race bug where the metrics endpoint
+# could show "paused" status while the plugin was actually idle. The bug was caused by
+# handlePrometheusMetrics reading metrics data without holding a read lock.
+begin_test "metrics-status-validation"
+echo "] Validating metrics endpoints show correct 'idle' status for all plugins..."
+sleep 3 # Ensure metrics have time to update after previous tests
+
+METRICS_TEST_PASSED=true
+
+# Check handler metrics (remote)
+echo "] Checking handler-8-16 metrics endpoint..."
+HANDLER_METRICS=$(ssh_to_host "handler-8-16" "curl -s http://127.0.0.1:8080/metrics/v1?format=prometheus" 2>/dev/null || echo "CURL_FAILED")
+if [[ "$HANDLER_METRICS" == "CURL_FAILED" ]]; then
+    echo "FAIL: Could not reach handler metrics endpoint"
+    METRICS_TEST_PASSED=false
+else
+    # Check GITHUB_HANDLER1 status
+    if echo "$HANDLER_METRICS" | grep -q "plugin_status{name=GITHUB_HANDLER1.*} idle"; then
+        echo "PASS: GITHUB_HANDLER1 metrics status is 'idle'"
+    else
+        echo "FAIL: GITHUB_HANDLER1 metrics status is NOT 'idle'"
+        echo "  Status found: $(echo "$HANDLER_METRICS" | grep "plugin_status{name=GITHUB_HANDLER1" || echo "not found")"
+        METRICS_TEST_PASSED=false
+    fi
+    # Check GITHUB_HANDLER2 status if it exists
+    if echo "$HANDLER_METRICS" | grep -q "plugin_status{name=GITHUB_HANDLER2"; then
+        if echo "$HANDLER_METRICS" | grep -q "plugin_status{name=GITHUB_HANDLER2.*} idle"; then
+            echo "PASS: GITHUB_HANDLER2 metrics status is 'idle'"
+        else
+            echo "FAIL: GITHUB_HANDLER2 metrics status is NOT 'idle'"
+            echo "  Status found: $(echo "$HANDLER_METRICS" | grep "plugin_status{name=GITHUB_HANDLER2" || echo "not found")"
+            METRICS_TEST_PASSED=false
+        fi
+    fi
+fi
+
+# Check receiver metrics (local)
+echo "] Checking local receiver metrics endpoint..."
+RECEIVER_METRICS=$(curl -s http://127.0.0.1:8080/metrics/v1?format=prometheus 2>/dev/null || echo "CURL_FAILED")
+if [[ "$RECEIVER_METRICS" == "CURL_FAILED" ]]; then
+    echo "FAIL: Could not reach receiver metrics endpoint"
+    METRICS_TEST_PASSED=false
+else
+    if echo "$RECEIVER_METRICS" | grep -q "plugin_status{name=GITHUB_RECEIVER1.*} idle"; then
+        echo "PASS: GITHUB_RECEIVER1 metrics status is 'idle'"
+    else
+        echo "FAIL: GITHUB_RECEIVER1 metrics status is NOT 'idle'"
+        echo "  Status found: $(echo "$RECEIVER_METRICS" | grep "plugin_status{name=GITHUB_RECEIVER1" || echo "not found")"
+        METRICS_TEST_PASSED=false
+    fi
+fi
+
+# Record test result
+if [[ "$METRICS_TEST_PASSED" == "true" ]]; then
+    record_pass
+else
+    record_fail "one or more plugins did not show expected 'idle' status in metrics"
 fi
 end_test
 ############
