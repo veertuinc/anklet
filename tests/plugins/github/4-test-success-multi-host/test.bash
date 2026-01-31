@@ -328,6 +328,10 @@ else
     else
         echo "FAIL: GITHUB_HANDLER_13_L_ARM_MACOS metrics status is NOT 'idle'"
         echo "  Status found: $(echo "$HANDLER_16_METRICS" | grep "plugin_status{name=GITHUB_HANDLER_13_L_ARM_MACOS" || echo "not found")"
+        echo "  All plugin_status lines from handler-8-16:"
+        echo "$HANDLER_16_METRICS" | grep "plugin_status" || echo "    (no plugin_status lines found)"
+        echo "  Full metrics output from handler-8-16:"
+        echo "$HANDLER_16_METRICS"
         METRICS_TEST_PASSED=false
     fi
 fi
@@ -344,6 +348,10 @@ else
     else
         echo "FAIL: GITHUB_HANDLER1_8_L_ARM_MACOS metrics status is NOT 'idle'"
         echo "  Status found: $(echo "$HANDLER_8_METRICS" | grep "plugin_status{name=GITHUB_HANDLER1_8_L_ARM_MACOS" || echo "not found")"
+        echo "  All plugin_status lines from handler-8-8:"
+        echo "$HANDLER_8_METRICS" | grep "plugin_status" || echo "    (no plugin_status lines found)"
+        echo "  Full metrics output from handler-8-8:"
+        echo "$HANDLER_8_METRICS" | head -50
         METRICS_TEST_PASSED=false
     fi
 fi
@@ -360,6 +368,10 @@ else
     else
         echo "FAIL: GITHUB_RECEIVER1 metrics status is NOT 'idle'"
         echo "  Status found: $(echo "$RECEIVER_METRICS" | grep "plugin_status{name=GITHUB_RECEIVER1" || echo "not found")"
+        echo "  All plugin_status lines from receiver:"
+        echo "$RECEIVER_METRICS" | grep "plugin_status" || echo "    (no plugin_status lines found)"
+        echo "  Full metrics output from receiver:"
+        echo "$RECEIVER_METRICS" | head -50
         METRICS_TEST_PASSED=false
     fi
 fi

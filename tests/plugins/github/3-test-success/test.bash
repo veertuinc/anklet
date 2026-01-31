@@ -200,6 +200,10 @@ else
     else
         echo "FAIL: GITHUB_HANDLER1 metrics status is NOT 'idle'"
         echo "  Status found: $(echo "$HANDLER_METRICS" | grep "plugin_status{name=GITHUB_HANDLER1" || echo "not found")"
+        echo "  All plugin_status lines from handler:"
+        echo "$HANDLER_METRICS" | grep "plugin_status" || echo "    (no plugin_status lines found)"
+        echo "  Full metrics output from handler:"
+        echo "$HANDLER_METRICS" | head -50
         METRICS_TEST_PASSED=false
     fi
     # Check GITHUB_HANDLER2 status if it exists
@@ -209,6 +213,8 @@ else
         else
             echo "FAIL: GITHUB_HANDLER2 metrics status is NOT 'idle'"
             echo "  Status found: $(echo "$HANDLER_METRICS" | grep "plugin_status{name=GITHUB_HANDLER2" || echo "not found")"
+            echo "  All plugin_status lines from handler:"
+            echo "$HANDLER_METRICS" | grep "plugin_status" || echo "    (no plugin_status lines found)"
             METRICS_TEST_PASSED=false
         fi
     fi
@@ -226,6 +232,10 @@ else
     else
         echo "FAIL: GITHUB_RECEIVER1 metrics status is NOT 'idle'"
         echo "  Status found: $(echo "$RECEIVER_METRICS" | grep "plugin_status{name=GITHUB_RECEIVER1" || echo "not found")"
+        echo "  All plugin_status lines from receiver:"
+        echo "$RECEIVER_METRICS" | grep "plugin_status" || echo "    (no plugin_status lines found)"
+        echo "  Full metrics output from receiver:"
+        echo "$RECEIVER_METRICS" | head -50
         METRICS_TEST_PASSED=false
     fi
 fi
