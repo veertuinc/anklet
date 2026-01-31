@@ -7,3 +7,4 @@ dist
 *.pid
 docker/anklet*
 anklet_v*
+anklet.code-workspace
