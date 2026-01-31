@@ -101,19 +101,29 @@ if wait_for_workflow_runs_to_complete "veertuinc" "anklet" "t2-6c14r-1" "success
         sleep 3
         
         # Check handler-8-16 metrics
-        HANDLER_16_METRICS=$(ssh_to_host "handler-8-16" "curl -s http://127.0.0.1:8080/metrics/v1?format=prometheus" 2>/dev/null || echo "CURL_FAILED")
-        if [[ "$HANDLER_16_METRICS" != "CURL_FAILED" ]] && echo "$HANDLER_16_METRICS" | grep -q "plugin_status{name=GITHUB_HANDLER_13_L_ARM_MACOS.*} idle"; then
-            echo "] ✓ handler-8-16 (GITHUB_HANDLER_13_L_ARM_MACOS) metrics status is 'idle'"
+        HANDLER_16_METRICS=$(ssh_to_host "handler-8-16" "curl -s http://127.0.0.1:8080/metrics/v1?format=prometheus" 2>&1)
+        if echo "$HANDLER_16_METRICS" | grep -q "plugin_status"; then
+            if echo "$HANDLER_16_METRICS" | grep -q "plugin_status{name=GITHUB_HANDLER_13_L_ARM_MACOS.*} idle"; then
+                echo "] ✓ handler-8-16 (GITHUB_HANDLER_13_L_ARM_MACOS) metrics status is 'idle'"
+            else
+                echo "] WARN: handler-8-16 metrics status:"
+                echo "$HANDLER_16_METRICS" | grep "plugin_status"
+            fi
         else
-            echo "] WARN: handler-8-16 metrics check - status: $(echo "$HANDLER_16_METRICS" | grep "plugin_status{name=GITHUB_HANDLER_13_L_ARM_MACOS" || echo "not found")"
+            echo "] WARN: Could not get valid metrics from handler-8-16"
         fi
         
         # Check handler-8-8 metrics
-        HANDLER_8_METRICS=$(ssh_to_host "handler-8-8" "curl -s http://127.0.0.1:8080/metrics/v1?format=prometheus" 2>/dev/null || echo "CURL_FAILED")
-        if [[ "$HANDLER_8_METRICS" != "CURL_FAILED" ]] && echo "$HANDLER_8_METRICS" | grep -q "plugin_status{name=GITHUB_HANDLER1_8_L_ARM_MACOS.*} idle"; then
-            echo "] ✓ handler-8-8 (GITHUB_HANDLER1_8_L_ARM_MACOS) metrics status is 'idle'"
+        HANDLER_8_METRICS=$(ssh_to_host "handler-8-8" "curl -s http://127.0.0.1:8080/metrics/v1?format=prometheus" 2>&1)
+        if echo "$HANDLER_8_METRICS" | grep -q "plugin_status"; then
+            if echo "$HANDLER_8_METRICS" | grep -q "plugin_status{name=GITHUB_HANDLER1_8_L_ARM_MACOS.*} idle"; then
+                echo "] ✓ handler-8-8 (GITHUB_HANDLER1_8_L_ARM_MACOS) metrics status is 'idle'"
+            else
+                echo "] WARN: handler-8-8 metrics status:"
+                echo "$HANDLER_8_METRICS" | grep "plugin_status"
+            fi
         else
-            echo "] WARN: handler-8-8 metrics check - status: $(echo "$HANDLER_8_METRICS" | grep "plugin_status{name=GITHUB_HANDLER1_8_L_ARM_MACOS" || echo "not found")"
+            echo "] WARN: Could not get valid metrics from handler-8-8"
         fi
         
         record_pass
@@ -270,31 +280,37 @@ echo "] Verifying metrics endpoints show 'idle' status after paused job handoff.
 sleep 5
 
 # Check handler-8-16 metrics (picked up the paused job)
-HANDLER_16_METRICS=$(ssh_to_host "handler-8-16" "curl -s http://127.0.0.1:8080/metrics/v1?format=prometheus" 2>/dev/null || echo "CURL_FAILED")
-if [[ "$HANDLER_16_METRICS" != "CURL_FAILED" ]]; then
+echo "] Checking handler-8-16 metrics..."
+HANDLER_16_METRICS=$(ssh_to_host "handler-8-16" "curl -s http://127.0.0.1:8080/metrics/v1?format=prometheus" 2>&1)
+if echo "$HANDLER_16_METRICS" | grep -q "plugin_status"; then
     if echo "$HANDLER_16_METRICS" | grep -q "plugin_status{name=GITHUB_HANDLER_13_L_ARM_MACOS.*} idle"; then
         echo "] ✓ handler-8-16 (GITHUB_HANDLER_13_L_ARM_MACOS) metrics status is 'idle' after paused job handoff"
     else
         echo "] FAIL: handler-8-16 metrics status is NOT 'idle' after paused job handoff"
-        echo "  Status found: $(echo "$HANDLER_16_METRICS" | grep "plugin_status{name=GITHUB_HANDLER_13_L_ARM_MACOS" || echo "not found")"
+        echo "  All plugin_status lines:"
+        echo "$HANDLER_16_METRICS" | grep "plugin_status"
         test_passed=false
     fi
 else
-    echo "] WARN: Could not reach handler-8-16 metrics endpoint"
+    echo "] WARN: Could not get valid metrics from handler-8-16"
+    echo "  Raw output: $HANDLER_16_METRICS"
 fi
 
 # Check handler-8-8 metrics (was waiting for resources, then job was handed off)
-HANDLER_8_METRICS=$(ssh_to_host "handler-8-8" "curl -s http://127.0.0.1:8080/metrics/v1?format=prometheus" 2>/dev/null || echo "CURL_FAILED")
-if [[ "$HANDLER_8_METRICS" != "CURL_FAILED" ]]; then
+echo "] Checking handler-8-8 metrics..."
+HANDLER_8_METRICS=$(ssh_to_host "handler-8-8" "curl -s http://127.0.0.1:8080/metrics/v1?format=prometheus" 2>&1)
+if echo "$HANDLER_8_METRICS" | grep -q "plugin_status"; then
     if echo "$HANDLER_8_METRICS" | grep -q "plugin_status{name=GITHUB_HANDLER1_8_L_ARM_MACOS.*} idle"; then
         echo "] ✓ handler-8-8 (GITHUB_HANDLER1_8_L_ARM_MACOS) metrics status is 'idle' after paused job handoff"
     else
         echo "] FAIL: handler-8-8 metrics status is NOT 'idle' after paused job handoff"
-        echo "  Status found: $(echo "$HANDLER_8_METRICS" | grep "plugin_status{name=GITHUB_HANDLER1_8_L_ARM_MACOS" || echo "not found")"
+        echo "  All plugin_status lines:"
+        echo "$HANDLER_8_METRICS" | grep "plugin_status"
         test_passed=false
     fi
 else
-    echo "] WARN: Could not reach handler-8-8 metrics endpoint"
+    echo "] WARN: Could not get valid metrics from handler-8-8"
+    echo "  Raw output: $HANDLER_8_METRICS"
 fi
 
 if [[ "$test_passed" == "true" ]]; then
