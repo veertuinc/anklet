@@ -1990,6 +1990,7 @@ func Run(
 							// no need to error, as it's not a big deal if it's not there
 							logging.Warn(pluginCtx, "error deleting from paused queue", "error", err)
 						}
+						workerGlobals.Plugins[pluginConfig.Plugin][pluginConfig.Name].Paused.Store(false)
 						pluginGlobals.JobChannel <- job // put the job back for cleanup
 						return pluginCtx, nil
 					}
@@ -2000,6 +2001,7 @@ func Run(
 				}
 
 				if workerCtx.Err() != nil || pluginCtx.Err() != nil {
+					workerGlobals.Plugins[pluginConfig.Plugin][pluginConfig.Name].Paused.Store(false)
 					pluginGlobals.RetryChannel <- "context_canceled"
 					return pluginCtx, fmt.Errorf("context canceled while waiting for resources")
 				}
@@ -2017,10 +2019,12 @@ func Run(
 					if err != nil {
 						logging.Error(pluginCtx, "error deleting from paused queue", "error", err)
 					}
+					workerGlobals.Plugins[pluginConfig.Plugin][pluginConfig.Name].Paused.Store(false)
 					return pluginCtx, nil
 				}
 				if existingJobJSON == "" { // some other host has taken the job from this host
 					logging.Warn(pluginCtx, "job was picked up by another host")
+					workerGlobals.Plugins[pluginConfig.Plugin][pluginConfig.Name].Paused.Store(false)
 					pluginGlobals.PausedCancellationJobChannel <- queuedJob
 					return pluginCtx, nil
 				}
