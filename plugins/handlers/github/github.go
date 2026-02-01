@@ -888,11 +888,10 @@ func cleanup(
 		}
 		if !workerGlobals.Plugins[pluginConfig.Plugin][pluginConfig.Name].FinishedInitialRun.Load() {
 			workerGlobals.Plugins[pluginConfig.Plugin][pluginConfig.Name].FinishedInitialRun.Store(true)
-		} else {
-			// don't unpause if it's the initial start and first plugin
-			if workerGlobals.Plugins[pluginConfig.Plugin][pluginConfig.Name].Paused.Load() {
-				workerGlobals.Plugins[pluginConfig.Plugin][pluginConfig.Name].Paused.Store(false)
-			}
+		}
+		// Always unpause after cleanup to allow other plugins on this host to run
+		if workerGlobals.Plugins[pluginConfig.Plugin][pluginConfig.Name].Paused.Load() {
+			workerGlobals.Plugins[pluginConfig.Plugin][pluginConfig.Name].Paused.Store(false)
 		}
 	}()
 
