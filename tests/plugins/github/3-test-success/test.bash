@@ -79,7 +79,7 @@ if run_workflow_and_get_logs "veertuinc" "anklet" "t1-with-tag-1" "success"; the
     # This validates the fix for the data race bug where metrics showed "paused" 
     # when the plugin was actually idle (internal paused state was false)
     echo "] Verifying handler metrics endpoint shows 'idle' status..."
-    sleep 10 # Allow metrics to update after job completion
+    sleep 2 # Allow metrics to update after job completion
     HANDLER_METRICS=$(ssh_to_host "handler-8-16" "curl -s http://127.0.0.1:8080/metrics/v1?format=prometheus" 2>&1)
     if echo "$HANDLER_METRICS" | grep -q "plugin_status"; then
         if echo "$HANDLER_METRICS" | grep -q "plugin_status{name=GITHUB_HANDLER1.*} idle"; then
@@ -190,7 +190,7 @@ end_test
 # handlePrometheusMetrics reading metrics data without holding a read lock.
 begin_test "metrics-status-validation"
 echo "] Validating metrics endpoints show correct 'idle' status for all plugins..."
-sleep 3 # Ensure metrics have time to update after previous tests
+sleep 10 # Ensure metrics have time to update after previous tests
 
 METRICS_TEST_PASSED=true
 
