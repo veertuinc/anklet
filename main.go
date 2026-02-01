@@ -703,6 +703,11 @@ func worker(
 							time.Sleep(time.Second * 3)
 							continue
 						}
+						// Set status back to idle after exiting the preparing wait loop
+						err = metricsData.SetStatus(pluginCtx, "idle")
+						if err != nil {
+							logging.Error(pluginCtx, "error setting plugin status", "error", err)
+						}
 
 						workerGlobals.IncrementPluginRunCount(plugin.Name)
 
