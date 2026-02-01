@@ -1189,11 +1189,6 @@ func Run(
 		return pluginCtx, err
 	}
 
-	// Mark this plugin as preparing to prevent race conditions with sibling plugins
-	// trying to allocate resources simultaneously. This blocks other plugins of the same
-	// type from starting until this plugin finishes its resource allocation phase.
-	workerGlobals.Plugins[pluginConfig.Plugin][pluginConfig.Name].Preparing.Store(true)
-
 	pluginCtx = logging.AppendCtx(pluginCtx,
 		slog.Int("hostCPUCount", workerGlobals.HostCPUCount),
 		slog.Uint64("hostMemoryBytes", workerGlobals.HostMemoryBytes),
@@ -1700,6 +1695,12 @@ func Run(
 		"queued job found",
 		"queuedJob", queuedJob,
 	)
+
+	// Mark this plugin as preparing to prevent race conditions with sibling plugins
+	// trying to allocate resources simultaneously. This blocks other plugins of the same
+	// type from starting until this plugin finishes its resource allocation phase.
+	// Only set this AFTER we know there's a job to process, not at the start of every run.
+	workerGlobals.Plugins[pluginConfig.Plugin][pluginConfig.Name].Preparing.Store(true)
 
 	pluginCtx = logging.AppendCtx(pluginCtx,
 		slog.Int64("workflowJobID", *queuedJob.WorkflowJob.ID),
