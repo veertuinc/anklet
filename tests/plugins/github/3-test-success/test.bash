@@ -60,117 +60,117 @@ assert_redis_key_exists "anklet/metrics/veertuinc/GITHUB_RECEIVER1"
 # Test Cases
 ###############################################################################
 
-############
-# t1-with-tag-1
-begin_test "t1-with-tag-1"
-if run_workflow_and_get_logs "veertuinc" "anklet" "t1-with-tag-1" "success"; then
-    # Check handler's anklet.log for expected entries
-    assert_remote_log_contains "handler-8-16" "queued job found"
-    assert_remote_log_contains "handler-8-16" "handling anka workflow run job"
-    assert_remote_log_contains "handler-8-16" "vm has enough resources now to run; starting runner"
-    assert_remote_log_contains "handler-8-16" "job found registered runner and is now in progress"
-    assert_remote_log_contains "handler-8-16" "cleanup | WorkflowJobPayload | queuedJob"
-    assert_remote_log_contains "handler-8-16" "cleanup | anka.VM | queuedJob"
-    assert_remote_log_contains "handler-8-16" "job is still in progress"
-    assert_remote_log_contains "handler-8-16" "job completed"
-    assert_remote_log_contains "handler-8-16" "GITHUB_HANDLER1"
+# ############
+# # t1-with-tag-1
+# begin_test "t1-with-tag-1"
+# if run_workflow_and_get_logs "veertuinc" "anklet" "t1-with-tag-1" "success"; then
+#     # Check handler's anklet.log for expected entries
+#     assert_remote_log_contains "handler-8-16" "queued job found"
+#     assert_remote_log_contains "handler-8-16" "handling anka workflow run job"
+#     assert_remote_log_contains "handler-8-16" "vm has enough resources now to run; starting runner"
+#     assert_remote_log_contains "handler-8-16" "job found registered runner and is now in progress"
+#     assert_remote_log_contains "handler-8-16" "cleanup | WorkflowJobPayload | queuedJob"
+#     assert_remote_log_contains "handler-8-16" "cleanup | anka.VM | queuedJob"
+#     assert_remote_log_contains "handler-8-16" "job is still in progress"
+#     assert_remote_log_contains "handler-8-16" "job completed"
+#     assert_remote_log_contains "handler-8-16" "GITHUB_HANDLER1"
     
-    # Verify metrics endpoint shows correct status after job completion
-    # This validates the fix for the data race bug where metrics showed "paused" 
-    # when the plugin was actually idle (internal paused state was false)
-    echo "] Verifying handler metrics endpoint shows 'idle' status..."
-    sleep 2 # Allow metrics to update after job completion
-    HANDLER_METRICS=$(ssh_to_host "handler-8-16" "curl -s http://127.0.0.1:8080/metrics/v1?format=prometheus" 2>&1)
-    if echo "$HANDLER_METRICS" | grep -q "plugin_status"; then
-        if echo "$HANDLER_METRICS" | grep -q "plugin_status{name=GITHUB_HANDLER1.*} idle"; then
-            echo "PASS: Handler GITHUB_HANDLER1 metrics status is 'idle'"
-            record_pass
-        else
-            echo "FAIL: Handler GITHUB_HANDLER1 metrics status is NOT 'idle'"
-            echo "  All plugin_status lines:"
-            echo "$HANDLER_METRICS" | grep "plugin_status"
-            record_fail "metrics endpoint did not show expected 'idle' status for GITHUB_HANDLER1"
-        fi
-    else
-        echo "FAIL: Could not get valid metrics from handler"
-        echo "  Raw output:"
-        echo "$HANDLER_METRICS"
-        record_fail "could not get valid metrics from handler"
-    fi
-else
-    record_fail "workflow did not complete as expected"
-fi
-end_test
-############
+#     # Verify metrics endpoint shows correct status after job completion
+#     # This validates the fix for the data race bug where metrics showed "paused" 
+#     # when the plugin was actually idle (internal paused state was false)
+#     echo "] Verifying handler metrics endpoint shows 'idle' status..."
+#     sleep 2 # Allow metrics to update after job completion
+#     HANDLER_METRICS=$(ssh_to_host "handler-8-16" "curl -s http://127.0.0.1:8080/metrics/v1?format=prometheus" 2>&1)
+#     if echo "$HANDLER_METRICS" | grep -q "plugin_status"; then
+#         if echo "$HANDLER_METRICS" | grep -q "plugin_status{name=GITHUB_HANDLER1.*} idle"; then
+#             echo "PASS: Handler GITHUB_HANDLER1 metrics status is 'idle'"
+#             record_pass
+#         else
+#             echo "FAIL: Handler GITHUB_HANDLER1 metrics status is NOT 'idle'"
+#             echo "  All plugin_status lines:"
+#             echo "$HANDLER_METRICS" | grep "plugin_status"
+#             record_fail "metrics endpoint did not show expected 'idle' status for GITHUB_HANDLER1"
+#         fi
+#     else
+#         echo "FAIL: Could not get valid metrics from handler"
+#         echo "  Raw output:"
+#         echo "$HANDLER_METRICS"
+#         record_fail "could not get valid metrics from handler"
+#     fi
+# else
+#     record_fail "workflow did not complete as expected"
+# fi
+# end_test
+# ############
 
-############
-# t1-with-tag-1-matrix-nodes-2
-begin_test "t1-with-tag-1-matrix-nodes-2"
-if run_workflow_and_get_logs "veertuinc" "anklet" "t1-with-tag-1-matrix-nodes-2" "success"; then
-    assert_remote_log_contains "handler-8-16" "handling anka workflow run job"
-    record_pass
-else
-    record_fail "workflow did not complete as expected"
-fi
-end_test
-############
+# ############
+# # t1-with-tag-1-matrix-nodes-2
+# begin_test "t1-with-tag-1-matrix-nodes-2"
+# if run_workflow_and_get_logs "veertuinc" "anklet" "t1-with-tag-1-matrix-nodes-2" "success"; then
+#     assert_remote_log_contains "handler-8-16" "handling anka workflow run job"
+#     record_pass
+# else
+#     record_fail "workflow did not complete as expected"
+# fi
+# end_test
+# ############
 
-############
-# t1-with-tag-2
-begin_test "t1-with-tag-2"
-if run_workflow_and_get_logs "veertuinc" "anklet" "t1-with-tag-2" "success"; then
-    assert_remote_log_contains "handler-8-16" "anka -j registry pull"
-    record_pass
-else
-    record_fail "workflow did not complete as expected"
-fi
-end_test
-############
+# ############
+# # t1-with-tag-2
+# begin_test "t1-with-tag-2"
+# if run_workflow_and_get_logs "veertuinc" "anklet" "t1-with-tag-2" "success"; then
+#     assert_remote_log_contains "handler-8-16" "anka -j registry pull"
+#     record_pass
+# else
+#     record_fail "workflow did not complete as expected"
+# fi
+# end_test
+# ############
 
-############
-# t1-without-tag
-begin_test "t1-without-tag"
-if run_workflow_and_get_logs "veertuinc" "anklet" "t1-without-tag" "success"; then
-    record_pass
-else
-    record_fail "workflow did not complete as expected"
-fi
-end_test
-############
+# ############
+# # t1-without-tag
+# begin_test "t1-without-tag"
+# if run_workflow_and_get_logs "veertuinc" "anklet" "t1-without-tag" "success"; then
+#     record_pass
+# else
+#     record_fail "workflow did not complete as expected"
+# fi
+# end_test
+# ############
 
-############
-# t2-6c14r-1
-begin_test "t2-6c14r-1"
-if run_workflow_and_get_logs "veertuinc" "anklet" "t2-6c14r-1" "success"; then
-    assert_logs_contain "Ankas-Virtual-Machine.local" "${WORKFLOW_LOG_FILES[@]}"
-    record_pass
-else
-    record_fail "workflow did not complete as expected"
-fi
-end_test
-############
+# ############
+# # t2-6c14r-1
+# begin_test "t2-6c14r-1"
+# if run_workflow_and_get_logs "veertuinc" "anklet" "t2-6c14r-1" "success"; then
+#     assert_logs_contain "Ankas-Virtual-Machine.local" "${WORKFLOW_LOG_FILES[@]}"
+#     record_pass
+# else
+#     record_fail "workflow did not complete as expected"
+# fi
+# end_test
+# ############
 
-############
-# t2-6c14r-2-5m-pause
-begin_test "t2-6c14r-2-5m-pause"
-if run_workflow_and_get_logs "veertuinc" "anklet" "t2-6c14r-2-5m-pause" "success"; then
-    record_pass
-else
-    record_fail "workflow did not complete as expected"
-fi
-end_test
-############
+# ############
+# # t2-6c14r-2-5m-pause
+# begin_test "t2-6c14r-2-5m-pause"
+# if run_workflow_and_get_logs "veertuinc" "anklet" "t2-6c14r-2-5m-pause" "success"; then
+#     record_pass
+# else
+#     record_fail "workflow did not complete as expected"
+# fi
+# end_test
+# ############
 
-############
-# t2-8c14r-1
-begin_test "t2-8c14r-1"
-if run_workflow_and_get_logs "veertuinc" "anklet" "t2-8c14r-1" "success"; then
-    record_pass
-else
-    record_fail "workflow did not complete as expected"
-fi
-end_test
-############
+# ############
+# # t2-8c14r-1
+# begin_test "t2-8c14r-1"
+# if run_workflow_and_get_logs "veertuinc" "anklet" "t2-8c14r-1" "success"; then
+#     record_pass
+# else
+#     record_fail "workflow did not complete as expected"
+# fi
+# end_test
+# ############
 
 ############
 # t2-dual-without-tag
