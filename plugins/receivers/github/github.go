@@ -170,6 +170,24 @@ func Run(
 			webhookCtx = logging.AppendCtx(webhookCtx, slog.String("deliveryID", deliveryID))
 
 			logging.Info(webhookCtx, "received workflow job to consider")
+			if workflowJob.WorkflowJob.ID != nil {
+				logging.Info(webhookCtx, "workflow job ID", "workflowJobID", *workflowJob.WorkflowJob.ID)
+			}
+			if workflowJob.WorkflowJob.RunID != nil {
+				logging.Info(webhookCtx, "workflow job run ID", "workflowJobRunID", *workflowJob.WorkflowJob.RunID)
+			}
+			if workflowJob.WorkflowJob.WorkflowName != nil {
+				logging.Info(webhookCtx, "workflow job workflow name", "workflowJobWorkflowName", *workflowJob.WorkflowJob.WorkflowName)
+			}
+			if workflowJob.WorkflowJob.HTMLURL != nil {
+				logging.Info(webhookCtx, "workflow job HTML URL", "workflowJobHTMLURL", *workflowJob.WorkflowJob.HTMLURL)
+			}
+			if workflowJob.WorkflowJob.Status != nil {
+				logging.Info(webhookCtx, "workflow job status", "workflowJobStatus", *workflowJob.WorkflowJob.Status)
+			}
+			if workflowJob.WorkflowJob.Conclusion != nil {
+				logging.Info(webhookCtx, "workflow job conclusion", "workflowJobConclusion", *workflowJob.WorkflowJob.Conclusion)
+			}
 			if *workflowJob.Action == "queued" {
 				if exists_in_array_partial(simplifiedWorkflowJobEvent.WorkflowJob.Labels, []string{"anka-template"}) {
 					// make sure it doesn't already exist in the main queued queue

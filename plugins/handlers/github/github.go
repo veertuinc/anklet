@@ -1327,7 +1327,8 @@ func Run(
 	select {
 	case jobFromJobChannel := <-pluginGlobals.JobChannel:
 		// return if completed so the cleanup doesn't run twice
-		if *jobFromJobChannel.WorkflowJob.Status == "completed" || *jobFromJobChannel.WorkflowJob.Status == "failed" {
+		if jobFromJobChannel.WorkflowJob.Status != nil &&
+			(*jobFromJobChannel.WorkflowJob.Status == "completed" || *jobFromJobChannel.WorkflowJob.Status == "failed") {
 			logging.Info(pluginCtx, *jobFromJobChannel.WorkflowJob.Status+" job found at start", "jobFromJobChannel", jobFromJobChannel)
 			pluginGlobals.JobChannel <- jobFromJobChannel
 			return pluginCtx, nil
@@ -1701,11 +1702,28 @@ func Run(
 		"queuedJob", queuedJob,
 	)
 
+	var runID int64 = 0
+	if queuedJob.WorkflowJob.RunID != nil {
+		runID = *queuedJob.WorkflowJob.RunID
+	}
+	var workflowName string
+	if queuedJob.WorkflowJob.WorkflowName != nil {
+		workflowName = *queuedJob.WorkflowJob.WorkflowName
+	} else {
+		workflowName = ""
+	}
+	var htmlURL string
+	if queuedJob.WorkflowJob.HTMLURL != nil {
+		htmlURL = *queuedJob.WorkflowJob.HTMLURL
+	} else {
+		htmlURL = ""
+	}
+
 	pluginCtx = logging.AppendCtx(pluginCtx,
 		slog.Int64("workflowJobID", *queuedJob.WorkflowJob.ID),
-		slog.Int64("workflowJobRunID", *queuedJob.WorkflowJob.RunID),
-		slog.String("workflowName", *queuedJob.WorkflowJob.WorkflowName),
-		slog.String("workflowJobURL", *queuedJob.WorkflowJob.HTMLURL),
+		slog.Int64("workflowJobRunID", runID),
+		slog.String("workflowName", workflowName),
+		slog.String("workflowJobURL", htmlURL),
 		slog.Int("attempts", queuedJob.Attempts),
 	)
 
