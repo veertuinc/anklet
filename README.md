@@ -670,8 +670,8 @@ go mod tidy
 cd ${REPO_ROOT}
 ln -s ~/.config/anklet/org-config.yml org-config.yml
 ln -s ~/.config/anklet/repo-receiver-config.yml repo-receiver-config.yml
-./run org-receiver-config.yml # run the receiver
-./run org-config.yml # run the handler
+./run.bash org-receiver-config.yml # run the receiver
+./run.bash org-config.yml # run the handler
 ```
 
 - **NOTE:** You'll need to change the webhook URL so it points to the public IP of the server running the receiver (for me, that's my ISP's public IP + open port forwarding to my local machine).
