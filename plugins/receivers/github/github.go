@@ -112,10 +112,6 @@ func Run(
 		}
 	})
 	http.HandleFunc("/jobs/v1/receiver", func(w http.ResponseWriter, r *http.Request) {
-		if err != nil {
-			logging.Error(pluginCtx, "error getting database client from context", "error", err)
-			return
-		}
 		payload, err := github.ValidatePayload(r, []byte(pluginConfig.Secret))
 		if err != nil {
 			logging.Error(pluginCtx, "error validating payload", "error", err)
