@@ -690,11 +690,9 @@ func worker(
 								continue
 							}
 							if siblingPlugin.Preparing.Load() {
-								logging.Dev(pluginCtx, "paused for the previous plugin to finish preparing")
-								err = metricsData.SetStatus(pluginCtx, "paused")
-								if err != nil {
-									logging.Error(pluginCtx, "error setting plugin status", "error", err)
-								}
+								logging.Dev(pluginCtx, "waiting for the previous plugin to finish preparing")
+								// Don't set metrics to "paused" here - this is just normal coordination
+								// between handlers, not a resource wait. Keep status as "idle".
 								preparing = true
 								break
 							}
