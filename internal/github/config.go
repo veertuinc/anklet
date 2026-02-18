@@ -2,6 +2,7 @@ package github
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -86,6 +87,40 @@ type Repository struct {
 	Owner      *string `json:"owner"`
 	Visibility *string `json:"visibility"`
 	Private    *bool   `json:"private"`
+}
+
+// UnmarshalJSON handles both string and object formats for the Owner field.
+// GitHub webhook payloads send owner as an object ({"login": "...", ...}),
+// while the Redis queue stores it as a plain string.
+func (r *Repository) UnmarshalJSON(data []byte) error {
+	type repositoryRaw struct {
+		Name       *string         `json:"name"`
+		Owner      json.RawMessage `json:"owner"`
+		Visibility *string         `json:"visibility"`
+		Private    *bool           `json:"private"`
+	}
+	var raw repositoryRaw
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	r.Name = raw.Name
+	r.Visibility = raw.Visibility
+	r.Private = raw.Private
+	if raw.Owner != nil && string(raw.Owner) != "null" {
+		var s string
+		if err := json.Unmarshal(raw.Owner, &s); err == nil {
+			r.Owner = &s
+			return nil
+		}
+		var obj struct {
+			Login *string `json:"login"`
+		}
+		if err := json.Unmarshal(raw.Owner, &obj); err != nil {
+			return fmt.Errorf("cannot unmarshal repository owner: %w", err)
+		}
+		r.Owner = obj.Login
+	}
+	return nil
 }
 
 type SimplifiedWorkflowJob struct {
