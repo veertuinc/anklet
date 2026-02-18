@@ -93,6 +93,10 @@ sleep 30
 #
 # Truncate the anklet log before restarting so we don't match stale entries
 # from the first receiver start (which also ran the redelivery code path).
+echo "] === /tmp/anklet.log BEFORE restart ==="
+cat /tmp/anklet.log || true
+echo "] === END /tmp/anklet.log BEFORE restart ==="
+
 echo "] Truncating anklet log before restart..."
 > /tmp/anklet.log
 
@@ -116,14 +120,18 @@ while ! assert_json_log_contains /tmp/anklet.log "msg=receiver finished starting
     wait_count=$((wait_count + 5))
     if assert_json_log_contains /tmp/anklet.log "msg=error running plugin" 2>/dev/null; then
         echo "] FAIL: Receiver crashed with error during redelivery processing"
-        echo "] This likely means the raw GitHub payload could not be unmarshaled"
-        echo "] (e.g., repository.owner is an object but the struct expects a string)"
+        echo "] === /tmp/anklet.log AFTER crash ==="
+        cat /tmp/anklet.log || true
+        echo "] === END /tmp/anklet.log AFTER crash ==="
         record_fail "receiver crashed during redelivery: unmarshal error on raw webhook payload"
         end_test
         exit 1
     fi
     if [[ $wait_count -ge $max_wait ]]; then
         echo "] ERROR: Receiver did not finish starting within ${max_wait}s"
+        echo "] === /tmp/anklet.log AFTER timeout ==="
+        cat /tmp/anklet.log || true
+        echo "] === END /tmp/anklet.log AFTER timeout ==="
         record_fail "receiver did not complete startup"
         end_test
         exit 1
@@ -131,6 +139,9 @@ while ! assert_json_log_contains /tmp/anklet.log "msg=receiver finished starting
     echo "]] Waiting for receiver to finish starting... (${wait_count}s/${max_wait}s)"
 done
 echo "] Receiver is fully started and listening for webhooks"
+echo "] === /tmp/anklet.log AFTER successful startup ==="
+cat /tmp/anklet.log || true
+echo "] === END /tmp/anklet.log AFTER successful startup ==="
 
 # Step 6: Verify the unmarshal fix — no "error unmarshalling" in logs.
 assert_json_log_not_contains /tmp/anklet.log "msg=error running plugin,error=error unmarshalling hook request raw payload"
