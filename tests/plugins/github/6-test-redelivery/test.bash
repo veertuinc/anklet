@@ -71,10 +71,10 @@ echo "] Receiver is up and tunnel is established"
 echo "] Waiting for receiver to finish initial startup (including old redeliveries)..."
 max_wait=180
 wait_count=0
-while ! assert_json_log_contains /tmp/anklet.log "msg=receiver finished starting" 2>/dev/null; do
+while ! grep -q '"msg":"receiver finished starting"' /tmp/anklet.log 2>/dev/null; do
     sleep 5
     wait_count=$((wait_count + 5))
-    if assert_json_log_contains /tmp/anklet.log "msg=error running plugin" 2>/dev/null; then
+    if grep -q '"msg":"error running plugin"' /tmp/anklet.log 2>/dev/null; then
         echo "] WARN: Receiver crashed during initial startup, continuing anyway..."
         break
     fi
@@ -141,10 +141,10 @@ start_anklet_backgrounded_but_attached "receiver"
 echo "] Waiting for receiver to complete full redelivery cycle..."
 max_wait=180
 wait_count=0
-while ! assert_json_log_contains /tmp/anklet.log "msg=receiver finished starting" 2>/dev/null; do
+while ! grep -q '"msg":"receiver finished starting"' /tmp/anklet.log 2>/dev/null; do
     sleep 5
     wait_count=$((wait_count + 5))
-    if assert_json_log_contains /tmp/anklet.log "msg=error running plugin" 2>/dev/null; then
+    if grep -q '"msg":"error running plugin"' /tmp/anklet.log 2>/dev/null; then
         echo "] FAIL: Receiver crashed with error during redelivery processing"
         echo "] === /tmp/anklet.log AFTER crash ==="
         cat /tmp/anklet.log || true
@@ -181,7 +181,7 @@ assert_json_log_contains /tmp/anklet.log "msg=redelivering hook"
 echo "] Waiting for redelivered webhook to be processed..."
 max_wait=120
 wait_count=0
-while ! assert_json_log_contains /tmp/anklet.log "msg=job pushed to queued queue" 2>/dev/null; do
+while ! grep -q '"msg":"job pushed to queued queue"' /tmp/anklet.log 2>/dev/null; do
     sleep 5
     wait_count=$((wait_count + 5))
     if [[ $wait_count -ge $max_wait ]]; then
