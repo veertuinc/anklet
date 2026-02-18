@@ -2,5 +2,6 @@
 plugins:
   - name: GITHUB_RECEIVER1
     plugin: github_receiver
+    repo: anklet
     skip_redeliver: false
     redeliver_hours: 1
