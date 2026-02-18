@@ -99,15 +99,19 @@ echo "] Truncating anklet log before restart..."
 echo "] Restarting anklet on receiver with redelivery enabled..."
 start_anklet_backgrounded_but_attached "receiver"
 
-# Wait for receiver to initialize and complete redelivery processing.
-# The receiver sleeps 1 minute after requesting redelivery to allow handlers
-# to process jobs, then finishes. We need to wait for the full cycle.
-# Also check for the unmarshal error that occurs without the owner object fix —
-# the receiver crashes before finishing redelivery, so we detect it early.
-echo "] Waiting for receiver to initialize and process redeliveries..."
+# Wait for the receiver to fully start. The redelivery cycle is:
+#   1. Poll hook deliveries → find failed ones → unmarshal raw payloads → request redelivery
+#   2. Sleep 1 minute (to let handlers process redelivered jobs)
+#   3. Clean up in_progress queue
+#   4. Log "receiver finished starting" → enter HTTP handler loop
+#
+# We wait for "receiver finished starting" so the full cycle (including the
+# 1-minute sleep) is complete and the receiver is ready to handle webhooks.
+# We also check early for the unmarshal error that occurs without the fix.
+echo "] Waiting for receiver to complete full redelivery cycle..."
 max_wait=180
 wait_count=0
-while ! assert_json_log_contains /tmp/anklet.log "msg=finished processing hooks for redelivery" 2>/dev/null; do
+while ! assert_json_log_contains /tmp/anklet.log "msg=receiver finished starting" 2>/dev/null; do
     sleep 5
     wait_count=$((wait_count + 5))
     if assert_json_log_contains /tmp/anklet.log "msg=error running plugin" 2>/dev/null; then
@@ -119,20 +123,42 @@ while ! assert_json_log_contains /tmp/anklet.log "msg=finished processing hooks 
         exit 1
     fi
     if [[ $wait_count -ge $max_wait ]]; then
-        echo "] ERROR: Receiver did not finish redelivery processing within ${max_wait}s"
-        record_fail "receiver did not complete redelivery processing"
+        echo "] ERROR: Receiver did not finish starting within ${max_wait}s"
+        record_fail "receiver did not complete startup"
         end_test
         exit 1
     fi
-    echo "]] Waiting for receiver to finish redelivery processing... (${wait_count}s/${max_wait}s)"
+    echo "]] Waiting for receiver to finish starting... (${wait_count}s/${max_wait}s)"
 done
-echo "] Receiver finished redelivery processing"
+echo "] Receiver is fully started and listening for webhooks"
 
-# Step 6: Verify no errors occurred during redelivery
-assert_json_log_not_contains /tmp/anklet.log "level=ERROR"
+# Step 6: Verify the unmarshal fix — no "error unmarshalling" in logs.
+assert_json_log_not_contains /tmp/anklet.log "msg=error running plugin,error=error unmarshalling hook request raw payload"
 
-# Step 7: Wait for the workflow to complete via redelivery
-echo "] Waiting for workflow to complete (via redelivered webhook)..."
+# Verify the receiver actually found and requested redelivery
+assert_json_log_contains /tmp/anklet.log "msg=redelivering hook"
+
+# Step 7: Wait for the redelivered webhook to be processed and the job queued.
+# After "receiver finished starting", the HTTP handler is active and will
+# process the redelivered webhook from GitHub.
+echo "] Waiting for redelivered webhook to be processed..."
+max_wait=120
+wait_count=0
+while ! assert_json_log_contains /tmp/anklet.log "msg=job pushed to queued queue" 2>/dev/null; do
+    sleep 5
+    wait_count=$((wait_count + 5))
+    if [[ $wait_count -ge $max_wait ]]; then
+        echo "] ERROR: Redelivered webhook was not processed within ${max_wait}s"
+        record_fail "redelivered webhook was not processed (job not pushed to queue)"
+        end_test
+        exit 1
+    fi
+    echo "]] Waiting for job to be pushed to queue... (${wait_count}s/${max_wait}s)"
+done
+echo "] Job pushed to queue from redelivered webhook"
+
+# Step 8: Wait for the workflow to complete.
+echo "] Waiting for workflow to complete..."
 if wait_for_workflow_runs_to_complete "veertuinc" "anklet" "t1-with-tag-1" "success" 600; then
     # Verify handler processed the job
     assert_remote_log_contains "handler-8-16" "queued job found"
