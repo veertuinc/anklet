@@ -1,0 +1,4 @@
+# Note: Don't specify any credentials for the plugin. We will inject them into the config for you.
+plugins:
+  - name: GITHUB_HANDLER1
+    plugin: github

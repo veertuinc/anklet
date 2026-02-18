@@ -1,0 +1,6 @@
+# Note: Don't specify any credentials for the plugin. We will inject them into the config for you.
+plugins:
+  - name: GITHUB_RECEIVER1
+    plugin: github_receiver
+    skip_redeliver: false
+    redeliver_hours: 1
