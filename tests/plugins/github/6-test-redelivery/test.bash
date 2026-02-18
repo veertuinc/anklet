@@ -63,6 +63,31 @@ sleep 10
 assert_redis_key_exists "anklet/metrics/veertuinc/GITHUB_RECEIVER1"
 echo "] Receiver is up and tunnel is established"
 
+# Wait for the receiver to finish its full startup cycle (including any
+# redelivery of old failed hooks from previous runs). If we stop it during
+# the redelivery sleep, the HTTP handler stays alive with a cancelled context
+# and webhooks get HTTP 200 but fail internally — GitHub marks them as
+# delivered, so they won't appear as failed on the next receiver start.
+echo "] Waiting for receiver to finish initial startup (including old redeliveries)..."
+max_wait=180
+wait_count=0
+while ! assert_json_log_contains /tmp/anklet.log "msg=receiver finished starting" 2>/dev/null; do
+    sleep 5
+    wait_count=$((wait_count + 5))
+    if assert_json_log_contains /tmp/anklet.log "msg=error running plugin" 2>/dev/null; then
+        echo "] WARN: Receiver crashed during initial startup, continuing anyway..."
+        break
+    fi
+    if [[ $wait_count -ge $max_wait ]]; then
+        echo "] ERROR: Receiver did not finish initial startup within ${max_wait}s"
+        record_fail "receiver did not complete initial startup"
+        end_test
+        exit 1
+    fi
+    echo "]] Waiting for receiver initial startup... (${wait_count}s/${max_wait}s)"
+done
+echo "] Receiver initial startup complete"
+
 # Step 2: Start handler so it's ready to process jobs
 echo "] Starting anklet on handler-8-16..."
 start_anklet_on_host_background "handler-8-16"
@@ -70,7 +95,8 @@ sleep 10
 assert_redis_key_exists "anklet/metrics/veertuinc/GITHUB_HANDLER1"
 
 # Step 3: Stop just the anklet process on receiver (tunnel stays up)
-# When GitHub delivers the webhook, the tunnel will route it to the local port
+# Now that the receiver is fully started and idle in the HTTP handler loop,
+# SIGINT will shut it down cleanly. GitHub will route webhooks via the tunnel
 # but anklet won't be listening, resulting in a failed delivery (non-200 status).
 echo "] Stopping anklet on receiver (tunnel should remain up)..."
 pkill -INT -f '^/tmp/anklet$' 2>/dev/null || true
