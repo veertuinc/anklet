@@ -90,14 +90,22 @@ sleep 30
 # The receiver will poll the GitHub Hook Delivery API, find the failed delivery,
 # fetch the raw payload, unmarshal it (exercising the owner object fix), and
 # request redelivery.
+#
+# Truncate the anklet log before restarting so we don't match stale entries
+# from the first receiver start (which also ran the redelivery code path).
+echo "] Truncating anklet log before restart..."
+> /tmp/anklet.log
+
 echo "] Restarting anklet on receiver with redelivery enabled..."
 start_anklet_backgrounded_but_attached "receiver"
 
 # Wait for receiver to initialize and complete redelivery processing.
+# The receiver sleeps 1 minute after requesting redelivery to allow handlers
+# to process jobs, then finishes. We need to wait for the full cycle.
 # Also check for the unmarshal error that occurs without the owner object fix —
 # the receiver crashes before finishing redelivery, so we detect it early.
 echo "] Waiting for receiver to initialize and process redeliveries..."
-max_wait=120
+max_wait=180
 wait_count=0
 while ! assert_json_log_contains /tmp/anklet.log "msg=finished processing hooks for redelivery" 2>/dev/null; do
     sleep 5
