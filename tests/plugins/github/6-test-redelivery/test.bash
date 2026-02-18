@@ -93,13 +93,23 @@ sleep 30
 echo "] Restarting anklet on receiver with redelivery enabled..."
 start_anklet_backgrounded_but_attached "receiver"
 
-# Wait for receiver to initialize and complete redelivery processing
+# Wait for receiver to initialize and complete redelivery processing.
+# Also check for the unmarshal error that occurs without the owner object fix —
+# the receiver crashes before finishing redelivery, so we detect it early.
 echo "] Waiting for receiver to initialize and process redeliveries..."
 max_wait=120
 wait_count=0
 while ! assert_json_log_contains /tmp/anklet.log "msg=finished processing hooks for redelivery" 2>/dev/null; do
     sleep 5
     wait_count=$((wait_count + 5))
+    if assert_json_log_contains /tmp/anklet.log "msg=error running plugin" 2>/dev/null; then
+        echo "] FAIL: Receiver crashed with error during redelivery processing"
+        echo "] This likely means the raw GitHub payload could not be unmarshaled"
+        echo "] (e.g., repository.owner is an object but the struct expects a string)"
+        record_fail "receiver crashed during redelivery: unmarshal error on raw webhook payload"
+        end_test
+        exit 1
+    fi
     if [[ $wait_count -ge $max_wait ]]; then
         echo "] ERROR: Receiver did not finish redelivery processing within ${max_wait}s"
         record_fail "receiver did not complete redelivery processing"
@@ -110,7 +120,7 @@ while ! assert_json_log_contains /tmp/anklet.log "msg=finished processing hooks 
 done
 echo "] Receiver finished redelivery processing"
 
-# Step 6: Verify receiver found deliveries and no unmarshal errors
+# Step 6: Verify no errors occurred during redelivery
 assert_json_log_not_contains /tmp/anklet.log "level=ERROR"
 
 # Step 7: Wait for the workflow to complete via redelivery
