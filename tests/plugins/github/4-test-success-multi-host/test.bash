@@ -189,10 +189,10 @@ if ! ssh_to_host "handler-8-8" "pgrep -f '^/tmp/anklet\$' > /dev/null" 2>/dev/nu
 fi
 assert_redis_key_exists "anklet/metrics/veertuinc/GITHUB_HANDLER1_8_L_ARM_MACOS"
 
-# Step 2: Trigger t2-3c6r-1-2m-pause twice (uses 3c6r template, sleeps 2m)
+# Step 2: Trigger t2-3c6r-1-90s-pause twice (uses 3c6r template, sleeps 2m)
 # This should consume resources on handler-8-8, causing the second job to pause
-echo "] Triggering t2-3c6r-1-2m-pause workflow twice..."
-trigger_workflow_runs "veertuinc" "anklet" "t2-3c6r-1-2m-pause.yml" 2
+echo "] Triggering t2-3c6r-1-90s-pause workflow twice..."
+trigger_workflow_runs "veertuinc" "anklet" "t2-3c6r-1-90s-pause.yml" 2
 
 # Wait for handler-8-8 to pick up a job (poll instead of fixed sleep)
 echo "] Waiting for handler-8-8 to pick up a job..."
@@ -271,7 +271,7 @@ fi
 
 # Wait for workflows to complete
 echo "] Waiting for workflows to complete..."
-wait_for_workflow_runs_to_complete "veertuinc" "anklet" "t2-3c6r-1-2m-pause" "success" 300 || true
+wait_for_workflow_runs_to_complete "veertuinc" "anklet" "t2-3c6r-1-90s-pause" "success" 300 || true
 
 # Step 7: Verify metrics show correct 'idle' status after paused job handoff
 # This is critical - after a job transitions through paused state, the metrics
