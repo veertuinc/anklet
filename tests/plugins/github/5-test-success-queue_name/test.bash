@@ -42,11 +42,30 @@ trap 'cleanup; _finalize_test_report_on_exit' EXIT
 ###############################################################################
 echo "] Starting anklet on receiver (local)..."
 start_anklet_backgrounded_but_attached "receiver"
-
-# Wait for receiver to initialize
-echo "] Waiting for receiver to initialize..."
-sleep 5
+sleep 10
 assert_redis_key_exists "anklet/metrics/veertuinc/GITHUB_RECEIVER1"
+echo "] Receiver is up and tunnel is established"
+
+echo "] Waiting for receiver to finish initial startup (including any old redeliveries)..."
+max_wait=180
+wait_count=0
+while ! grep -q '"msg":"receiver finished starting"' /tmp/anklet.log 2>/dev/null; do
+    sleep 5
+    wait_count=$((wait_count + 5))
+    if grep -q '"msg":"error running plugin"' /tmp/anklet.log 2>/dev/null; then
+        echo "] WARN: Receiver crashed during initial startup, continuing anyway..."
+        break
+    fi
+    if [[ $wait_count -ge $max_wait ]]; then
+        echo "] ERROR: Receiver did not finish initial startup within ${max_wait}s"
+        echo "] === /tmp/anklet.log ==="
+        cat /tmp/anklet.log || true
+        echo "] === END /tmp/anklet.log ==="
+        exit 1
+    fi
+    echo "]] Waiting for receiver initial startup... (${wait_count}s/${max_wait}s)"
+done
+echo "] Receiver initial startup complete"
 
 ###############################################################################
 # Test: Verify shared queue is being used
