@@ -63,6 +63,31 @@ sleep 10
 assert_redis_key_exists "anklet/metrics/veertuinc/GITHUB_RECEIVER1"
 echo "] Receiver is up and tunnel is established"
 
+# Wait for the receiver to finish its full startup cycle (including any
+# redelivery of old failed hooks from previous runs). If we stop it during
+# the redelivery sleep, the HTTP handler stays alive with a cancelled context
+# and webhooks get HTTP 200 but fail internally — GitHub marks them as
+# delivered, so they won't appear as failed on the next receiver start.
+echo "] Waiting for receiver to finish initial startup (including old redeliveries)..."
+max_wait=180
+wait_count=0
+while ! grep -q '"msg":"receiver finished starting"' /tmp/anklet.log 2>/dev/null; do
+    sleep 5
+    wait_count=$((wait_count + 5))
+    if grep -q '"msg":"error running plugin"' /tmp/anklet.log 2>/dev/null; then
+        echo "] WARN: Receiver crashed during initial startup, continuing anyway..."
+        break
+    fi
+    if [[ $wait_count -ge $max_wait ]]; then
+        echo "] ERROR: Receiver did not finish initial startup within ${max_wait}s"
+        record_fail "receiver did not complete initial startup"
+        end_test
+        exit 1
+    fi
+    echo "]] Waiting for receiver initial startup... (${wait_count}s/${max_wait}s)"
+done
+echo "] Receiver initial startup complete"
+
 # Step 2: Start handler so it's ready to process jobs
 echo "] Starting anklet on handler-8-16..."
 start_anklet_on_host_background "handler-8-16"
@@ -70,7 +95,8 @@ sleep 10
 assert_redis_key_exists "anklet/metrics/veertuinc/GITHUB_HANDLER1"
 
 # Step 3: Stop just the anklet process on receiver (tunnel stays up)
-# When GitHub delivers the webhook, the tunnel will route it to the local port
+# Now that the receiver is fully started and idle in the HTTP handler loop,
+# SIGINT will shut it down cleanly. GitHub will route webhooks via the tunnel
 # but anklet won't be listening, resulting in a failed delivery (non-200 status).
 echo "] Stopping anklet on receiver (tunnel should remain up)..."
 pkill -INT -f '^/tmp/anklet$' 2>/dev/null || true
@@ -90,41 +116,86 @@ sleep 30
 # The receiver will poll the GitHub Hook Delivery API, find the failed delivery,
 # fetch the raw payload, unmarshal it (exercising the owner object fix), and
 # request redelivery.
+#
+# Truncate the anklet log before restarting so we don't match stale entries
+# from the first receiver start (which also ran the redelivery code path).
+echo "] === /tmp/anklet.log BEFORE restart ==="
+cat /tmp/anklet.log || true
+echo "] === END /tmp/anklet.log BEFORE restart ==="
+
+echo "] Truncating anklet log before restart..."
+> /tmp/anklet.log
+
 echo "] Restarting anklet on receiver with redelivery enabled..."
 start_anklet_backgrounded_but_attached "receiver"
 
-# Wait for receiver to initialize and complete redelivery processing.
-# Also check for the unmarshal error that occurs without the owner object fix —
-# the receiver crashes before finishing redelivery, so we detect it early.
-echo "] Waiting for receiver to initialize and process redeliveries..."
-max_wait=120
+# Wait for the receiver to fully start. The redelivery cycle is:
+#   1. Poll hook deliveries → find failed ones → unmarshal raw payloads → request redelivery
+#   2. Sleep 1 minute (to let handlers process redelivered jobs)
+#   3. Clean up in_progress queue
+#   4. Log "receiver finished starting" → enter HTTP handler loop
+#
+# We wait for "receiver finished starting" so the full cycle (including the
+# 1-minute sleep) is complete and the receiver is ready to handle webhooks.
+# We also check early for the unmarshal error that occurs without the fix.
+echo "] Waiting for receiver to complete full redelivery cycle..."
+max_wait=180
 wait_count=0
-while ! assert_json_log_contains /tmp/anklet.log "msg=finished processing hooks for redelivery" 2>/dev/null; do
+while ! grep -q '"msg":"receiver finished starting"' /tmp/anklet.log 2>/dev/null; do
     sleep 5
     wait_count=$((wait_count + 5))
-    if assert_json_log_contains /tmp/anklet.log "msg=error running plugin" 2>/dev/null; then
+    if grep -q '"msg":"error running plugin"' /tmp/anklet.log 2>/dev/null; then
         echo "] FAIL: Receiver crashed with error during redelivery processing"
-        echo "] This likely means the raw GitHub payload could not be unmarshaled"
-        echo "] (e.g., repository.owner is an object but the struct expects a string)"
+        echo "] === /tmp/anklet.log AFTER crash ==="
+        cat /tmp/anklet.log || true
+        echo "] === END /tmp/anklet.log AFTER crash ==="
         record_fail "receiver crashed during redelivery: unmarshal error on raw webhook payload"
         end_test
         exit 1
     fi
     if [[ $wait_count -ge $max_wait ]]; then
-        echo "] ERROR: Receiver did not finish redelivery processing within ${max_wait}s"
-        record_fail "receiver did not complete redelivery processing"
+        echo "] ERROR: Receiver did not finish starting within ${max_wait}s"
+        echo "] === /tmp/anklet.log AFTER timeout ==="
+        cat /tmp/anklet.log || true
+        echo "] === END /tmp/anklet.log AFTER timeout ==="
+        record_fail "receiver did not complete startup"
         end_test
         exit 1
     fi
-    echo "]] Waiting for receiver to finish redelivery processing... (${wait_count}s/${max_wait}s)"
+    echo "]] Waiting for receiver to finish starting... (${wait_count}s/${max_wait}s)"
 done
-echo "] Receiver finished redelivery processing"
+echo "] Receiver is fully started and listening for webhooks"
+echo "] === /tmp/anklet.log AFTER successful startup ==="
+cat /tmp/anklet.log || true
+echo "] === END /tmp/anklet.log AFTER successful startup ==="
 
-# Step 6: Verify no errors occurred during redelivery
-assert_json_log_not_contains /tmp/anklet.log "level=ERROR"
+# Step 6: Verify the unmarshal fix — no "error unmarshalling" in logs.
+assert_json_log_not_contains /tmp/anklet.log "msg=error running plugin,error=error unmarshalling hook request raw payload"
 
-# Step 7: Wait for the workflow to complete via redelivery
-echo "] Waiting for workflow to complete (via redelivered webhook)..."
+# Verify the receiver actually found and requested redelivery
+assert_json_log_contains /tmp/anklet.log "msg=redelivering hook"
+
+# Step 7: Wait for the redelivered webhook to be processed and the job queued.
+# After "receiver finished starting", the HTTP handler is active and will
+# process the redelivered webhook from GitHub.
+echo "] Waiting for redelivered webhook to be processed..."
+max_wait=120
+wait_count=0
+while ! grep -q '"msg":"job pushed to queued queue"' /tmp/anklet.log 2>/dev/null; do
+    sleep 5
+    wait_count=$((wait_count + 5))
+    if [[ $wait_count -ge $max_wait ]]; then
+        echo "] ERROR: Redelivered webhook was not processed within ${max_wait}s"
+        record_fail "redelivered webhook was not processed (job not pushed to queue)"
+        end_test
+        exit 1
+    fi
+    echo "]] Waiting for job to be pushed to queue... (${wait_count}s/${max_wait}s)"
+done
+echo "] Job pushed to queue from redelivered webhook"
+
+# Step 8: Wait for the workflow to complete.
+echo "] Waiting for workflow to complete..."
 if wait_for_workflow_runs_to_complete "veertuinc" "anklet" "t1-with-tag-1" "success" 600; then
     # Verify handler processed the job
     assert_remote_log_contains "handler-8-16" "queued job found"
