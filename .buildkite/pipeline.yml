@@ -1,0 +1,5 @@
+steps:
+  - label: ":pipeline: Test pipeline"
+    agents:
+      queue: "anklet-tester"
+    command: "echo 123"
