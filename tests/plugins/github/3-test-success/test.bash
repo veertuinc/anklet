@@ -69,7 +69,7 @@ if run_workflow_and_get_logs "veertuinc" "anklet" "t1-with-tag-1" "success"; the
     assert_remote_log_contains "handler-8-16" "handling anka workflow run job"
     assert_remote_log_contains "handler-8-16" "vm has enough resources now to run; starting runner"
     assert_remote_log_contains "handler-8-16" "job found registered runner and is now in progress"
-    assert_remote_log_contains "handler-8-16" "cleanup | WorkflowJobPayload | queuedJob"
+    assert_remote_log_contains "handler-8-16" "cleanup | JobPayload | queuedJob"
     assert_remote_log_contains "handler-8-16" "cleanup | anka.VM | queuedJob"
     assert_remote_log_contains "handler-8-16" "job is still in progress"
     assert_remote_log_contains "handler-8-16" "job completed"

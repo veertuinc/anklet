@@ -1,8 +1,13 @@
 #!/usr/bin/env bash
 set -exo pipefail
-RUNNER_HOME="${RUNNER_HOME:-"$HOME/actions-runner"}"
-cd "${RUNNER_HOME}"
-./svc.sh install
-./svc.sh start
-./svc.sh status
-echo "runner started"
+
+CONFIG_FILE="${HOME}/.buildkite-agent/anklet.env"
+[[ -f "${CONFIG_FILE}" ]] || (echo "Error: missing ${CONFIG_FILE}" && exit 1)
+source "${CONFIG_FILE}"
+
+buildkite-agent start \
+  --name "${BUILDKITE_AGENT_NAME}" \
+  --token "${BUILDKITE_AGENT_TOKEN}" \
+  --tags "${BUILDKITE_AGENT_TAGS}" \
+  --acquire-job "${BUILDKITE_ACQUIRE_JOB_ID}" \
+  --disconnect-after-job

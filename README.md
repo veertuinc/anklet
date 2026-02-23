@@ -764,7 +764,7 @@ In your plugin code, you can use functions from metricsData to update in specifi
 							Name: pluginConfig.Name,
 						},
 						LastFailedRun:       time.Now(),
-						LastFailedRunJobUrl: *queuedJob.WorkflowJob.HTMLURL,
+						LastFailedRunJobUrl: *queuedJob.Job.HTMLURL,
 					})
 ```
 

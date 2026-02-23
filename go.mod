@@ -1,9 +1,10 @@
 module github.com/veertuinc/anklet
 
-go 1.24.1
+go 1.25
 
 require (
 	github.com/bradleyfalzon/ghinstallation/v2 v2.17.0
+	github.com/buildkite/go-buildkite/v4 v4.14.1
 	github.com/gofri/go-github-ratelimit/v2 v2.0.2
 	github.com/google/go-github/v74 v74.0.0
 	github.com/google/uuid v1.6.0
@@ -13,6 +14,7 @@ require (
 )
 
 require (
+	github.com/cenkalti/backoff v1.1.1-0.20171020064038-309aa717adbf // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f // indirect
 	github.com/ebitengine/purego v0.9.1 // indirect
@@ -25,6 +27,7 @@ require (
 	github.com/tklauser/go-sysconf v0.3.16 // indirect
 	github.com/tklauser/numcpus v0.11.0 // indirect
 	github.com/yusufpapurcu/wmi v1.2.4 // indirect
+	golang.org/x/net v0.38.0 // indirect
 	golang.org/x/sys v0.38.0 // indirect
 )
 

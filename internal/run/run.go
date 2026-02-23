@@ -5,7 +5,9 @@ import (
 	"fmt"
 
 	"github.com/veertuinc/anklet/internal/config"
+	buildkite "github.com/veertuinc/anklet/plugins/handlers/buildkite"
 	"github.com/veertuinc/anklet/plugins/handlers/github"
+	buildkite_receiver "github.com/veertuinc/anklet/plugins/receivers/buildkite"
 	github_receiver "github.com/veertuinc/anklet/plugins/receivers/github"
 )
 
@@ -43,6 +45,30 @@ func Plugin(
 		}
 	case "github_receiver":
 		updatedPluginCtx, err = github_receiver.Run(
+			workerCtx,
+			pluginCtx,
+		)
+		if err != nil {
+			return updatedPluginCtx, err
+		}
+	case "buildkite":
+		select {
+		case <-pluginCtx.Done():
+			pluginCancel()
+			return pluginCtx, nil
+		default:
+			updatedPluginCtx, err = buildkite.Run(
+				workerCtx,
+				pluginCtx,
+				pluginCancel,
+			)
+			if err != nil {
+				return updatedPluginCtx, fmt.Errorf("error running buildkite plugin: %s", err.Error())
+			}
+			return updatedPluginCtx, nil
+		}
+	case "buildkite_receiver":
+		updatedPluginCtx, err = buildkite_receiver.Run(
 			workerCtx,
 			pluginCtx,
 		)

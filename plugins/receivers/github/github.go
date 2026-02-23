@@ -19,6 +19,8 @@ import (
 	internalGithub "github.com/veertuinc/anklet/internal/github"
 	"github.com/veertuinc/anklet/internal/logging"
 	"github.com/veertuinc/anklet/internal/metrics"
+	internalModels "github.com/veertuinc/anklet/internal/models"
+	internalQueue "github.com/veertuinc/anklet/internal/queue"
 )
 
 // Server defines the structure for the API server
@@ -47,6 +49,14 @@ func exists_in_array_partial(array_to_search_in []string, desired []string) bool
 		}
 	}
 	return true
+}
+
+func githubTimestampToTime(ts *github.Timestamp) *time.Time {
+	if ts == nil {
+		return nil
+	}
+	t := ts.Time
+	return &t
 }
 
 // Start runs the HTTP server
@@ -125,47 +135,45 @@ func Run(
 		deliveryID := r.Header.Get("X-GitHub-Delivery")
 		switch workflowJob := event.(type) {
 		case *github.WorkflowJobEvent:
-			simplifiedWorkflowJobEvent := internalGithub.QueueJob{
-				Type: "WorkflowJobPayload",
-				WorkflowJob: internalGithub.SimplifiedWorkflowJob{
+			simplifiedJobEvent := internalGithub.QueueJob{
+				Type: "JobPayload",
+				Job: internalGithub.SimplifiedJob{
 					ID:           workflowJob.WorkflowJob.ID,
 					Name:         workflowJob.WorkflowJob.Name,
 					RunID:        workflowJob.WorkflowJob.RunID,
 					Status:       workflowJob.WorkflowJob.Status,
 					Conclusion:   workflowJob.WorkflowJob.Conclusion,
-					StartedAt:    workflowJob.WorkflowJob.StartedAt,
-					CompletedAt:  workflowJob.WorkflowJob.CompletedAt,
+					StartedAt:    githubTimestampToTime(workflowJob.WorkflowJob.StartedAt),
+					CompletedAt:  githubTimestampToTime(workflowJob.WorkflowJob.CompletedAt),
 					Labels:       workflowJob.WorkflowJob.Labels,
 					HTMLURL:      workflowJob.WorkflowJob.HTMLURL,
 					WorkflowName: workflowJob.WorkflowJob.WorkflowName,
 				},
 				Action: *workflowJob.Action,
-				Repository: internalGithub.Repository{
+				Repository: internalModels.Repository{
 					Name:       workflowJob.Repo.Name,
 					Owner:      workflowJob.Repo.Owner.Login,
-					Visibility: workflowJob.Repo.Visibility,
-					Private:    workflowJob.Repo.Private,
 				},
 				AnkaVM:   anka.VM{},
 				Attempts: 0,
 			}
 			// Create a fresh context for this webhook request to avoid accumulating job contexts
 			webhookCtx := logging.AppendCtx(pluginCtx, slog.Group("job",
-				slog.Group("workflowJob",
-					slog.Any("labels", simplifiedWorkflowJobEvent.WorkflowJob.Labels),
-					slog.Any("id", simplifiedWorkflowJobEvent.WorkflowJob.ID),
-					slog.Any("name", simplifiedWorkflowJobEvent.WorkflowJob.Name),
-					slog.Any("runID", simplifiedWorkflowJobEvent.WorkflowJob.RunID),
-					slog.Any("htmlURL", simplifiedWorkflowJobEvent.WorkflowJob.HTMLURL),
-					slog.Any("status", simplifiedWorkflowJobEvent.WorkflowJob.Status),
-					slog.Any("conclusion", simplifiedWorkflowJobEvent.WorkflowJob.Conclusion),
-					slog.Any("startedAt", simplifiedWorkflowJobEvent.WorkflowJob.StartedAt),
-					slog.Any("completedAt", simplifiedWorkflowJobEvent.WorkflowJob.CompletedAt),
-					slog.Any("workflowName", simplifiedWorkflowJobEvent.WorkflowJob.WorkflowName),
+				slog.Group("job",
+					slog.Any("labels", simplifiedJobEvent.Job.Labels),
+					slog.Any("id", simplifiedJobEvent.Job.ID),
+					slog.Any("name", simplifiedJobEvent.Job.Name),
+					slog.Any("runID", simplifiedJobEvent.Job.RunID),
+					slog.Any("htmlURL", simplifiedJobEvent.Job.HTMLURL),
+					slog.Any("status", simplifiedJobEvent.Job.Status),
+					slog.Any("conclusion", simplifiedJobEvent.Job.Conclusion),
+					slog.Any("startedAt", simplifiedJobEvent.Job.StartedAt),
+					slog.Any("completedAt", simplifiedJobEvent.Job.CompletedAt),
+					slog.Any("workflowName", simplifiedJobEvent.Job.WorkflowName),
 				),
-				slog.String("action", simplifiedWorkflowJobEvent.Action),
-				slog.Any("repository", simplifiedWorkflowJobEvent.Repository),
-				slog.Any("ankaVM", simplifiedWorkflowJobEvent.AnkaVM),
+				slog.String("action", simplifiedJobEvent.Action),
+				slog.Any("repository", simplifiedJobEvent.Repository),
+				slog.Any("ankaVM", simplifiedJobEvent.AnkaVM),
 			))
 			webhookCtx = logging.AppendCtx(webhookCtx, slog.String("deliveryID", deliveryID))
 
@@ -189,10 +197,10 @@ func Run(
 				logging.Info(webhookCtx, "workflow job conclusion", "workflowJobConclusion", *workflowJob.WorkflowJob.Conclusion)
 			}
 			if *workflowJob.Action == "queued" {
-				if exists_in_array_partial(simplifiedWorkflowJobEvent.WorkflowJob.Labels, []string{"anka-template"}) {
+				if exists_in_array_partial(simplifiedJobEvent.Job.Labels, []string{"anka-template"}) {
 					// make sure it doesn't already exist in the main queued queue
 					queuedQueueName := "anklet/jobs/github/queued/" + queueOwner
-					inQueueJobJSON, err := internalGithub.GetJobJSONFromQueueByID(pluginCtx, *simplifiedWorkflowJobEvent.WorkflowJob.ID, queuedQueueName)
+					inQueueJobJSON, err := internalQueue.GetJobJSONFromQueueByID(pluginCtx, *simplifiedJobEvent.Job.ID, queuedQueueName)
 					if err != nil {
 						logging.Error(webhookCtx, "error searching in queue", "error", err)
 						return
@@ -200,12 +208,13 @@ func Run(
 
 					// Also check if it exists in any handler queues
 					inHandlerQueue := false
-					if inQueueJobJSON == "" && simplifiedWorkflowJobEvent.WorkflowJob.RunID != nil && simplifiedWorkflowJobEvent.WorkflowJob.ID != nil {
-						inHandlerQueue, err = internalGithub.CheckIfJobExistsInHandlerQueues(
+					if inQueueJobJSON == "" && simplifiedJobEvent.Job.RunID != nil && simplifiedJobEvent.Job.ID != nil {
+						inHandlerQueue, err = internalQueue.CheckIfJobExistsInHandlerQueues(
 							pluginCtx,
-							*simplifiedWorkflowJobEvent.WorkflowJob.RunID,
-							*simplifiedWorkflowJobEvent.WorkflowJob.ID,
+							*simplifiedJobEvent.Job.RunID,
+							*simplifiedJobEvent.Job.ID,
 							queueOwner,
+							"github",
 						)
 						if err != nil {
 							logging.Error(webhookCtx, "error checking handler queues", "error", err)
@@ -215,7 +224,7 @@ func Run(
 
 					if inQueueJobJSON == "" && !inHandlerQueue { // if it doesn't exist already
 						// push it to the queue
-						wrappedPayloadJSON, err := json.Marshal(simplifiedWorkflowJobEvent)
+						wrappedPayloadJSON, err := json.Marshal(simplifiedJobEvent)
 						if err != nil {
 							logging.Error(webhookCtx, "error converting job payload to JSON", "error", err)
 							return
@@ -239,17 +248,17 @@ func Run(
 					return
 				}
 				// store in_progress so we can know if the registration failed
-				if exists_in_array_partial(simplifiedWorkflowJobEvent.WorkflowJob.Labels, []string{"anka-template"}) {
+				if exists_in_array_partial(simplifiedJobEvent.Job.Labels, []string{"anka-template"}) {
 					// make sure it doesn't already exist
 					inProgressQueueName := "anklet/jobs/github/in_progress/" + queueOwner
-					inQueueJobJSON, err := internalGithub.GetJobJSONFromQueueByID(pluginCtx, *simplifiedWorkflowJobEvent.WorkflowJob.ID, inProgressQueueName)
+					inQueueJobJSON, err := internalQueue.GetJobJSONFromQueueByID(pluginCtx, *simplifiedJobEvent.Job.ID, inProgressQueueName)
 					if err != nil {
 						logging.Error(webhookCtx, "error searching in queue", "error", err)
 						return
 					}
 					if inQueueJobJSON == "" { // if it doesn't exist already
 						// push it to the queue
-						wrappedPayloadJSON, err := json.Marshal(simplifiedWorkflowJobEvent)
+						wrappedPayloadJSON, err := json.Marshal(simplifiedJobEvent)
 						if err != nil {
 							logging.Error(webhookCtx, "error converting job payload to JSON", "error", err)
 							return
@@ -265,7 +274,7 @@ func Run(
 					}
 				}
 			} else if *workflowJob.Action == "completed" {
-				if exists_in_array_partial(simplifiedWorkflowJobEvent.WorkflowJob.Labels, []string{"anka-template"}) {
+				if exists_in_array_partial(simplifiedJobEvent.Job.Labels, []string{"anka-template"}) {
 					queues := []string{}
 					// get all keys from database for the main queue and service queues as well as completed
 					queuedKeys, err := databaseContainer.RetryKeys(pluginCtx, "anklet/jobs/github/queued/"+queueOwner+"*")
@@ -280,7 +289,7 @@ func Run(
 						wg.Add(1)
 						go func(queue string) {
 							defer wg.Done()
-							inQueueJobJSON, err := internalGithub.GetJobJSONFromQueueByID(pluginCtx, *simplifiedWorkflowJobEvent.WorkflowJob.ID, queue)
+							inQueueJobJSON, err := internalQueue.GetJobJSONFromQueueByID(pluginCtx, *simplifiedJobEvent.Job.ID, queue)
 							if err != nil {
 								logging.Warn(webhookCtx, err.Error(), "queue", queue)
 							}
@@ -300,14 +309,14 @@ func Run(
 					}
 					if inAQueue { // only add completed if it's in a queue
 						completedQueueName := "anklet/jobs/github/completed/" + queueOwner
-						inCompletedQueueJobJSON, err := internalGithub.GetJobJSONFromQueueByID(pluginCtx, *simplifiedWorkflowJobEvent.WorkflowJob.ID, completedQueueName)
+						inCompletedQueueJobJSON, err := internalQueue.GetJobJSONFromQueueByID(pluginCtx, *simplifiedJobEvent.Job.ID, completedQueueName)
 						if err != nil {
 							logging.Error(webhookCtx, "error searching in queue", "error", err)
 							return
 						}
 						if inCompletedQueueJobJSON == "" {
 							// push it to the queue
-							wrappedPayloadJSON, err := json.Marshal(simplifiedWorkflowJobEvent)
+							wrappedPayloadJSON, err := json.Marshal(simplifiedJobEvent)
 							if err != nil {
 								logging.Error(webhookCtx, "error converting job payload to JSON", "error", err)
 								return
@@ -324,7 +333,7 @@ func Run(
 					}
 					if !inAQueue {
 						logging.Debug(webhookCtx, "job not present in any tracked queue, skipping completed enqueue",
-							"job_id", simplifiedWorkflowJobEvent.WorkflowJob.ID,
+							"job_id", simplifiedJobEvent.Job.ID,
 							"queues_checked", queues,
 						)
 					}
@@ -345,7 +354,7 @@ func Run(
 					// 	if !inCompletedQueue {
 					// 		// push it to the queue
 					// 		wrappedJobPayload := map[string]any{
-					// 			"type":    "WorkflowJobPayload",
+					// 			"type":    "JobPayload",
 					// 			"payload": workflowJob,
 					// 		}
 					// 		wrappedPayloadJSON, err := json.Marshal(wrappedJobPayload)
@@ -478,7 +487,7 @@ func Run(
 	// 					logger.ErrorContext(pluginCtx, "error unmarshalling hook request raw payload to HookResponse", "error", err)
 	// 					return
 	// 				}
-	// 				if !exists_in_array_partial(workflowJobEvent.WorkflowJob.Labels, []string{"anka-template"}) {
+	// 				if !exists_in_array_partial(workflowJobEvent.Job.Labels, []string{"anka-template"}) {
 	// 					continue
 	// 				}
 	// 				allHooks = append(allHooks, map[string]any{
@@ -668,12 +677,12 @@ MainLoop:
 			// logger.ErrorContext(pluginCtx, "error unmarshalling hook request raw payload to HookResponse", "error", err)
 			return pluginCtx, fmt.Errorf("error unmarshalling hook request raw payload to HookResponse: %s", err.Error())
 		}
-		workflowJob := workflowJobEventPayload.WorkflowJob
+		workflowJob := workflowJobEventPayload.Job
 
 		logging.Debug(pluginCtx, "fetched hook delivery details",
 			"hook_id", *hookDelivery.ID,
-			"workflow_job_id", *workflowJob.ID,
-			"workflow_job_name", *workflowJob.Name,
+			"job_id", *workflowJob.ID,
+			"job_name", *workflowJob.Name,
 			"labels", workflowJob.Labels,
 		)
 
@@ -689,13 +698,13 @@ MainLoop:
 
 		// Check if the job is already in the queue
 		if workflowJob.ID == nil {
-			logging.Warn(pluginCtx, "WorkflowJob or WorkflowJob.ID is nil")
+			logging.Warn(pluginCtx, "job or job ID is nil")
 			continue
 		}
 
 		// Queued deliveries
 		// // always get queued jobs so that completed cleanup (when there is no queued but there is a completed) works
-		logging.Debug(pluginCtx, "checking if job is in queued database", "workflow_job_id", *workflowJob.ID)
+		logging.Debug(pluginCtx, "checking if job is in queued database", "job_id", *workflowJob.ID)
 		for _, queuedJobs := range allQueuedJobs {
 			for _, queuedJob := range queuedJobs {
 				if queuedJob == "" {
@@ -709,15 +718,15 @@ MainLoop:
 				if typeErr != nil { // not the type we want
 					continue
 				}
-				if wrappedPayload.WorkflowJob.ID == nil {
+				if wrappedPayload.Job.ID == nil {
 					continue
 				}
 				if workflowJob.ID == nil {
 					continue
 				}
-				if *wrappedPayload.WorkflowJob.ID == *workflowJob.ID {
+				if *wrappedPayload.Job.ID == *workflowJob.ID {
 					inQueued = true
-					logging.Debug(pluginCtx, "job found in queued database", "workflow_job_id", *workflowJob.ID)
+					logging.Debug(pluginCtx, "job found in queued database", "job_id", *workflowJob.ID)
 					// inQueuedListKey = key
 					// inQueuedListIndex = index
 					break
@@ -725,12 +734,12 @@ MainLoop:
 			}
 		}
 		if !inQueued {
-			logging.Debug(pluginCtx, "job not found in queued database", "workflow_job_id", *workflowJob.ID)
+			logging.Debug(pluginCtx, "job not found in queued database", "job_id", *workflowJob.ID)
 		}
 
 		// Completed deliveries
 		if *hookDelivery.Action == "completed" {
-			logging.Debug(pluginCtx, "checking if completed job is in completed database", "workflow_job_id", *workflowJob.ID)
+			logging.Debug(pluginCtx, "checking if completed job is in completed database", "job_id", *workflowJob.ID)
 			for key, completedJobs := range allCompletedJobs {
 				for index, completedJob := range completedJobs {
 					wrappedPayload, err, typeErr := database.Unwrap[internalGithub.QueueJob](completedJob)
@@ -741,24 +750,24 @@ MainLoop:
 					if typeErr != nil { // not the type we want
 						continue
 					}
-					if *wrappedPayload.WorkflowJob.ID == *workflowJob.ID {
+					if *wrappedPayload.Job.ID == *workflowJob.ID {
 						inCompleted = true
 						inCompletedListKey = key
 						inCompletedIndex = index
-						logging.Debug(pluginCtx, "job found in completed database", "workflow_job_id", *workflowJob.ID)
+						logging.Debug(pluginCtx, "job found in completed database", "job_id", *workflowJob.ID)
 						break
 					}
 				}
 			}
 			if !inCompleted {
-				logging.Debug(pluginCtx, "completed job not found in completed database", "workflow_job_id", *workflowJob.ID)
+				logging.Debug(pluginCtx, "completed job not found in completed database", "job_id", *workflowJob.ID)
 			}
 		}
 
 		// if in queued, but also has completed; continue and do nothing
 		if inQueued && inCompleted {
 			logging.Debug(pluginCtx, "job is in both queued and completed, skipping redelivery",
-				"workflow_job_id", *workflowJob.ID,
+				"job_id", *workflowJob.ID,
 				"hook_id", *hookDelivery.ID,
 			)
 			continue
@@ -767,7 +776,7 @@ MainLoop:
 		// if in completed, but has no queued; remove from completed db
 		if inCompleted && !inQueued {
 			logging.Debug(pluginCtx, "job is in completed but not queued, removing from completed database",
-				"workflow_job_id", *workflowJob.ID,
+				"job_id", *workflowJob.ID,
 				"hook_id", *hookDelivery.ID,
 			)
 			_, err = databaseContainer.RetryLRem(pluginCtx, inCompletedListKey, 1, allCompletedJobs[inCompletedListKey][inCompletedIndex])
@@ -782,7 +791,7 @@ MainLoop:
 		if *hookDelivery.Action == "queued" {
 			logging.Debug(pluginCtx, "checking if queued hook already has a completed delivery",
 				"hook_id", *hookDelivery.ID,
-				"workflow_job_id", *workflowJob.ID,
+				"job_id", *workflowJob.ID,
 			)
 			// check if a completed hook exists, so we don't re-queue something already finished
 			for _, otherHookDelivery := range allHookDeliveries {
@@ -818,7 +827,7 @@ MainLoop:
 						logging.Warn(pluginCtx, "error getting hook delivery, skipping check for completed delivery",
 							"error", err,
 							"hook_id", *otherHookDelivery.ID,
-							"workflow_job_id", *workflowJob.ID,
+							"job_id", *workflowJob.ID,
 						)
 						continue
 					}
@@ -828,19 +837,19 @@ MainLoop:
 						// logger.ErrorContext(pluginCtx, "error unmarshalling hook request raw payload to HookResponse", "error", err)
 						return pluginCtx, fmt.Errorf("error unmarshalling hook request raw payload to HookResponse: %s", err.Error())
 					}
-					otherWorkflowJob := otherWorkflowJobEventPayload.WorkflowJob
+					otherWorkflowJob := otherWorkflowJobEventPayload.Job
 					if *workflowJob.ID == *otherWorkflowJob.ID {
 						logging.Debug(pluginCtx, "found completed delivery for queued hook, skipping redelivery",
 							"hook_id", *hookDelivery.ID,
-							"workflow_job_id", *workflowJob.ID,
+							"job_id", *workflowJob.ID,
 							"completed_hook_id", *otherHookDelivery.ID,
-							"other_workflow_job_id", *otherWorkflowJob.ID,
+							"other_job_id", *otherWorkflowJob.ID,
 						)
 						continue MainLoop
 					} else {
 						logging.Debug(pluginCtx, "completed hook is for different workflow job, continuing",
-							"queued_workflow_job_id", *workflowJob.ID,
-							"completed_workflow_job_id", *otherWorkflowJob.ID,
+							"queued_job_id", *workflowJob.ID,
+							"completed_job_id", *otherWorkflowJob.ID,
 						)
 					}
 				}
@@ -851,12 +860,12 @@ MainLoop:
 		if *hookDelivery.Action == "completed" && inQueued && *hookDelivery.StatusCode == 200 && !inCompleted {
 			logging.Info(pluginCtx, "hook delivery has completed but is still in queued; redelivering",
 				"hook_id", *hookDelivery.ID,
-				"workflow_job_id", *workflowJob.ID,
+				"job_id", *workflowJob.ID,
 			)
 		} else if *hookDelivery.StatusCode == 200 || inCompleted { // all other cases (like when it's queued); continue
 			logging.Debug(pluginCtx, "skipping redelivery, hook already succeeded or completed",
 				"hook_id", *hookDelivery.ID,
-				"workflow_job_id", *workflowJob.ID,
+				"job_id", *workflowJob.ID,
 				"status_code", *hookDelivery.StatusCode,
 				"in_completed", inCompleted,
 			)
@@ -867,7 +876,7 @@ MainLoop:
 
 		logging.Info(pluginCtx, "redelivering hook",
 			"hook_id", *hookDelivery.ID,
-			"workflow_job_id", *workflowJob.ID,
+			"job_id", *workflowJob.ID,
 			"action", *hookDelivery.Action,
 			"original_status_code", *hookDelivery.StatusCode,
 			"in_queued", inQueued,

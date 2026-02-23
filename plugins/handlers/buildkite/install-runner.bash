@@ -1,15 +1,35 @@
 #!/usr/bin/env bash
 set -exo pipefail
-RUNNER_HOME="${RUNNER_HOME:-"$HOME/actions-runner"}"
-mkdir -p "${RUNNER_HOME}"
-cd "${RUNNER_HOME}"
-RUNNER_ARCH=${RUNNER_ARCH:-"$(uname -m)"}
-if [ "$RUNNER_ARCH" = "x86_64" ] || [ "$RUNNER_ARCH" = "x64" ]; then
-  RUNNER_ARCH="x64"
+
+if command -v buildkite-agent >/dev/null 2>&1; then
+  echo "buildkite-agent already installed"
+  exit 0
 fi
-CURL_CMD="$(curl -s -L https://github.com/actions/runner/releases/latest | grep "curl.*actions-runner-osx-${RUNNER_ARCH}.*.tar.gz" | head -1)"
-FULL_FILE_NAME="$(echo "$CURL_CMD" | cut -d/ -f9)"
-$CURL_CMD
-tar -xzf "$FULL_FILE_NAME" 1>/dev/null
-rm -f "$FULL_FILE_NAME"
-echo "runner successfully installed"
+
+if ! command -v curl >/dev/null 2>&1; then
+  echo "ERROR: curl is required to install buildkite-agent" >&2
+  exit 1
+fi
+
+# Buildkite Linux install flow:
+# https://buildkite.com/docs/agent/self-hosted/install/linux
+if [[ -n "${BUILDKITE_AGENT_TOKEN:-}" ]]; then
+  TOKEN="${BUILDKITE_AGENT_TOKEN}" bash -c "$(curl -sL https://raw.githubusercontent.com/buildkite/agent/main/install.sh)"
+else
+  bash -c "$(curl -sL https://raw.githubusercontent.com/buildkite/agent/main/install.sh)"
+fi
+
+if command -v buildkite-agent >/dev/null 2>&1; then
+  buildkite-agent --version
+  echo "buildkite-agent successfully installed"
+  exit 0
+fi
+
+if [[ -x "${HOME}/.buildkite-agent/bin/buildkite-agent" ]]; then
+  "${HOME}/.buildkite-agent/bin/buildkite-agent" --version
+  echo "buildkite-agent successfully installed"
+  exit 0
+fi
+
+echo "ERROR: buildkite-agent install completed but binary not found" >&2
+exit 1

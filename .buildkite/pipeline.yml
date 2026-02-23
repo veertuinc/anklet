@@ -1,5 +1,11 @@
 steps:
-  - label: ":pipeline: Test pipeline"
+  - label: ":anka: Anklet Buildkite VM test"
     agents:
-      queue: "anklet-tester"
-    command: "echo 123"
+      # queue: "anklet-tester"
+      anklet: "true"
+      anka-template: "REPLACE_WITH_TEMPLATE_UUID"
+      anka-template-tag: "REPLACE_WITH_TEMPLATE_TAG"
+    env:
+      ANKA_TEMPLATE_UUID: "REPLACE_WITH_TEMPLATE_UUID"
+      ANKA_TEMPLATE_TAG: "REPLACE_WITH_TEMPLATE_TAG"
+    command: "echo running inside Anklet-provisioned VM"
