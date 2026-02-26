@@ -152,6 +152,9 @@ func main() {
 			if plugin.TemplateDiskBuffer == 0 {
 				loadedConfig.Plugins[index].TemplateDiskBuffer = 10.0
 			}
+			if loadedConfig.GlobalSkipCPUAndMemoryResourceChecks {
+				loadedConfig.Plugins[index].SkipCPUAndMemoryResourceChecks = true
+			}
 		}
 	}
 

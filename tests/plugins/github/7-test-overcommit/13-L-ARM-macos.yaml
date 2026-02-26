@@ -1,0 +1,9 @@
+# Note: Don't specify any credentials for the plugin. We will inject them into the config for you.
+plugins:
+  - name: GITHUB_HANDLER1
+    plugin: github
+    skip_cpu_and_memory_resource_checks: true
+
+  - name: GITHUB_HANDLER2
+    plugin: github
+    skip_cpu_and_memory_resource_checks: true

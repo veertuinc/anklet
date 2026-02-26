@@ -1178,6 +1178,12 @@ func Run(
 	if err != nil {
 		return pluginCtx, err
 	}
+	if pluginConfig.SkipCPUAndMemoryResourceChecks {
+		logging.Warn(
+			pluginCtx,
+			"skipping VM CPU and memory resource checks; this plugin may overcommit host resources; use at your own risk",
+		)
+	}
 
 	metricsData, err := metrics.GetMetricsDataFromContext(workerCtx)
 	if err != nil {
@@ -1513,23 +1519,25 @@ func Run(
 				}
 				continue
 			}
-			err = internalAnka.VmHasEnoughHostResources(pluginCtx, pausedQueuedJob.AnkaVM)
-			if err != nil {
-				// fmt.Println(pluginConfig.Name, "paused job does not have enough host resources to run")
-				pausedQueueTargetIndex++
-				if pausedQueueLength == 1 { // don't go into a forever loop
-					break
+			if !pluginConfig.SkipCPUAndMemoryResourceChecks {
+				err = internalAnka.VmHasEnoughHostResources(pluginCtx, pausedQueuedJob.AnkaVM)
+				if err != nil {
+					// fmt.Println(pluginConfig.Name, "paused job does not have enough host resources to run")
+					pausedQueueTargetIndex++
+					if pausedQueueLength == 1 { // don't go into a forever loop
+						break
+					}
+					continue
 				}
-				continue
-			}
-			err = internalAnka.VmHasEnoughResources(pluginCtx, pausedQueuedJob.AnkaVM)
-			if err != nil {
-				// fmt.Println(pluginConfig.Name, "paused job does not have enough resources yet on the host")
-				pausedQueueTargetIndex++
-				if pausedQueueLength == 1 { // don't go into a forever loop
-					break
+				err = internalAnka.VmHasEnoughResources(pluginCtx, pausedQueuedJob.AnkaVM)
+				if err != nil {
+					// fmt.Println(pluginConfig.Name, "paused job does not have enough resources yet on the host")
+					pausedQueueTargetIndex++
+					if pausedQueueLength == 1 { // don't go into a forever loop
+						break
+					}
+					continue
 				}
-				continue
 			}
 
 			logging.Info(pluginCtx, "paused job found to run", "pausedQueuedJob", pausedQueuedJob)
@@ -1939,126 +1947,32 @@ func Run(
 	pluginCtx = logging.AppendCtx(pluginCtx, slog.Any("vm", queuedJob.AnkaVM))
 
 	if queuedJob.Action != "paused" { // no need to do this, we already did it when we got the paused job
-		// check if the host has enough resources to run this VM
-		err = internalAnka.VmHasEnoughHostResources(pluginCtx, queuedJob.AnkaVM)
-		if err != nil {
-			logging.Warn(pluginCtx, "host does not have enough resources to run vm")
-			workerGlobals.IncrementQueueTargetIndex() // prevent trying to run this job again
-			pluginGlobals.RetryChannel <- "not_enough_host_resources"
-			return pluginCtx, nil
-		}
-
-		// check if, compared to other VMs potentially running, we have enough resources to run this VM
-		err = internalAnka.VmHasEnoughResources(pluginCtx, queuedJob.AnkaVM)
-		if err != nil {
-
-			// pause all other plugins trying to run
-			workerGlobals.Plugins[pluginConfig.Plugin][pluginConfig.Name].Paused.Store(true)
-
-			// push to proper queue so other hosts with the same specs can pick it up if available
-			queuedJob.PausedOn = pluginConfig.Name
-			queuedJob.Action = "paused"
-			queuedJobJSON, err := json.Marshal(queuedJob)
+		if !pluginConfig.SkipCPUAndMemoryResourceChecks {
+			// check if the host has enough resources to run this VM
+			err = internalAnka.VmHasEnoughHostResources(pluginCtx, queuedJob.AnkaVM)
 			if err != nil {
-				logging.Error(pluginCtx, "error marshalling queued job", "error", err)
-				pluginGlobals.RetryChannel <- "error_marshalling_queued_job"
+				logging.Warn(pluginCtx, "host does not have enough resources to run vm")
+				workerGlobals.IncrementQueueTargetIndex() // prevent trying to run this job again
+				pluginGlobals.RetryChannel <- "not_enough_host_resources"
 				return pluginCtx, nil
 			}
-			err, completed = internalGithub.UpdateJobInDB(pluginCtx, pluginQueueName, &queuedJob)
-			if completed != nil {
-				pluginGlobals.JobChannel <- internalGithub.QueueJob{Action: "finish"}
-				return pluginCtx, nil
-			}
-			if err != nil {
-				logging.Error(pluginCtx, "error updating job in db", "error", err)
-			}
-			// check if it's already in the paused queue
-			pausedQueuedJobJSON, err := internalGithub.GetJobJSONFromQueueByID(pluginCtx, *queuedJob.WorkflowJob.ID, pausedQueueName)
-			if err != nil {
-				logging.Error(pluginCtx, "error checking if job is in paused queue", "error", err)
-				pluginGlobals.RetryChannel <- "error_checking_if_job_is_in_paused_queue"
-				return pluginCtx, nil
-			}
-			if pausedQueuedJobJSON == "" {
-				success, err := databaseContainer.RetryRPush(pluginCtx, pausedQueueName, queuedJobJSON)
-				if err != nil {
-					logging.Error(pluginCtx, "error pushing job to paused queue", "error", err)
-					pluginGlobals.RetryChannel <- "error_pushing_job_to_paused_queue"
-					return pluginCtx, nil
-				}
-				if success == 0 {
-					logging.Error(pluginCtx, "error pushing job to paused queue", "error", err)
-					pluginGlobals.RetryChannel <- "error_pushing_job_to_paused_queue"
-					return pluginCtx, nil
-				}
-				logging.Info(pluginCtx, "pushed job to paused queue", "queuedJob.WorkflowJob.ID", *queuedJob.WorkflowJob.ID)
-			}
-			enoughResourcesLoopCount := 0
-			logging.Warn(pluginCtx, "cannot run vm yet, waiting for enough resources to be available...")
-			for {
-				// Check for completed jobs or context cancellation
-				select {
-				case job := <-pluginGlobals.JobChannel:
-					if job.WorkflowJob.Status != nil && (*job.WorkflowJob.Status == "completed" || *job.WorkflowJob.Status == "failed") {
-						logging.Info(pluginCtx, *job.WorkflowJob.Status+" job found while waiting for resources")
-						// Clean up paused queue entry
-						err := internalGithub.DeleteFromQueue(pluginCtx, *queuedJob.WorkflowJob.ID, pausedQueueName)
-						if err != nil {
-							// no need to error, as it's not a big deal if it's not there
-							logging.Warn(pluginCtx, "error deleting from paused queue", "error", err)
-						}
-						workerGlobals.Plugins[pluginConfig.Plugin][pluginConfig.Name].Paused.Store(false)
-						pluginGlobals.JobChannel <- job // put the job back for cleanup
-						return pluginCtx, nil
-					}
-					// Put the job back if it's not completed
-					pluginGlobals.JobChannel <- job
-				default:
-					// No job in channel, continue with resource checks
-				}
 
-				if workerCtx.Err() != nil || pluginCtx.Err() != nil {
-					workerGlobals.Plugins[pluginConfig.Plugin][pluginConfig.Name].Paused.Store(false)
-					pluginGlobals.RetryChannel <- "context_canceled"
-					return pluginCtx, fmt.Errorf("context canceled while waiting for resources")
-				}
-				time.Sleep(1 * time.Second) // Reduced from 5 seconds to 1 second for faster shutdown response
-				if enoughResourcesLoopCount%10 == 0 {
-					logging.Warn(pluginCtx, "waiting for enough resources to be available...")
-				}
-				enoughResourcesLoopCount++
-				// check if the job was picked up by another host
-				// the other host would have pulled the job from the current host's plugin queue, so we check that
-				existingJobJSON, err := internalGithub.GetJobJSONFromQueueByID(pluginCtx, *queuedJob.WorkflowJob.ID, pluginQueueName)
+			// check if, compared to other VMs potentially running, we have enough resources to run this VM
+			err = internalAnka.VmHasEnoughResources(pluginCtx, queuedJob.AnkaVM)
+			if err != nil {
+
+				// pause all other plugins trying to run
+				workerGlobals.Plugins[pluginConfig.Plugin][pluginConfig.Name].Paused.Store(true)
+
+				// push to proper queue so other hosts with the same specs can pick it up if available
+				queuedJob.PausedOn = pluginConfig.Name
+				queuedJob.Action = "paused"
+				queuedJobJSON, err := json.Marshal(queuedJob)
 				if err != nil {
-					pluginGlobals.RetryChannel <- "error_checking_if_queue_has_job"
-					err = internalGithub.DeleteFromQueue(pluginCtx, *queuedJob.WorkflowJob.ID, pausedQueueName)
-					if err != nil {
-						logging.Error(pluginCtx, "error deleting from paused queue", "error", err)
-					}
-					workerGlobals.Plugins[pluginConfig.Plugin][pluginConfig.Name].Paused.Store(false)
+					logging.Error(pluginCtx, "error marshalling queued job", "error", err)
+					pluginGlobals.RetryChannel <- "error_marshalling_queued_job"
 					return pluginCtx, nil
 				}
-				if existingJobJSON == "" { // some other host has taken the job from this host
-					logging.Warn(pluginCtx, "job was picked up by another host")
-					workerGlobals.Plugins[pluginConfig.Plugin][pluginConfig.Name].Paused.Store(false)
-					pluginGlobals.PausedCancellationJobChannel <- queuedJob
-					return pluginCtx, nil
-				}
-				// If there is still a queued job, check if the host has enough resources to run it
-				err = internalAnka.VmHasEnoughResources(pluginCtx, queuedJob.AnkaVM)
-				if err != nil {
-					if enoughResourcesLoopCount%10 == 0 {
-						logging.Warn(pluginCtx, "error from vm has enough resources check", "error", err)
-					}
-					continue
-				}
-				// remove from paused queue so other hosts won't try to pick it up anymore.
-				err = internalGithub.DeleteFromQueue(pluginCtx, *queuedJob.WorkflowJob.ID, pausedQueueName)
-				if err != nil {
-					logging.Error(pluginCtx, "error deleting from paused queue", "error", err)
-				}
-				queuedJob.Action = "in_progress"
 				err, completed = internalGithub.UpdateJobInDB(pluginCtx, pluginQueueName, &queuedJob)
 				if completed != nil {
 					pluginGlobals.JobChannel <- internalGithub.QueueJob{Action: "finish"}
@@ -2067,7 +1981,103 @@ func Run(
 				if err != nil {
 					logging.Error(pluginCtx, "error updating job in db", "error", err)
 				}
-				break
+				// check if it's already in the paused queue
+				pausedQueuedJobJSON, err := internalGithub.GetJobJSONFromQueueByID(pluginCtx, *queuedJob.WorkflowJob.ID, pausedQueueName)
+				if err != nil {
+					logging.Error(pluginCtx, "error checking if job is in paused queue", "error", err)
+					pluginGlobals.RetryChannel <- "error_checking_if_job_is_in_paused_queue"
+					return pluginCtx, nil
+				}
+				if pausedQueuedJobJSON == "" {
+					success, err := databaseContainer.RetryRPush(pluginCtx, pausedQueueName, queuedJobJSON)
+					if err != nil {
+						logging.Error(pluginCtx, "error pushing job to paused queue", "error", err)
+						pluginGlobals.RetryChannel <- "error_pushing_job_to_paused_queue"
+						return pluginCtx, nil
+					}
+					if success == 0 {
+						logging.Error(pluginCtx, "error pushing job to paused queue", "error", err)
+						pluginGlobals.RetryChannel <- "error_pushing_job_to_paused_queue"
+						return pluginCtx, nil
+					}
+					logging.Info(pluginCtx, "pushed job to paused queue", "queuedJob.WorkflowJob.ID", *queuedJob.WorkflowJob.ID)
+				}
+				enoughResourcesLoopCount := 0
+				logging.Warn(pluginCtx, "cannot run vm yet, waiting for enough resources to be available...")
+				for {
+					// Check for completed jobs or context cancellation
+					select {
+					case job := <-pluginGlobals.JobChannel:
+						if job.WorkflowJob.Status != nil && (*job.WorkflowJob.Status == "completed" || *job.WorkflowJob.Status == "failed") {
+							logging.Info(pluginCtx, *job.WorkflowJob.Status+" job found while waiting for resources")
+							// Clean up paused queue entry
+							err := internalGithub.DeleteFromQueue(pluginCtx, *queuedJob.WorkflowJob.ID, pausedQueueName)
+							if err != nil {
+								// no need to error, as it's not a big deal if it's not there
+								logging.Warn(pluginCtx, "error deleting from paused queue", "error", err)
+							}
+							workerGlobals.Plugins[pluginConfig.Plugin][pluginConfig.Name].Paused.Store(false)
+							pluginGlobals.JobChannel <- job // put the job back for cleanup
+							return pluginCtx, nil
+						}
+						// Put the job back if it's not completed
+						pluginGlobals.JobChannel <- job
+					default:
+						// No job in channel, continue with resource checks
+					}
+
+					if workerCtx.Err() != nil || pluginCtx.Err() != nil {
+						workerGlobals.Plugins[pluginConfig.Plugin][pluginConfig.Name].Paused.Store(false)
+						pluginGlobals.RetryChannel <- "context_canceled"
+						return pluginCtx, fmt.Errorf("context canceled while waiting for resources")
+					}
+					time.Sleep(1 * time.Second) // Reduced from 5 seconds to 1 second for faster shutdown response
+					if enoughResourcesLoopCount%10 == 0 {
+						logging.Warn(pluginCtx, "waiting for enough resources to be available...")
+					}
+					enoughResourcesLoopCount++
+					// check if the job was picked up by another host
+					// the other host would have pulled the job from the current host's plugin queue, so we check that
+					existingJobJSON, err := internalGithub.GetJobJSONFromQueueByID(pluginCtx, *queuedJob.WorkflowJob.ID, pluginQueueName)
+					if err != nil {
+						pluginGlobals.RetryChannel <- "error_checking_if_queue_has_job"
+						err = internalGithub.DeleteFromQueue(pluginCtx, *queuedJob.WorkflowJob.ID, pausedQueueName)
+						if err != nil {
+							logging.Error(pluginCtx, "error deleting from paused queue", "error", err)
+						}
+						workerGlobals.Plugins[pluginConfig.Plugin][pluginConfig.Name].Paused.Store(false)
+						return pluginCtx, nil
+					}
+					if existingJobJSON == "" { // some other host has taken the job from this host
+						logging.Warn(pluginCtx, "job was picked up by another host")
+						workerGlobals.Plugins[pluginConfig.Plugin][pluginConfig.Name].Paused.Store(false)
+						pluginGlobals.PausedCancellationJobChannel <- queuedJob
+						return pluginCtx, nil
+					}
+					// If there is still a queued job, check if the host has enough resources to run it
+					err = internalAnka.VmHasEnoughResources(pluginCtx, queuedJob.AnkaVM)
+					if err != nil {
+						if enoughResourcesLoopCount%10 == 0 {
+							logging.Warn(pluginCtx, "error from vm has enough resources check", "error", err)
+						}
+						continue
+					}
+					// remove from paused queue so other hosts won't try to pick it up anymore.
+					err = internalGithub.DeleteFromQueue(pluginCtx, *queuedJob.WorkflowJob.ID, pausedQueueName)
+					if err != nil {
+						logging.Error(pluginCtx, "error deleting from paused queue", "error", err)
+					}
+					queuedJob.Action = "in_progress"
+					err, completed = internalGithub.UpdateJobInDB(pluginCtx, pluginQueueName, &queuedJob)
+					if completed != nil {
+						pluginGlobals.JobChannel <- internalGithub.QueueJob{Action: "finish"}
+						return pluginCtx, nil
+					}
+					if err != nil {
+						logging.Error(pluginCtx, "error updating job in db", "error", err)
+					}
+					break
+				}
 			}
 		}
 	}

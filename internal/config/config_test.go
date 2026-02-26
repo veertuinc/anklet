@@ -257,10 +257,11 @@ func TestApplyPluginEnvOverrides(t *testing.T) {
 
 func TestApplyPluginEnvOverrides_BoolFields(t *testing.T) {
 	tests := []struct {
-		name         string
-		envVars      map[string]string
-		pluginPrefix string
-		wantSkipPull bool
+		name                                 string
+		envVars                              map[string]string
+		pluginPrefix                         string
+		wantSkipPull                         bool
+		wantSkipCPUAndMemoryResourceChecks   bool
 	}{
 		{
 			name:         "skip_pull true",
@@ -273,6 +274,12 @@ func TestApplyPluginEnvOverrides_BoolFields(t *testing.T) {
 			envVars:      map[string]string{"TEST_PLUGIN_SKIP_PULL": "false"},
 			pluginPrefix: "TEST_PLUGIN",
 			wantSkipPull: false,
+		},
+		{
+			name:       "skip_cpu_and_memory_resource_checks true",
+			envVars:    map[string]string{"TEST_PLUGIN_SKIP_CPU_AND_MEMORY_RESOURCE_CHECKS": "true"},
+			pluginPrefix: "TEST_PLUGIN",
+			wantSkipCPUAndMemoryResourceChecks: true,
 		},
 	}
 
@@ -291,6 +298,13 @@ func TestApplyPluginEnvOverrides_BoolFields(t *testing.T) {
 
 			if plugin.SkipPull != tt.wantSkipPull {
 				t.Errorf("SkipPull = %v, want %v", plugin.SkipPull, tt.wantSkipPull)
+			}
+			if plugin.SkipCPUAndMemoryResourceChecks != tt.wantSkipCPUAndMemoryResourceChecks {
+				t.Errorf(
+					"SkipCPUAndMemoryResourceChecks = %v, want %v",
+					plugin.SkipCPUAndMemoryResourceChecks,
+					tt.wantSkipCPUAndMemoryResourceChecks,
+				)
 			}
 		})
 	}

@@ -38,6 +38,7 @@ plugins:
     # registration_timeout_seconds: 80 # Optional; defaults to 80 seconds.
     # template_disk_buffer: 10.0 # Optional; defaults to 10.0%. How much disk space to leave free on the host for templates.
     # job_retry_attempts: 10  # Override the default of 5
+    # skip_cpu_and_memory_resource_checks: true # Optional; allows CPU/RAM overcommit by skipping VM admission checks on this host.
     #database:
     #  enabled: true
     #  url: localhost
@@ -57,6 +58,7 @@ plugins:
 - If you are attempting to register runners for an entire organization, do NOT set `repo` and make sure your Github App has `Self-hosted runners` > `Read and write` permissions.
 - If your Organization level runner is registered and your public repo jobs are not picking it up even though the labels are a perfect match, make sure the Runner groups (likely `Default`) has `Allow public repositories`.
 - There are times when github will not register the runner for some reason. `registration_timeout_seconds` is available to set the custom seconds to wait before considering the runner registration failed (and retry on a new VM).
+- `skip_cpu_and_memory_resource_checks` (or global `global_skip_cpu_and_memory_resource_checks`) is intended for overcommit fleets. It allows multiple VMs to start even when host CPU/RAM capacity checks would normally block them, which can improve throughput in bursty workloads but may increase contention and job runtime variance under sustained load.
 
 ---
 

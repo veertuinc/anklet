@@ -104,6 +104,7 @@ pid_file_dir: /tmp/
 # global_database_database: 0
 # global_private_key: /Users/{YOUR USER HERE}/.private-key.pem # If you use the same key for all your plugins, you can set it here.
 # global_token: github_pat_XXX # If you use the same token for all your plugins, you can set it here.
+# global_skip_cpu_and_memory_resource_checks: true # Optional; skip VM CPU/RAM admission checks for all handler plugins (allows overcommit).
 # plugins_path: ~/.config/anklet/plugins/ # This sets the location where scripts used by plugins are stored; we don't recommend changing this.
 plugins:
 ```
@@ -136,6 +137,7 @@ It is also possible to use ENVs for several of the items in the config. They ove
 | ANKLET_GLOBAL_TOKEN | GitHub token for all plugins (ex: github_pat_XXX) |
 | ANKLET_GLOBAL_RECEIVER_SECRET | Secret to use for receiver plugin (ex: "my-secret") |
 | ANKLET_GLOBAL_TEMPLATE_DISK_BUFFER | Disk buffer (how much disk space to leave free on the host) percentage for templates (ex: 10.0 for 10%) |
+| ANKLET_GLOBAL_SKIP_CPU_AND_MEMORY_RESOURCE_CHECKS | Skip VM CPU/RAM admission checks for all handler plugins (ex: true) |
 
 You can also set or override plugin settings per plugin using envs based on the plugin name:
 

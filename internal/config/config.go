@@ -40,6 +40,7 @@ type Config struct {
 	GlobalDatabaseTLSInsecure        bool     `yaml:"global_database_tls_insecure"`
 	GlobalReceiverSecret             string   `yaml:"global_receiver_secret"`
 	GlobalTemplateDiskBuffer         float64  `yaml:"global_template_disk_buffer"` // Global disk buffer percentage (e.g., 10.0 for 10%)
+	GlobalSkipCPUAndMemoryResourceChecks bool `yaml:"global_skip_cpu_and_memory_resource_checks"` // Global override to skip CPU/RAM resource admission checks
 }
 
 type Log struct {
@@ -98,6 +99,7 @@ type Plugin struct {
 	RegistrationTimeoutSeconds int      `yaml:"registration_timeout_seconds"`
 	TemplateDiskBuffer         float64  `yaml:"template_disk_buffer"` // Plugin-specific disk buffer percentage (e.g., 10.0 for 10%)
 	JobRetryAttempts           int      `yaml:"job_retry_attempts"`   // Maximum number of retry attempts for failed jobs
+	SkipCPUAndMemoryResourceChecks bool `yaml:"skip_cpu_and_memory_resource_checks"` // Skip CPU/RAM resource admission checks for this plugin
 }
 
 // GetQueueOwner returns QueueName if set, otherwise returns Owner.
@@ -249,6 +251,10 @@ func LoadInEnvs(config Config) (Config, error) {
 			return Config{}, err
 		}
 		config.GlobalTemplateDiskBuffer = buffer
+	}
+	envGlobalSkipCPUAndMemoryResourceChecks := os.Getenv("ANKLET_GLOBAL_SKIP_CPU_AND_MEMORY_RESOURCE_CHECKS")
+	if envGlobalSkipCPUAndMemoryResourceChecks != "" {
+		config.GlobalSkipCPUAndMemoryResourceChecks = envGlobalSkipCPUAndMemoryResourceChecks == "true"
 	}
 
 	envJobRetryAttempts := os.Getenv("ANKLET_JOB_RETRY_ATTEMPTS")
