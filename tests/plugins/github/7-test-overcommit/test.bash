@@ -115,16 +115,16 @@ assert_redis_key_exists "anklet/metrics/veertuinc/GITHUB_RECEIVER1"
 ###############################################################################
 # Test: overcommit on a single 13-L-ARM host (8 cores)
 ###############################################################################
-begin_test "t2-6c14r-1-overcommit-two-runs-single-host" "success"
+begin_test "t2-6c14r-3-90s-pause-overcommit-two-runs-single-host" "success"
 
-# Trigger two identical jobs that each need 6 cores / 14 GB RAM.
-# On an 8-core host, this requires CPU overcommit to run simultaneously.
-echo "] Triggering t2-6c14r-1 workflow twice..."
-trigger_workflow_runs "veertuinc" "anklet" "t2-6c14r-1.yml" 2
+# Trigger two runs of the 90s-pause workflow (6c/14GB each). On an 8-core host
+# this requires CPU overcommit; the 90s pause gives time for both VMs to start.
+echo "] Triggering t2-6c14r-3-90s-pause workflow twice..."
+trigger_workflow_runs "veertuinc" "anklet" "t2-6c14r-3-90s-pause.yml" 2
 
 echo "] Waiting for both runs to be in_progress at the same time..."
-if ! wait_for_in_progress_run_count "veertuinc" "anklet" "t2-6c14r-1" 2 240; then
-    record_fail "did not observe two simultaneous in_progress t2-6c14r-1 runs"
+if ! wait_for_in_progress_run_count "veertuinc" "anklet" "t2-6c14r-3-90s-pause" 2 240; then
+    record_fail "did not observe two simultaneous in_progress t2-6c14r-3-90s-pause runs"
     end_test
     exit 1
 fi
@@ -133,7 +133,7 @@ echo "] ✓ observed two simultaneous in_progress runs"
 assert_remote_log_contains "handler-8-16" "skipping VM CPU and memory resource checks"
 
 echo "] Waiting for both runs to complete..."
-if wait_for_workflow_runs_to_complete "veertuinc" "anklet" "t2-6c14r-1" "success" 1200; then
+if wait_for_workflow_runs_to_complete "veertuinc" "anklet" "t2-6c14r-3-90s-pause" "success" 1200; then
     local_in_progress_log_count="$(
         ssh_to_host "handler-8-16" "grep -c 'job found registered runner and is now in progress' /tmp/anklet.log 2>/dev/null || true" \
             | tr -d '[:space:]'
