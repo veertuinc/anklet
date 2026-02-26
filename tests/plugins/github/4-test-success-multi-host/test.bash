@@ -10,6 +10,37 @@ source "$SCRIPT_DIR/helpers.bash"
 
 echo "] Running $TEST_DIR_NAME test..."
 
+# Metrics snapshot helpers (receiver + both handlers)
+_print_metrics_for_host() {
+    local host_name="$1"
+    local host_metrics_output=""
+
+    if [[ "$host_name" == "receiver" ]]; then
+        host_metrics_output="$(curl -sS --max-time 10 "http://127.0.0.1:8080/metrics/v1?format=prometheus" 2>&1 || true)"
+    else
+        host_metrics_output="$(ssh_to_host "$host_name" "curl -sS --max-time 10 http://127.0.0.1:8080/metrics/v1?format=prometheus" 2>&1 || true)"
+    fi
+
+    echo "] Metrics output from ${host_name}:"
+    if echo "$host_metrics_output" | grep -q "plugin_"; then
+        echo "$host_metrics_output" | grep "plugin_" || true
+    else
+        echo "$host_metrics_output"
+    fi
+    echo ""
+}
+
+print_metrics_snapshot() {
+    local snapshot_label="$1"
+    echo ""
+    echo "========== METRICS SNAPSHOT: ${snapshot_label} =========="
+    _print_metrics_for_host "receiver"
+    _print_metrics_for_host "handler-8-8"
+    _print_metrics_for_host "handler-8-16"
+    echo "======== END METRICS SNAPSHOT: ${snapshot_label} ========"
+    echo ""
+}
+
 # Initialize test report
 init_test_report "$TEST_DIR_NAME"
 
@@ -47,6 +78,7 @@ start_anklet_backgrounded_but_attached "receiver"
 echo "] Waiting for receiver to initialize..."
 sleep 5
 assert_redis_key_exists "anklet/metrics/veertuinc/GITHUB_RECEIVER1"
+print_metrics_snapshot "receiver initialized"
 
 ###############################################################################
 # Test: handler-8-8 (8GB RAM) can't run 14GB job, handler-8-16 (16GB) can
@@ -58,10 +90,12 @@ echo "] Starting anklet ONLY on handler-8-8 (8GB RAM)..."
 start_anklet_on_host_background "handler-8-8"
 sleep 5
 assert_redis_key_exists "anklet/metrics/veertuinc/GITHUB_HANDLER1_8_L_ARM_MACOS"
+print_metrics_snapshot "after starting handler-8-8 (failover test)"
 
 # Step 2: Trigger workflow that needs 14GB RAM (more than 8GB host has)
 echo "] Triggering t2-6c14r-1 workflow (requires 14GB RAM)..."
 trigger_workflow_runs "veertuinc" "anklet" "t2-6c14r-1.yml" 1
+print_metrics_snapshot "after triggering t2-6c14r-1"
 
 # Step 3: Wait for handler-8-8 to report insufficient resources
 echo "] Waiting for handler-8-8 to report 'not enough resources'..."
@@ -79,16 +113,19 @@ while ! check_remote_log_contains "handler-8-8" "host does not have enough resou
 done
 echo "] ✓ handler-8-8 correctly reported insufficient resources"
 assert_remote_log_contains "handler-8-8" "host does not have enough resources to run vm"
+print_metrics_snapshot "after handler-8-8 insufficient resources detected"
 
 # Step 4: Now start handler-8-16 (16GB RAM host) - should be able to handle the job
 echo "] Starting anklet on handler-8-16 (16GB RAM)..."
 start_anklet_on_host_background "handler-8-16"
 sleep 5
 assert_redis_key_exists "anklet/metrics/veertuinc/GITHUB_HANDLER_13_L_ARM_MACOS"
+print_metrics_snapshot "after starting handler-8-16 (failover test)"
 
 # Step 5: Wait for workflow to complete (handler-8-16 should pick it up)
 echo "] Waiting for workflow to complete (handler-8-16 should process it)..."
 if wait_for_workflow_runs_to_complete "veertuinc" "anklet" "t2-6c14r-1" "success"; then
+    print_metrics_snapshot "after t2-6c14r-1 completion"
     # Verify handler-8-16 processed the job
     if check_remote_log_contains "handler-8-16" "queued job found"; then
         echo "] ✓ handler-8-16 processed the job successfully"
@@ -141,7 +178,9 @@ end_test
 ###########################
 
 begin_test "t2-dual-without-tag"
+print_metrics_snapshot "before t2-dual-without-tag"
 if run_workflow_and_get_logs "veertuinc" "anklet" "t2-dual-without-tag" "success"; then
+    print_metrics_snapshot "after t2-dual-without-tag completion"
     assert_remote_log_contains "handler-8-16" "queued job found"
     assert_remote_log_contains "handler-8-8" "queued job found"
     assert_logs_contain "Ankas-Virtual-Machine.local" "${WORKFLOW_LOG_FILES[0]}"
@@ -157,7 +196,9 @@ end_test
 # Test: t1-with-tag-1-matrix-nodes-2
 ####################################
 begin_test "t1-with-tag-1-matrix-nodes-2"
+print_metrics_snapshot "before t1-with-tag-1-matrix-nodes-2"
 if run_workflow_and_get_logs "veertuinc" "anklet" "t1-with-tag-1-matrix-nodes-2" "success"; then
+    print_metrics_snapshot "after t1-with-tag-1-matrix-nodes-2 completion"
     assert_remote_log_contains "handler-8-16" "queued job found"
     assert_remote_log_contains "handler-8-8" "queued job found"
     assert_logs_contain "Ankas-Virtual-Machine.local" "${WORKFLOW_LOG_FILES[0]}"
@@ -174,11 +215,13 @@ end_test
 # Tests that when a host doesn't have enough resources for a second VM,
 # it pauses the job and another host with available resources picks it up.
 begin_test "different-sized-templates-paused-job-handoff" "success"
+print_metrics_snapshot "start different-sized-templates-paused-job-handoff"
 
 # Step 1: Stop handler-8-16 (we'll start it later), keep only handler-8-8 running
 echo "] Stopping handler-8-16 for this test..."
 stop_anklet_on_host "handler-8-16" || true
 sleep 5
+print_metrics_snapshot "after stopping handler-8-16"
 
 # Verify handler-8-8 is still running (it should be from previous tests)
 echo "] Verifying handler-8-8 is running..."
@@ -188,11 +231,13 @@ if ! ssh_to_host "handler-8-8" "pgrep -f '^/tmp/anklet\$' > /dev/null" 2>/dev/nu
     sleep 5
 fi
 assert_redis_key_exists "anklet/metrics/veertuinc/GITHUB_HANDLER1_8_L_ARM_MACOS"
+print_metrics_snapshot "after verifying handler-8-8 running"
 
 # Step 2: Trigger t2-3c6r-1-90s-pause twice (uses 3c6r template, sleeps 2m)
 # This should consume resources on handler-8-8, causing the second job to pause
 echo "] Triggering t2-3c6r-1-90s-pause workflow twice..."
 trigger_workflow_runs "veertuinc" "anklet" "t2-3c6r-1-90s-pause.yml" 2
+print_metrics_snapshot "after triggering t2-3c6r-1-90s-pause twice"
 
 # Wait for handler-8-8 to pick up a job (poll instead of fixed sleep)
 echo "] Waiting for handler-8-8 to pick up a job..."
@@ -211,6 +256,7 @@ while ! check_remote_log_contains "handler-8-8" "queued job found"; do
     echo "]] Still waiting for handler-8-8 to pick up job... (${wait_elapsed}s/${wait_timeout}s)"
 done
 echo "] ✓ handler-8-8 picked up a job"
+print_metrics_snapshot "after handler-8-8 picked up paused-handoff workload"
 
 # need some time for the job to be picked up by handler-8-8 and the next job to be paused
 sleep 10
@@ -220,6 +266,7 @@ echo "] Starting handler-8-16 (should pick up paused job)..."
 start_anklet_on_host_background "handler-8-16"
 sleep 5
 assert_redis_key_exists "anklet/metrics/veertuinc/GITHUB_HANDLER_13_L_ARM_MACOS"
+print_metrics_snapshot "after starting handler-8-16 for paused-handoff test"
 
 # Step 4: Wait for handler-8-16 to pick up the paused job (poll with 5 min timeout)
 echo "] Waiting for handler-8-16 to pick up paused job..."
@@ -238,6 +285,7 @@ done
 if [[ $wait_elapsed -lt $wait_timeout ]]; then
     echo "] ✓ handler-8-16 picked up paused job after ${wait_elapsed}s"
 fi
+print_metrics_snapshot "after paused job handoff wait loop"
 
 # Step 5: Check handler-8-8 logs for paused job behavior
 echo "] Checking handler-8-8 logs for paused job behavior..."
@@ -272,6 +320,7 @@ fi
 # Wait for workflows to complete
 echo "] Waiting for workflows to complete..."
 wait_for_workflow_runs_to_complete "veertuinc" "anklet" "t2-3c6r-1-90s-pause" "success" 300 || true
+print_metrics_snapshot "after t2-3c6r-1-90s-pause completion wait"
 
 # Step 7: Verify metrics show correct 'idle' status after paused job handoff
 # This is critical - after a job transitions through paused state, the metrics
@@ -328,6 +377,7 @@ end_test
 # "paused" when the plugin was actually idle (internal paused state was false).
 begin_test "metrics-status-validation-multi-host"
 echo "] Final validation: checking metrics endpoints on all hosts..."
+print_metrics_snapshot "start metrics-status-validation-multi-host"
 
 METRICS_TEST_PASSED=true
 
@@ -346,6 +396,7 @@ fi
 
 # Give metrics time to stabilize
 sleep 5
+print_metrics_snapshot "after handler restart/stabilization"
 
 # Check handler-8-16 metrics
 echo "] Checking handler-8-16 metrics endpoint..."
