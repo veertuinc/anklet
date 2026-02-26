@@ -1,12 +1,22 @@
 #!/usr/bin/env bash
 set -eo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# When run by anklet-tests runner, script is /tmp/test.bash and helpers live under /tmp/tests/
+if [[ -f "/tmp/tests/plugins/github/helpers.bash" ]]; then
+    source "/tmp/tests/plugins/github/helpers.bash"
+elif [[ -f "$SCRIPT_DIR/../helpers.bash" ]]; then
+    source "$SCRIPT_DIR/../helpers.bash"
+else
+    source "$SCRIPT_DIR/helpers.bash"
+fi
 TEST_DIR_NAME="$(basename "$(pwd)")"
+# When run as /tmp/test.bash, pwd may not be the test dir; use script location for report name
+if [[ "$SCRIPT_DIR" == "/tmp" ]]; then
+    TEST_DIR_NAME="7-test-overcommit"
+fi
 echo "==========================================="
 echo "START $TEST_DIR_NAME/test.bash"
 echo "==========================================="
-# Source the helper functions (includes test report tracking functions)
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/helpers.bash"
 
 echo "] Running $TEST_DIR_NAME test..."
 
@@ -115,16 +125,16 @@ assert_redis_key_exists "anklet/metrics/veertuinc/GITHUB_RECEIVER1"
 ###############################################################################
 # Test: overcommit on a single 13-L-ARM host (8 cores)
 ###############################################################################
-begin_test "t2-6c14r-3-90s-pause-overcommit-two-runs-single-host" "success"
+begin_test "t2-6c14r-2-5m-pause-overcommit-two-runs-single-host" "success"
 
-# Trigger two runs of the 90s-pause workflow (6c/14GB each). On an 8-core host
-# this requires CPU overcommit; the 90s pause gives time for both VMs to start.
-echo "] Triggering t2-6c14r-3-90s-pause workflow twice..."
-trigger_workflow_runs "veertuinc" "anklet" "t2-6c14r-3-90s-pause.yml" 2
+# Trigger two runs of the 5m-pause workflow (6c/14GB each). On an 8-core host
+# this requires CPU overcommit; the 5-minute pause gives time for both VMs to start.
+echo "] Triggering t2-6c14r-2-5m-pause workflow twice..."
+trigger_workflow_runs "veertuinc" "anklet" "t2-6c14r-2-5m-pause.yml" 2
 
 echo "] Waiting for both runs to be in_progress at the same time..."
-if ! wait_for_in_progress_run_count "veertuinc" "anklet" "t2-6c14r-3-90s-pause" 2 240; then
-    record_fail "did not observe two simultaneous in_progress t2-6c14r-3-90s-pause runs"
+if ! wait_for_in_progress_run_count "veertuinc" "anklet" "t2-6c14r-2-5m-pause" 2 240; then
+    record_fail "did not observe two simultaneous in_progress t2-6c14r-2-5m-pause runs"
     end_test
     exit 1
 fi
@@ -133,7 +143,7 @@ echo "] ✓ observed two simultaneous in_progress runs"
 assert_remote_log_contains "handler-8-16" "skipping VM CPU and memory resource checks"
 
 echo "] Waiting for both runs to complete..."
-if wait_for_workflow_runs_to_complete "veertuinc" "anklet" "t2-6c14r-3-90s-pause" "success" 1200; then
+if wait_for_workflow_runs_to_complete "veertuinc" "anklet" "t2-6c14r-2-5m-pause" "success" 1200; then
     local_in_progress_log_count="$(
         ssh_to_host "handler-8-16" "grep -c 'job found registered runner and is now in progress' /tmp/anklet.log 2>/dev/null || true" \
             | tr -d '[:space:]'
