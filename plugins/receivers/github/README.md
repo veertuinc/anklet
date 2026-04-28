@@ -27,11 +27,13 @@ plugins:
     hook_id: 4897477123
     port: 54321
     # secret: 12345
+    token: github_pat_XXX
     # private_key: /Users/{YOUR USER HERE}/private-key.pem
     app_id: 949431
     installation_id: 52970581
     # repo: anklet # Optional; if you want to receive webhooks for a specific repo and not at the org level
     owner: veertuinc
+    # queue_name: shared_queue # Optional; override the queue namespace (defaults to owner). Useful for multiple orgs sharing a queue.
     # skip_redeliver: true # Optional; if you want to skip redelivering undelivered webhooks on startup
     # redeliver_hours: 24 # Optional; default is 24 hours
     #database:
@@ -45,7 +47,7 @@ plugins:
 Some things to note:
 
 - If you leave off `repo`, the receiver will be an organization level receiver.
-- The receiver must come FIRST in the `plugins:` list. Do not place it after other plugins.
+- The receiver must come FIRST in the `plugins:` list. Do not place it after other plugins. This is required because the receiver clears the `in_progress` queue on startup and must be listening for webhooks, processing them if there is a completed item that came in while it was down, before handlers begin processing jobs.
 - **IMPORTANT**: On first start, it will scan for failed webhook deliveries for the past 24 hours and send a re-delivery request for each one. This is to ensure that all webhooks are delivered and processed and nothing in your plugins are orphaned or database. Avoid excessive restarts or else you'll eat up your API limits quickly. You can use `skip_redeliver: true` to disable this behavior.
 
 Once configured, you can run Anklet and, if everything is configured properly, you should see logs like this:

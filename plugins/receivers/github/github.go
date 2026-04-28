@@ -101,11 +101,7 @@ func Run(
 		return pluginCtx, fmt.Errorf("error authenticating github client: %s", err.Error())
 	}
 
-	// clean up in_progress queue if it exists
-	_, err = databaseContainer.RetryDel(pluginCtx, "anklet/jobs/github/in_progress/"+pluginConfig.Owner)
-	if err != nil {
-		return pluginCtx, fmt.Errorf("error deleting in_progress queue: %s", err.Error())
-	}
+	queueOwner := pluginConfig.GetQueueOwner()
 
 	server := &http.Server{Addr: ":" + pluginConfig.Port}
 	http.HandleFunc("/healthcheck", func(w http.ResponseWriter, r *http.Request) {
@@ -116,10 +112,6 @@ func Run(
 		}
 	})
 	http.HandleFunc("/jobs/v1/receiver", func(w http.ResponseWriter, r *http.Request) {
-		if err != nil {
-			logging.Error(pluginCtx, "error getting database client from context", "error", err)
-			return
-		}
 		payload, err := github.ValidatePayload(r, []byte(pluginConfig.Secret))
 		if err != nil {
 			logging.Error(pluginCtx, "error validating payload", "error", err)
@@ -150,6 +142,7 @@ func Run(
 				Action: *workflowJob.Action,
 				Repository: internalGithub.Repository{
 					Name:       workflowJob.Repo.Name,
+					Owner:      workflowJob.Repo.Owner.Login,
 					Visibility: workflowJob.Repo.Visibility,
 					Private:    workflowJob.Repo.Private,
 				},
@@ -177,10 +170,28 @@ func Run(
 			webhookCtx = logging.AppendCtx(webhookCtx, slog.String("deliveryID", deliveryID))
 
 			logging.Info(webhookCtx, "received workflow job to consider")
+			if workflowJob.WorkflowJob.ID != nil {
+				logging.Info(webhookCtx, "workflow job ID", "workflowJobID", *workflowJob.WorkflowJob.ID)
+			}
+			if workflowJob.WorkflowJob.RunID != nil {
+				logging.Info(webhookCtx, "workflow job run ID", "workflowJobRunID", *workflowJob.WorkflowJob.RunID)
+			}
+			if workflowJob.WorkflowJob.WorkflowName != nil {
+				logging.Info(webhookCtx, "workflow job workflow name", "workflowJobWorkflowName", *workflowJob.WorkflowJob.WorkflowName)
+			}
+			if workflowJob.WorkflowJob.HTMLURL != nil {
+				logging.Info(webhookCtx, "workflow job HTML URL", "workflowJobHTMLURL", *workflowJob.WorkflowJob.HTMLURL)
+			}
+			if workflowJob.WorkflowJob.Status != nil {
+				logging.Info(webhookCtx, "workflow job status", "workflowJobStatus", *workflowJob.WorkflowJob.Status)
+			}
+			if workflowJob.WorkflowJob.Conclusion != nil {
+				logging.Info(webhookCtx, "workflow job conclusion", "workflowJobConclusion", *workflowJob.WorkflowJob.Conclusion)
+			}
 			if *workflowJob.Action == "queued" {
 				if exists_in_array_partial(simplifiedWorkflowJobEvent.WorkflowJob.Labels, []string{"anka-template"}) {
 					// make sure it doesn't already exist in the main queued queue
-					queuedQueueName := "anklet/jobs/github/queued/" + pluginConfig.Owner
+					queuedQueueName := "anklet/jobs/github/queued/" + queueOwner
 					inQueueJobJSON, err := internalGithub.GetJobJSONFromQueueByID(pluginCtx, *simplifiedWorkflowJobEvent.WorkflowJob.ID, queuedQueueName)
 					if err != nil {
 						logging.Error(webhookCtx, "error searching in queue", "error", err)
@@ -194,7 +205,7 @@ func Run(
 							pluginCtx,
 							*simplifiedWorkflowJobEvent.WorkflowJob.RunID,
 							*simplifiedWorkflowJobEvent.WorkflowJob.ID,
-							pluginConfig.Owner,
+							queueOwner,
 						)
 						if err != nil {
 							logging.Error(webhookCtx, "error checking handler queues", "error", err)
@@ -230,7 +241,7 @@ func Run(
 				// store in_progress so we can know if the registration failed
 				if exists_in_array_partial(simplifiedWorkflowJobEvent.WorkflowJob.Labels, []string{"anka-template"}) {
 					// make sure it doesn't already exist
-					inProgressQueueName := "anklet/jobs/github/in_progress/" + pluginConfig.Owner
+					inProgressQueueName := "anklet/jobs/github/in_progress/" + queueOwner
 					inQueueJobJSON, err := internalGithub.GetJobJSONFromQueueByID(pluginCtx, *simplifiedWorkflowJobEvent.WorkflowJob.ID, inProgressQueueName)
 					if err != nil {
 						logging.Error(webhookCtx, "error searching in queue", "error", err)
@@ -257,7 +268,7 @@ func Run(
 				if exists_in_array_partial(simplifiedWorkflowJobEvent.WorkflowJob.Labels, []string{"anka-template"}) {
 					queues := []string{}
 					// get all keys from database for the main queue and service queues as well as completed
-					queuedKeys, err := databaseContainer.RetryKeys(pluginCtx, "anklet/jobs/github/queued/"+pluginConfig.Owner+"*")
+					queuedKeys, err := databaseContainer.RetryKeys(pluginCtx, "anklet/jobs/github/queued/"+queueOwner+"*")
 					if err != nil {
 						logging.Error(webhookCtx, "error getting list of queued keys (completed)", "error", err)
 						return
@@ -288,7 +299,7 @@ func Run(
 						}
 					}
 					if inAQueue { // only add completed if it's in a queue
-						completedQueueName := "anklet/jobs/github/completed/" + pluginConfig.Owner
+						completedQueueName := "anklet/jobs/github/completed/" + queueOwner
 						inCompletedQueueJobJSON, err := internalGithub.GetJobJSONFromQueueByID(pluginCtx, *simplifiedWorkflowJobEvent.WorkflowJob.ID, completedQueueName)
 						if err != nil {
 							logging.Error(webhookCtx, "error searching in queue", "error", err)
@@ -586,9 +597,9 @@ func Run(
 
 	// if len(allHooks) > 0 {
 	// get all keys from database for the main queue and service queues as well as completed
-	queuedKeys, err := databaseContainer.RetryKeys(pluginCtx, "anklet/jobs/github/queued/"+pluginConfig.Owner+"*")
+	queuedKeys, err := databaseContainer.RetryKeys(pluginCtx, "anklet/jobs/github/queued/"+queueOwner+"*")
 	if queuedKeys == nil && err != nil {
-		return pluginCtx, fmt.Errorf("error getting list of queued keys: %s %s", err.Error(), "anklet/jobs/github/queued/"+pluginConfig.Owner+"*")
+		return pluginCtx, fmt.Errorf("error getting list of queued keys: %s %s", err.Error(), "anklet/jobs/github/queued/"+queueOwner+"*")
 	}
 	var allQueuedJobs = make(map[string][]string)
 	for _, key := range queuedKeys {
@@ -599,7 +610,7 @@ func Run(
 		}
 		allQueuedJobs[key] = queuedJobs
 	}
-	completedKeys, err := databaseContainer.RetryKeys(pluginCtx, "anklet/jobs/github/completed"+pluginConfig.Owner+"*")
+	completedKeys, err := databaseContainer.RetryKeys(pluginCtx, "anklet/jobs/github/completed/"+queueOwner+"*")
 	if err != nil {
 		// logger.ErrorContext(pluginCtx, "error getting list of keys", "error", err)
 		return pluginCtx, fmt.Errorf("error getting list of completed keys: %s", err.Error())
@@ -615,6 +626,7 @@ func Run(
 	}
 
 	logging.Info(pluginCtx, "processing hooks scheduled for redelivery", "total_to_redeliver", len(toRedeliver))
+	redeliveryRequested := false
 
 MainLoop:
 	for i := len(toRedeliver) - 1; i >= 0; i-- { // make sure we process/redeliver queued before completed
@@ -760,8 +772,8 @@ MainLoop:
 			)
 			_, err = databaseContainer.RetryLRem(pluginCtx, inCompletedListKey, 1, allCompletedJobs[inCompletedListKey][inCompletedIndex])
 			if err != nil {
-				// logger.ErrorContext(pluginCtx, "error removing completedJob from anklet/jobs/github/completed/"+pluginConfig.Owner, "error", err, "completedJob", allCompletedJobs[inCompletedListKey][inCompletedIndex])
-				return pluginCtx, fmt.Errorf("error removing completedJob from anklet/jobs/github/completed/"+pluginConfig.Owner+": %s", err.Error())
+				// logger.ErrorContext(pluginCtx, "error removing completedJob from anklet/jobs/github/completed/"+queueOwner, "error", err, "completedJob", allCompletedJobs[inCompletedListKey][inCompletedIndex])
+				return pluginCtx, fmt.Errorf("error removing completedJob from anklet/jobs/github/completed/"+queueOwner+": %s", err.Error())
 			}
 			continue
 		}
@@ -882,6 +894,7 @@ MainLoop:
 			})
 		}
 		// err doesn't matter here and it will always throw "job scheduled on GitHub side; try again later"
+		redeliveryRequested = true
 		logging.Info(pluginCtx, "hook redelivery requested successfully",
 			"redelivery", redelivery,
 			"hookDelivery", map[string]any{
@@ -902,6 +915,18 @@ MainLoop:
 	logging.Info(pluginCtx, "finished processing hooks for redelivery",
 		"total_hooks_checked", len(toRedeliver),
 	)
+
+	if redeliveryRequested {
+		logging.Info(pluginCtx, "sleeping for 1 minute to allow handlers to process jobs")
+		time.Sleep(1 * time.Minute)
+	}
+
+	// Clean up in_progress queue AFTER redelivery processing completes
+	// This ensures any in_progress webhooks have a chance to be redelivered first
+	_, err = databaseContainer.RetryDel(pluginCtx, "anklet/jobs/github/in_progress/"+queueOwner)
+	if err != nil {
+		return pluginCtx, fmt.Errorf("error deleting in_progress queue: %s", err.Error())
+	}
 
 	err = metrics.UpdatePlugin(workerCtx, pluginCtx, metrics.PluginBase{
 		Status:      "running",

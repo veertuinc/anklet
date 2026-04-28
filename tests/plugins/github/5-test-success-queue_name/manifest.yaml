@@ -1,0 +1,16 @@
+description: "Github Actions success tests with shared queue_name"
+tests:
+    - name: "Shared queue_name test"
+      hosts:
+        - name: "receiver"
+          id: "ubuntu-22.04-linux"
+          config: ubuntu-22.04-linux.yaml
+          tester: true
+
+        - name: "handler-8-16"
+          id: "13-L-ARM-macos"
+          config: 13-L-ARM-macos.yaml
+
+        - name: "handler-8-8"
+          id: "8-L-ARM-macos"
+          config: 8-L-ARM-macos.yaml
