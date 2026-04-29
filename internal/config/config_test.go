@@ -53,6 +53,162 @@ func TestPlugin_GetQueueOwner(t *testing.T) {
 	}
 }
 
+func TestPlugin_ValidateAzureDevOps(t *testing.T) {
+	base := func(plugin string) Plugin {
+		return Plugin{
+			Name:            "AZURE_DEVOPS_TEST",
+			Plugin:          plugin,
+			Token:           "pat",
+			OrganizationURL: "https://dev.azure.com/my-org",
+			Project:         "MyProject",
+			AgentPoolName:   "my-pool",
+			Port:            "8080",
+		}
+	}
+	tests := []struct {
+		name    string
+		mutate  func(*Plugin)
+		wantErr bool
+	}{
+		{
+			name:    "handler valid",
+			mutate:  func(p *Plugin) { p.Plugin = "azure_devops" },
+			wantErr: false,
+		},
+		{
+			name:    "receiver valid",
+			mutate:  func(p *Plugin) { p.Plugin = "azure_devops_receiver" },
+			wantErr: false,
+		},
+		{
+			name:    "handler missing agent_pool_name",
+			mutate:  func(p *Plugin) { p.Plugin = "azure_devops"; p.AgentPoolName = "" },
+			wantErr: true,
+		},
+		{
+			name:    "handler ignores missing port",
+			mutate:  func(p *Plugin) { p.Plugin = "azure_devops"; p.Port = "" },
+			wantErr: false,
+		},
+		{
+			name:    "receiver missing port",
+			mutate:  func(p *Plugin) { p.Plugin = "azure_devops_receiver"; p.Port = "" },
+			wantErr: true,
+		},
+		{
+			name:    "receiver ignores missing agent_pool_name",
+			mutate:  func(p *Plugin) { p.Plugin = "azure_devops_receiver"; p.AgentPoolName = "" },
+			wantErr: false,
+		},
+		{
+			name:    "missing token",
+			mutate:  func(p *Plugin) { p.Plugin = "azure_devops"; p.Token = "" },
+			wantErr: true,
+		},
+		{
+			name:    "missing organization_url",
+			mutate:  func(p *Plugin) { p.Plugin = "azure_devops"; p.OrganizationURL = "" },
+			wantErr: true,
+		},
+		{
+			name:    "missing project",
+			mutate:  func(p *Plugin) { p.Plugin = "azure_devops"; p.Project = "" },
+			wantErr: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			plugin := base("azure_devops")
+			if tt.mutate != nil {
+				tt.mutate(&plugin)
+			}
+			err := plugin.ValidateAzureDevOps()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ValidateAzureDevOps() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestPlugin_AzureDevOpsRedisNamespace(t *testing.T) {
+	tests := []struct {
+		name   string
+		plugin Plugin
+		want   string
+	}{
+		{
+			name: "queue_name overrides everything",
+			plugin: Plugin{
+				Name:            "RECEIVER_A",
+				Owner:           "github-org",
+				OrganizationURL: "https://dev.azure.com/some-org",
+				Project:         "some-project",
+				QueueName:       "shared_ns",
+			},
+			want: "shared_ns",
+		},
+		{
+			name: "derives <org>/<project> from organization_url + project",
+			plugin: Plugin{
+				Name:            "AZURE_DEVOPS_RECEIVER",
+				OrganizationURL: "https://dev.azure.com/veertu",
+				Project:         "anklet-azure-devops-examples",
+			},
+			want: "veertu/anklet-azure-devops-examples",
+		},
+		{
+			name: "handler with same org/project as receiver derives same namespace",
+			plugin: Plugin{
+				Name:            "AZURE_DEVOPS_HANDLER",
+				OrganizationURL: "https://dev.azure.com/veertu",
+				Project:         "anklet-azure-devops-examples",
+			},
+			want: "veertu/anklet-azure-devops-examples",
+		},
+		{
+			name: "trailing slash on organization_url is tolerated",
+			plugin: Plugin{
+				OrganizationURL: "https://dev.azure.com/veertu/",
+				Project:         "proj",
+			},
+			want: "veertu/proj",
+		},
+		{
+			name: "non-decomposable organization_url falls through to project only",
+			plugin: Plugin{
+				OrganizationURL: "https://veertu.visualstudio.com/",
+				Project:         "proj",
+			},
+			want: "proj",
+		},
+		{
+			name: "uses plugin name when queue_name and org/project empty",
+			plugin: Plugin{
+				Name:  "AZURE_DEVOPS_RECEIVER",
+				Owner: "github-org",
+			},
+			want: "AZURE_DEVOPS_RECEIVER",
+		},
+		{
+			name: "falls back to owner when name empty",
+			plugin: Plugin{
+				Name:  "",
+				Owner: "fallback-org",
+			},
+			want: "fallback-org",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.plugin.AzureDevOpsRedisNamespace()
+			if got != tt.want {
+				t.Errorf("AzureDevOpsRedisNamespace() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestNormalizePluginEnvPrefix(t *testing.T) {
 	tests := []struct {
 		name  string

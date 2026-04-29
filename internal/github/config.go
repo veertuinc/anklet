@@ -1,85 +1,54 @@
 package github
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
-	"sync"
-	"sync/atomic"
 
 	"github.com/google/go-github/v74/github"
-	"github.com/veertuinc/anklet/internal/anka"
-	"github.com/veertuinc/anklet/internal/config"
+	"github.com/veertuinc/anklet/internal/jobqueue"
 )
 
-type PluginGlobals struct {
-	FirstCheckForCompletedJobsRan int32         // atomic flag: 0 = false, 1 = true - allows us to do a full check for completed jobs on startup
-	FirstStartCapacityCheckRan    int32         // atomic flag: 0 = false, 1 = true - allows us to check VM capacity only on first plugin start
-	RetryChannel                  chan string   // Send a string to this channel to send the job back to the main queue after checking for reason
-	CleanupMutex                  *sync.Mutex   // prevent multiple cleanup jobs from running at the same time
-	JobChannel                    chan QueueJob // Used in the CheckForCompletedJobs to handle logic specific to the job
-	PausedCancellationJobChannel  chan QueueJob // If a job is paused on the host, getting a job in this channel cleans it up so another host can continue to handle it
-	ReturnToMainQueue             chan string   // Similar to the RetryChannel, but used to acually send the job back to the main queue
-	CheckForCompletedJobsRunCount int32         // atomic counter - Used to track how many times the CheckForCompletedJobs function has run so we can log every 5 runs the "job is still in progress" message
-	Unreturnable                  bool          // Used to prevent a job from being returned to the main queue if it's not returnable
-}
-
-func (p *PluginGlobals) SetUnreturnable(unreturnable bool) {
-	p.Unreturnable = unreturnable
-}
-
-func (p *PluginGlobals) IsUnreturnable() bool {
-	return p.Unreturnable
-}
-
-func (p *PluginGlobals) IncrementCheckForCompletedJobsRunCount() {
-	atomic.AddInt32(&p.CheckForCompletedJobsRunCount, 1)
-}
-
-func (p *PluginGlobals) GetCheckForCompletedJobsRunCount() int32 {
-	return atomic.LoadInt32(&p.CheckForCompletedJobsRunCount)
-}
-
-func (p *PluginGlobals) SetFirstCheckForCompletedJobsRan(ran bool) {
-	var value int32
-	if ran {
-		value = 1
-	}
-	atomic.StoreInt32(&p.FirstCheckForCompletedJobsRan, value)
-}
-
-func (p *PluginGlobals) GetFirstCheckForCompletedJobsRan() bool {
-	return atomic.LoadInt32(&p.FirstCheckForCompletedJobsRan) == 1
-}
-
-func (p *PluginGlobals) SetFirstStartCapacityCheckRan(ran bool) {
-	var value int32
-	if ran {
-		value = 1
-	}
-	atomic.StoreInt32(&p.FirstStartCapacityCheckRan, value)
-}
-
-func (p *PluginGlobals) GetFirstStartCapacityCheckRan() bool {
-	return atomic.LoadInt32(&p.FirstStartCapacityCheckRan) == 1
-}
-
-func GetPluginGlobalsFromContext(ctx context.Context) (*PluginGlobals, error) {
-	pluginGlobals, ok := ctx.Value(config.ContextKey("pluginglobals")).(*PluginGlobals)
-	if !ok {
-		return nil, fmt.Errorf("GetPluginGlobalFromContext failed")
-	}
-	return pluginGlobals, nil
-}
-
+// QueueJob is the GitHub-specific Redis queue payload. It embeds
+// jobqueue.BaseQueueJob to share the Type/Action/Attempts/PausedOn/AnkaVM
+// fields with the Azure DevOps plugin.
+//
+// JSON wire format is preserved bit-for-bit from the pre-Phase-0 layout:
+// embedded field tags flatten into the outer object, so the Redis payload
+// looks identical to what the GitHub plugin already produces.
 type QueueJob struct {
-	Type        string                `json:"type"`
+	jobqueue.BaseQueueJob
 	WorkflowJob SimplifiedWorkflowJob `json:"workflow_job"`
-	AnkaVM      anka.VM               `json:"anka_vm"`
 	Repository  Repository            `json:"repository"`
-	Action      string                `json:"action"`
-	PausedOn    string                `json:"paused_on"`
-	Attempts    int                   `json:"attempts"`
+}
+
+// Matches reports whether other refers to the same workflow run + workflow
+// job as the receiver. Used as the Matcher passed to jobqueue.UpdateJobInDB.
+func (q QueueJob) Matches(other QueueJob) bool {
+	if q.Type != other.Type {
+		return false
+	}
+	if q.WorkflowJob.ID == nil || other.WorkflowJob.ID == nil {
+		return false
+	}
+	if q.WorkflowJob.RunID == nil || other.WorkflowJob.RunID == nil {
+		return false
+	}
+	return *q.WorkflowJob.ID == *other.WorkflowJob.ID &&
+		*q.WorkflowJob.RunID == *other.WorkflowJob.RunID
+}
+
+// IsCompleted reports whether the queued job is in a terminal state.
+// Used as the CompletedPredicate passed to jobqueue.CheckIfJobIsCompleted
+// and jobqueue.UpdateJobInDB.
+func (q QueueJob) IsCompleted() bool {
+	return q.WorkflowJob.Status != nil && *q.WorkflowJob.Status == jobqueue.StatusCompleted
+}
+
+// FinishSignal returns a sentinel QueueJob carrying jobqueue.ActionFinish,
+// used to tell the handler's main loop to exit. Provided as a helper so
+// callsites do not need to spell out the embedded BaseQueueJob initializer.
+func FinishSignal() QueueJob {
+	return QueueJob{BaseQueueJob: jobqueue.BaseQueueJob{Action: jobqueue.ActionFinish}}
 }
 
 type Repository struct {

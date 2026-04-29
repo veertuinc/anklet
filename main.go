@@ -647,7 +647,7 @@ func worker(
 				// the key is the first plugin in the list's name
 				// The goRoutine inside shouild continue to run so only run this once
 				if index == 0 {
-					metrics.ExportMetricsToDB(workerCtx, pluginCtx, loadedConfig.Plugins[0].Owner+"/"+loadedConfig.Plugins[0].Name)
+					metrics.ExportMetricsToDB(workerCtx, pluginCtx, metrics.KeyEnding(loadedConfig.Plugins[0].Owner, loadedConfig.Plugins[0].Name))
 				}
 
 				for {

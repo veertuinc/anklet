@@ -170,7 +170,7 @@ func ExportMetricsToDB(workerCtx context.Context, pluginCtx context.Context, key
 ```
 
 - Exports every 10 seconds
-- Key format: `anklet/metrics/{owner}/{name}`
+- Key format: `anklet/metrics/{owner}/{name}` (or `anklet/metrics/{name}` when no owner is configured, e.g. for the Azure DevOps plugin)
 - TTL: 7 days
 - Includes `last_update` timestamp for freshness checks
 
@@ -194,4 +194,4 @@ When a plugin shuts down, call `Cleanup()` to remove its metrics from Redis:
 func Cleanup(ctx context.Context, owner string, name string)
 ```
 
-This deletes the `anklet/metrics/{owner}/{name}` key from Redis.
+This deletes the `anklet/metrics/{owner}/{name}` key (or `anklet/metrics/{name}` when no owner is configured) from Redis.

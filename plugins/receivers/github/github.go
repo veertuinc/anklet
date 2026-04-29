@@ -17,6 +17,7 @@ import (
 	"github.com/veertuinc/anklet/internal/config"
 	"github.com/veertuinc/anklet/internal/database"
 	internalGithub "github.com/veertuinc/anklet/internal/github"
+	"github.com/veertuinc/anklet/internal/jobqueue"
 	"github.com/veertuinc/anklet/internal/logging"
 	"github.com/veertuinc/anklet/internal/metrics"
 )
@@ -126,7 +127,12 @@ func Run(
 		switch workflowJob := event.(type) {
 		case *github.WorkflowJobEvent:
 			simplifiedWorkflowJobEvent := internalGithub.QueueJob{
-				Type: "WorkflowJobPayload",
+				BaseQueueJob: jobqueue.BaseQueueJob{
+					Type:     "WorkflowJobPayload",
+					Action:   *workflowJob.Action,
+					AnkaVM:   anka.VM{},
+					Attempts: 0,
+				},
 				WorkflowJob: internalGithub.SimplifiedWorkflowJob{
 					ID:           workflowJob.WorkflowJob.ID,
 					Name:         workflowJob.WorkflowJob.Name,
@@ -139,15 +145,12 @@ func Run(
 					HTMLURL:      workflowJob.WorkflowJob.HTMLURL,
 					WorkflowName: workflowJob.WorkflowJob.WorkflowName,
 				},
-				Action: *workflowJob.Action,
 				Repository: internalGithub.Repository{
 					Name:       workflowJob.Repo.Name,
 					Owner:      workflowJob.Repo.Owner.Login,
 					Visibility: workflowJob.Repo.Visibility,
 					Private:    workflowJob.Repo.Private,
 				},
-				AnkaVM:   anka.VM{},
-				Attempts: 0,
 			}
 			// Create a fresh context for this webhook request to avoid accumulating job contexts
 			webhookCtx := logging.AppendCtx(pluginCtx, slog.Group("job",
@@ -188,7 +191,7 @@ func Run(
 			if workflowJob.WorkflowJob.Conclusion != nil {
 				logging.Info(webhookCtx, "workflow job conclusion", "workflowJobConclusion", *workflowJob.WorkflowJob.Conclusion)
 			}
-			if *workflowJob.Action == "queued" {
+			if *workflowJob.Action == jobqueue.ActionQueued {
 				if exists_in_array_partial(simplifiedWorkflowJobEvent.WorkflowJob.Labels, []string{"anka-template"}) {
 					// make sure it doesn't already exist in the main queued queue
 					queuedQueueName := "anklet/jobs/github/queued/" + queueOwner
@@ -234,7 +237,7 @@ func Run(
 						}
 					}
 				}
-			} else if *workflowJob.Action == "in_progress" {
+			} else if *workflowJob.Action == jobqueue.ActionInProgress {
 				if workflowJob.WorkflowJob.Conclusion != nil && *workflowJob.WorkflowJob.Conclusion == "cancelled" {
 					return
 				}
@@ -264,7 +267,7 @@ func Run(
 						logging.Debug(webhookCtx, "job already present in in_progress queue, skipping enqueue", "queue", inProgressQueueName)
 					}
 				}
-			} else if *workflowJob.Action == "completed" {
+			} else if *workflowJob.Action == jobqueue.ActionCompleted {
 				if exists_in_array_partial(simplifiedWorkflowJobEvent.WorkflowJob.Labels, []string{"anka-template"}) {
 					queues := []string{}
 					// get all keys from database for the main queue and service queues as well as completed
@@ -556,7 +559,7 @@ func Run(
 		)
 
 		for _, hookDelivery := range allHookDeliveries {
-			if hookDelivery.StatusCode != nil && *hookDelivery.StatusCode != 200 && !*hookDelivery.Redelivery && *hookDelivery.Action != "in_progress" {
+			if hookDelivery.StatusCode != nil && *hookDelivery.StatusCode != 200 && !*hookDelivery.Redelivery && *hookDelivery.Action != jobqueue.ActionInProgress {
 				logging.Debug(pluginCtx, "found failed hook delivery, checking if it needs redelivery",
 					"hook_id", *hookDelivery.ID,
 					"guid", *hookDelivery.GUID,
@@ -729,7 +732,7 @@ MainLoop:
 		}
 
 		// Completed deliveries
-		if *hookDelivery.Action == "completed" {
+		if *hookDelivery.Action == jobqueue.ActionCompleted {
 			logging.Debug(pluginCtx, "checking if completed job is in completed database", "workflow_job_id", *workflowJob.ID)
 			for key, completedJobs := range allCompletedJobs {
 				for index, completedJob := range completedJobs {
@@ -779,14 +782,14 @@ MainLoop:
 		}
 
 		// handle queued that have already been successfully delivered before.
-		if *hookDelivery.Action == "queued" {
+		if *hookDelivery.Action == jobqueue.ActionQueued {
 			logging.Debug(pluginCtx, "checking if queued hook already has a completed delivery",
 				"hook_id", *hookDelivery.ID,
 				"workflow_job_id", *workflowJob.ID,
 			)
 			// check if a completed hook exists, so we don't re-queue something already finished
 			for _, otherHookDelivery := range allHookDeliveries {
-				if *otherHookDelivery.Action == "completed" &&
+				if *otherHookDelivery.Action == jobqueue.ActionCompleted &&
 					otherHookDelivery.DeliveredAt != nil && otherHookDelivery.DeliveredAt.After(hookDelivery.DeliveredAt.Time) &&
 					otherHookDelivery.RepositoryID != nil && *otherHookDelivery.RepositoryID == *hookDelivery.RepositoryID {
 					logging.Debug(pluginCtx, "found completed hook after queued hook in same repo, checking if same workflow job",
@@ -848,7 +851,7 @@ MainLoop:
 		}
 
 		// if in queued, and also has a successful completed, something is wrong and we need to re-deliver it.
-		if *hookDelivery.Action == "completed" && inQueued && *hookDelivery.StatusCode == 200 && !inCompleted {
+		if *hookDelivery.Action == jobqueue.ActionCompleted && inQueued && *hookDelivery.StatusCode == 200 && !inCompleted {
 			logging.Info(pluginCtx, "hook delivery has completed but is still in queued; redelivering",
 				"hook_id", *hookDelivery.ID,
 				"workflow_job_id", *workflowJob.ID,

@@ -883,6 +883,18 @@ func GetMetricsDataFromContext(ctx context.Context) (*MetricsDataLock, error) {
 	return metricsData, nil
 }
 
+// KeyEnding returns the {owner}/{name} suffix that gets appended to
+// "anklet/metrics/" to form a plugin's Redis metrics key. When owner is empty
+// (e.g. Azure DevOps plugins, where there is no GitHub-org-equivalent), the
+// owner segment and its separator are omitted to avoid keys like
+// "anklet/metrics//AZURE_DEVOPS_RECEIVER".
+func KeyEnding(owner, name string) string {
+	if owner == "" {
+		return name
+	}
+	return owner + "/" + name
+}
+
 func Cleanup(ctx context.Context, owner string, name string) {
 	databaseContainer, err := database.GetDatabaseFromContext(ctx)
 	if err != nil {
@@ -891,7 +903,7 @@ func Cleanup(ctx context.Context, owner string, name string) {
 	}
 
 	// During cleanup, skip database operations if they fail - they're not critical for shutdown
-	cleanupKey := "anklet/metrics/" + owner + "/" + name
+	cleanupKey := "anklet/metrics/" + KeyEnding(owner, name)
 	_, result := databaseContainer.RetryDel(ctx, cleanupKey)
 	if result != nil {
 		// Database errors during cleanup are not critical - just log at debug level and continue

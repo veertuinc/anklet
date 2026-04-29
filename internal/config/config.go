@@ -3,6 +3,7 @@ package config
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"os"
 	"reflect"
 	"strconv"
@@ -100,6 +101,13 @@ type Plugin struct {
 	TemplateDiskBuffer         float64  `yaml:"template_disk_buffer"` // Plugin-specific disk buffer percentage (e.g., 10.0 for 10%)
 	JobRetryAttempts           int      `yaml:"job_retry_attempts"`   // Maximum number of retry attempts for failed jobs
 	SkipCPUAndMemoryResourceChecks bool `yaml:"skip_cpu_and_memory_resource_checks"` // Skip CPU/RAM resource admission checks for this plugin
+	// Azure DevOps-specific fields. Only consulted when Plugin == "azure_devops" or "azure_devops_receiver".
+	// OrganizationURL example: "https://dev.azure.com/my-org".
+	OrganizationURL string `yaml:"organization_url"`
+	Project         string `yaml:"project"`
+	// AgentPoolName is required by the handler so it knows which Azure DevOps
+	// agent pool to register the Anka VM into.
+	AgentPoolName string `yaml:"agent_pool_name"`
 }
 
 // GetQueueOwner returns QueueName if set, otherwise returns Owner.
@@ -109,6 +117,86 @@ func (p Plugin) GetQueueOwner() string {
 		return p.QueueName
 	}
 	return p.Owner
+}
+
+// ValidateAzureDevOps verifies that an azure_devops or azure_devops_receiver
+// plugin has all the fields it needs to start. Returns nil on success.
+//
+// Both receiver and handler require token (PAT), organization_url, and project.
+// Receivers additionally require port (HTTP listener). Handlers additionally
+// require agent_pool_name (the pool the Anka VM agent registers into).
+func (p Plugin) ValidateAzureDevOps() error {
+	if p.Token == "" {
+		return fmt.Errorf("token is required for azure_devops plugin %q", p.Name)
+	}
+	if p.OrganizationURL == "" {
+		return fmt.Errorf("organization_url is required for azure_devops plugin %q", p.Name)
+	}
+	if p.Project == "" {
+		return fmt.Errorf("project is required for azure_devops plugin %q", p.Name)
+	}
+	if strings.HasSuffix(p.Plugin, "_receiver") {
+		if p.Port == "" {
+			return fmt.Errorf("port is required for azure_devops_receiver %q", p.Name)
+		}
+		return nil
+	}
+	if p.AgentPoolName == "" {
+		return fmt.Errorf("agent_pool_name is required for azure_devops handler %q", p.Name)
+	}
+	return nil
+}
+
+// AzureDevOpsRedisNamespace returns the Redis path segment for
+// anklet/jobs/azure_devops/* queues.
+//
+// The receiver and handler that work together MUST resolve to the same
+// namespace, otherwise the receiver pushes jobs the handler never sees.
+// Resolution order:
+//
+//  1. queue_name (explicit override - lets multiple receiver/handler pairs
+//     share one queue, or splits one project across many queues).
+//  2. <org-slug>/<project> derived from organization_url + project. This is
+//     the natural pairing unit for ADO and the recommended default since
+//     receiver and handler that target the same ADO project will share a
+//     namespace without the operator having to set queue_name on both.
+//  3. plugin name (legacy safety fallback; will NOT match between receiver
+//     and handler, so this case is only ever right for a single-plugin
+//     debug setup).
+//  4. owner (final fallback for misconfigured plugins).
+func (p Plugin) AzureDevOpsRedisNamespace() string {
+	if p.QueueName != "" {
+		return p.QueueName
+	}
+	if p.OrganizationURL != "" && p.Project != "" {
+		if slug := orgSlugFromURL(p.OrganizationURL); slug != "" {
+			return slug + "/" + p.Project
+		}
+		return p.Project
+	}
+	if p.Name != "" {
+		return p.Name
+	}
+	return p.Owner
+}
+
+// orgSlugFromURL extracts the organization name from an Azure DevOps
+// organization URL like "https://dev.azure.com/my-org". Returns "" for any
+// URL it cannot decompose (e.g. legacy *.visualstudio.com or on-prem
+// collection URLs); callers fall back to queue_name in that case.
+func orgSlugFromURL(rawURL string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return ""
+	}
+	p := strings.Trim(u.Path, "/")
+	if p == "" {
+		return ""
+	}
+	if i := strings.Index(p, "/"); i >= 0 {
+		return p[:i]
+	}
+	return p
 }
 
 func LoadConfig(configPath string) (Config, error) {

@@ -7,6 +7,7 @@ require (
 	github.com/gofri/go-github-ratelimit/v2 v2.0.2
 	github.com/google/go-github/v74 v74.0.0
 	github.com/google/uuid v1.6.0
+	github.com/microsoft/azure-devops-go-api/azuredevops/v7 v7.1.0
 	github.com/redis/go-redis/v9 v9.17.2
 	github.com/shirou/gopsutil/v4 v4.25.11
 	gopkg.in/yaml.v2 v2.4.0

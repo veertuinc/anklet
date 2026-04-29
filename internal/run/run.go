@@ -5,7 +5,9 @@ import (
 	"fmt"
 
 	"github.com/veertuinc/anklet/internal/config"
+	azure_devops_handler "github.com/veertuinc/anklet/plugins/handlers/azure_devops"
 	"github.com/veertuinc/anklet/plugins/handlers/github"
+	azure_devops_receiver "github.com/veertuinc/anklet/plugins/receivers/azure_devops"
 	github_receiver "github.com/veertuinc/anklet/plugins/receivers/github"
 )
 
@@ -43,6 +45,30 @@ func Plugin(
 		}
 	case "github_receiver":
 		updatedPluginCtx, err = github_receiver.Run(
+			workerCtx,
+			pluginCtx,
+		)
+		if err != nil {
+			return updatedPluginCtx, err
+		}
+	case "azure_devops":
+		select {
+		case <-pluginCtx.Done():
+			pluginCancel()
+			return pluginCtx, nil
+		default:
+			updatedPluginCtx, err = azure_devops_handler.Run(
+				workerCtx,
+				pluginCtx,
+				pluginCancel,
+			)
+			if err != nil {
+				return updatedPluginCtx, fmt.Errorf("error running azure_devops plugin: %s", err.Error())
+			}
+			return updatedPluginCtx, nil
+		}
+	case "azure_devops_receiver":
+		updatedPluginCtx, err = azure_devops_receiver.Run(
 			workerCtx,
 			pluginCtx,
 		)
