@@ -1,5 +1,9 @@
 # Azure DevOps
 
+## Current Blockers
+
+- Azure requires agents to already exist, otherwise it errors when you first run the job. The issue is that to prevent Job 1 from using Job 2's VM when both are trying to use the same template and tag, we have to use some sort of job specific ID and pass it through. The problem with that is that it's impossible to create the offline agent for that.
+
 ## Prerequisites
 
 1. Azure DevOps requires at least one registered agent PER TEMPLATE AND TAG capability to be present in the pool. Otherwise, you'll see "No agent found in pool anklet which satisfies the specified demands" errors. You'll need to manually create them by registering agents to the pool using your local machine (or a temporary remote machine). You can keep it offline, it just needs to show up in the pool. Once an offline agent is registered, add the specific capabilities your job will demand, the pipeline jobs you run will queue up without error and wait for anklet to register a new online agent with those same demands/capabilities inside of an Anka VM.
