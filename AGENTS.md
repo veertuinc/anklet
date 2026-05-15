@@ -296,6 +296,8 @@ Key environment variables Anklet supports:
 - `ANKLET_LOG_FILE_DIR` - Log directory (default: `./`)
 - `ANKLET_GLOBAL_DATABASE_URL` - Redis URL (e.g., `localhost`)
 - `ANKLET_GLOBAL_DATABASE_PORT` - Redis port (e.g., `6379`)
+- `ANKLET_GLOBAL_HOST_TO_GUEST_FOLDER_MOUNTS` - Comma-separated host folders to expose inside each guest VM (optional `host_path:guest_folder_name`); requires Anka ≥ 3.9.0 on Apple Silicon; non-empty replaces YAML `global_host_to_guest_folder_mounts`
+- `<PLUGIN_NAME>_HOST_TO_GUEST_FOLDER_MOUNTS` - Per-plugin comma-separated host→guest folder mounts (replaces that plugin’s YAML `host_to_guest_folder_mounts`; see README)
 - `LOG_LEVEL` - Logging level: `dev`, `DEBUG`, `INFO`, `ERROR`
 
 See README.md for complete list.

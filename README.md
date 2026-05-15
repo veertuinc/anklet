@@ -76,6 +76,28 @@ If your plugin uses the Anka CLI to create VMs, Anklet handles VM [Templates/Tag
     - Two consecutive pulls cannot happen on the same host or else the data may become corrupt. If a second job is picked up that requires a pull, it will send it back to the queue so another host can handle it.
 2. If the Template *AND* Tag already exist, it does *not* issue a pull from the Registry (which therefore doesn't require maintaining a Registry at all; useful for users who use `anka export/import`). Important: You must define the tag, or else it will attempt to use "latest" and forcefully issue a pull.
 
+#### Host-to-guest folder mounts
+
+Expose folders from the **host Mac** inside **handler VMs** (Apple Silicon only). Requires **Anka ≥ 3.9**; see Veertu’s [host directory mounts](https://docs.veertu.com/anka/whats-new/anka-3.9.0/#ability-to-mount-host-directories-inside-of-the-vm). Not supported on Intel hosts; if mounts are configured but Anka is too old, handler plugins will not start. Receiver plugins ignore these options.
+
+**Guest paths:** Mounts show up under **`/Volumes/My Shared Files/<guest_folder_name>`** (Apple’s shared-folder layout).
+
+**YAML**
+
+| Scope | Key |
+| ----- | --- |
+| All handlers on this host | `global_host_to_guest_folder_mounts` |
+| One handler plugin only | `host_to_guest_folder_mounts` (under that plugin) |
+
+Each list entry is **`host_path`** or **`host_path:guest_folder_name`** (use **`guest_folder_name`** so jobs know where to look under `/Volumes/My Shared Files/`). Globals mount first; duplicate host paths are only mounted once.
+
+**Environment (optional)** — comma-separated list; if set, replaces the matching YAML list for that scope:
+
+- `ANKLET_GLOBAL_HOST_TO_GUEST_FOLDER_MOUNTS`
+- `<PLUGIN_NAME>_HOST_TO_GUEST_FOLDER_MOUNTS` (same plugin name prefix rules as other Anklet env overrides)
+
+
+
 ---
 
 ## Setup Guide
@@ -105,6 +127,10 @@ pid_file_dir: /tmp/
 # global_private_key: /Users/{YOUR USER HERE}/.private-key.pem # If you use the same key for all your plugins, you can set it here.
 # global_token: github_pat_XXX # If you use the same token for all your plugins, you can set it here.
 # global_skip_cpu_and_memory_resource_checks: true # Optional; skip VM CPU/RAM admission checks for all handler plugins (allows overcommit).
+# global_host_to_guest_folder_mounts: # Optional; Anka 3.9+ on Apple Silicon; mount host dirs into each guest VM (see "Host-to-guest folder mounts").
+#   - /path/on/host
+#   - /another/path:GuestFolderName
+# Per-plugin: host_to_guest_folder_mounts under a plugin entry (merged with global; same format).
 # plugins_path: ~/.config/anklet/plugins/ # This sets the location where scripts used by plugins are stored; we don't recommend changing this.
 plugins:
 ```
@@ -138,6 +164,7 @@ It is also possible to use ENVs for several of the items in the config. They ove
 | ANKLET_GLOBAL_RECEIVER_SECRET | Secret to use for receiver plugin (ex: "my-secret") |
 | ANKLET_GLOBAL_TEMPLATE_DISK_BUFFER | Disk buffer (how much disk space to leave free on the host) percentage for templates (ex: 10.0 for 10%) |
 | ANKLET_GLOBAL_SKIP_CPU_AND_MEMORY_RESOURCE_CHECKS | Skip VM CPU/RAM admission checks for all handler plugins (ex: true) |
+| ANKLET_GLOBAL_HOST_TO_GUEST_FOLDER_MOUNTS | Comma-separated host folders to mount into guest VMs for all handler plugins (Anka ≥ 3.9.0, Apple Silicon only; ex: `/cache,/data:workdata`). Non-empty replaces `global_host_to_guest_folder_mounts` from YAML |
 
 You can also set or override plugin settings per plugin using envs based on the plugin name:
 
@@ -171,6 +198,7 @@ Per-plugin envs are dynamic and map to yaml keys:
 
 - `<PLUGIN_NAME>_<YAML_KEY>` (e.g., `GITHUB_HANDLER1_TOKEN`)
 - For nested database fields: `<PLUGIN_NAME>_DATABASE_<YAML_KEY>` (e.g., `GITHUB_HANDLER1_DATABASE_URL`)
+- For mounting host folders **into the guest** (per plugin): `<PLUGIN_NAME>_HOST_TO_GUEST_FOLDER_MOUNTS` — comma-separated list (replaces that plugin’s `host_to_guest_folder_mounts` from YAML when set)
 
 ### Database Setup
 

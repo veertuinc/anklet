@@ -1,0 +1,7 @@
+# Note: Don't specify any credentials for the plugin. We will inject them into the config for you.
+plugins:
+  - name: GITHUB_HANDLER1
+    plugin: github
+    host_to_guest_folder_mounts:
+      # /tmp exists on macOS CI hosts; guest_folder_name must appear in logged mountSpec.
+      - "/tmp:anklet_mount_test"

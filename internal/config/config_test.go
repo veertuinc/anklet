@@ -381,3 +381,34 @@ func TestApplyPluginEnvOverrides_InvalidValues(t *testing.T) {
 		})
 	}
 }
+
+func TestAnyHostToGuestFolderMountsConfigured(t *testing.T) {
+	t.Parallel()
+	if AnyHostToGuestFolderMountsConfigured(Config{}) {
+		t.Error("empty config should have no host-to-guest folder mounts")
+	}
+	if !AnyHostToGuestFolderMountsConfigured(Config{GlobalHostToGuestFolderMounts: []string{"/x"}}) {
+		t.Error("global only")
+	}
+	if !AnyHostToGuestFolderMountsConfigured(Config{Plugins: []Plugin{{Name: "p", HostToGuestFolderMounts: []string{"/y"}}}}) {
+		t.Error("plugin only")
+	}
+	if !AnyHostToGuestFolderMountsConfigured(Config{
+		GlobalHostToGuestFolderMounts: []string{"/x"},
+		Plugins:                       []Plugin{{Name: "p", HostToGuestFolderMounts: []string{"/y"}}},
+	}) {
+		t.Error("both")
+	}
+}
+
+func TestApplyPluginEnvOverrides_HostToGuestFolderMountsSlice(t *testing.T) {
+	t.Setenv("TEST_HANDLER_HOST_TO_GUEST_FOLDER_MOUNTS", "/a,/b:guest")
+	plugin := Plugin{Name: "TEST_HANDLER"}
+	err := applyPluginEnvOverrides(&plugin, "TEST_HANDLER")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plugin.HostToGuestFolderMounts) != 2 || plugin.HostToGuestFolderMounts[0] != "/a" || plugin.HostToGuestFolderMounts[1] != "/b:guest" {
+		t.Errorf("HostToGuestFolderMounts = %v", plugin.HostToGuestFolderMounts)
+	}
+}

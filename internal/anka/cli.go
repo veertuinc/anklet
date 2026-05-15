@@ -536,6 +536,40 @@ func (cli *Cli) AnkaDelete(workerCtx context.Context, pluginCtx context.Context,
 	return nil
 }
 
+// AnkaDeleteVMOnly deletes a VM without adjusting running-VM metrics. Use when cleaning up a VM
+// that was never counted (e.g. after start succeeded but host folder mounts failed).
+func (cli *Cli) AnkaDeleteVMOnly(pluginCtx context.Context, vmName string) error {
+	deleteOutput, err := cli.ExecuteParseJson(pluginCtx, "anka", "-j", "delete", "--yes", vmName)
+	if err != nil {
+		logging.Error(pluginCtx, "error executing anka delete", "err", err)
+		_, _, err = cli.Execute(pluginCtx, "anka", "delete", "--yes", vmName)
+		if err != nil {
+			logging.Error(pluginCtx, "error executing anka delete", "err", err)
+		}
+		return err
+	}
+	if deleteOutput.Status != "OK" {
+		return fmt.Errorf("error deleting vm: %s", deleteOutput.Message)
+	}
+	logging.Debug(pluginCtx, "successfully deleted vm without metrics change", "std", deleteOutput.Message)
+	return nil
+}
+
+func (cli *Cli) AnkaMount(pluginCtx context.Context, vmName string, mountSpec string) error {
+	if pluginCtx.Err() != nil {
+		return fmt.Errorf("context canceled before AnkaMount")
+	}
+	mountOutput, err := cli.ExecuteParseJson(pluginCtx, "anka", "-j", "mount", vmName, mountSpec)
+	if err != nil {
+		return err
+	}
+	if mountOutput.Status != "OK" {
+		return fmt.Errorf("anka mount failed: %s", mountOutput.Message)
+	}
+	logging.Info(pluginCtx, "mounted host folder into guest vm", "vm", vmName, "mountSpec", mountSpec)
+	return nil
+}
+
 // ping the registry to see if it's up
 func (cli *Cli) AnkaRegistryRunning(pluginCtx context.Context) (bool, error) {
 	listOutput, err := cli.AnkaExecuteRegistryCommand(pluginCtx, "list")
@@ -575,6 +609,39 @@ func (cli *Cli) ObtainAnkaVM(
 		logging.Error(pluginCtx, "error executing anka start", "err", err)
 		return vm, err
 	}
+
+	loadedConfig, cfgErr := config.GetLoadedConfigFromContext(pluginCtx)
+	var globalHostToGuestFolderMounts []string
+	if cfgErr == nil {
+		globalHostToGuestFolderMounts = loadedConfig.GlobalHostToGuestFolderMounts
+	}
+	pluginInst, pluginErr := config.GetPluginFromContext(pluginCtx)
+	var pluginHostToGuestFolderMounts []string
+	if pluginErr == nil {
+		pluginHostToGuestFolderMounts = pluginInst.HostToGuestFolderMounts
+	}
+
+	mergedMounts, mergeErr := MergeHostToGuestFolderMountLists(globalHostToGuestFolderMounts, pluginHostToGuestFolderMounts)
+	if mergeErr != nil {
+		logging.Error(pluginCtx, "host-to-guest folder mount configuration invalid; deleting vm", "vm", vmName, "err", mergeErr)
+		delErr := cli.AnkaDeleteVMOnly(pluginCtx, vmName)
+		if delErr != nil {
+			logging.Error(pluginCtx, "error deleting vm after mount merge failure", "vm", vmName, "err", delErr)
+		}
+		return vm, fmt.Errorf("host-to-guest folder mounts: %w", mergeErr)
+	}
+	if len(mergedMounts) > 0 {
+		err = cli.mountHostToGuestFolders(pluginCtx, vmName, mergedMounts)
+		if err != nil {
+			logging.Error(pluginCtx, "host-to-guest folder mounts failed; deleting vm", "vm", vmName, "err", err)
+			delErr := cli.AnkaDeleteVMOnly(pluginCtx, vmName)
+			if delErr != nil {
+				logging.Error(pluginCtx, "error deleting vm after mount failure", "vm", vmName, "err", delErr)
+			}
+			return vm, fmt.Errorf("host-to-guest folder mounts: %w", err)
+		}
+	}
+
 	// increment total running VMs
 	metricsData, err := metrics.GetMetricsDataFromContext(workerCtx)
 	if err != nil {

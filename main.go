@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -546,6 +547,21 @@ func worker(
 					}
 					pluginCtx = context.WithValue(pluginCtx, config.ContextKey("ankacli"), ankaCLI)
 					logging.Dev(pluginCtx, "loaded the anka CLI")
+
+					if config.AnyHostToGuestFolderMountsConfigured(loadedConfig) {
+						if runtime.GOARCH == "amd64" {
+							logging.Error(pluginCtx, "host-to-guest folder mounts are configured but Anka does not support this on Intel macOS hosts (Apple Silicon only); see Anka 3.9.0 release notes")
+							pluginCancel()
+							workerCancel()
+							return
+						}
+						if err := anka.ValidateAnkaVersionForHostToGuestFolderMounts(ankaCLI.Version); err != nil {
+							logging.Error(pluginCtx, "mounting host folders into the guest VM requires Anka >= 3.9.0", "error", err, "ankaVersion", ankaCLI.Version)
+							pluginCancel()
+							workerCancel()
+							return
+						}
+					}
 
 					// Discover and populate existing templates in the TemplateTracker
 					// This only needs to be done once per system, so we check if templates are already populated
