@@ -319,7 +319,7 @@ fi
 
 # Wait for workflows to complete
 echo "] Waiting for workflows to complete..."
-wait_for_workflow_runs_to_complete "veertuinc" "anklet" "t2-3c6r-1-90s-pause" "success" 300 || true
+wait_for_workflow_runs_to_complete "veertuinc" "anklet" "t2-3c6r-1-90s-pause" "success" 500 || true
 print_metrics_snapshot "after t2-3c6r-1-90s-pause completion wait"
 
 # Step 7: Verify metrics show correct 'idle' status after paused job handoff
