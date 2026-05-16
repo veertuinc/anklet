@@ -124,7 +124,6 @@ func watchJobStatus(
 	logCounter := 0
 	alreadyLogged := false
 	jobStatusCheckIntervalSeconds := 10
-	firstLog := true
 	previousStatus := ""
 	previousConclusion := ""
 	previousRegistrationState := ""
@@ -246,12 +245,9 @@ func watchJobStatus(
 						"queue_payload", mainInProgressQueueJobJSON,
 					)
 					previousRegistrationState = "in_progress"
-				}
-				if logCounter%2 == 0 {
-					if firstLog {
-						logging.Info(pluginCtx, "job found registered runner and is now in progress", "job_id", *queuedJob.WorkflowJob.ID)
-						firstLog = false
-					}
+					logging.Info(pluginCtx, "job found registered runner and is now in progress", "job_id", *queuedJob.WorkflowJob.ID)
+				} else if logCounter%2 == 0 {
+					logging.Info(pluginCtx, "job found registered runner and is now in progress", "job_id", *queuedJob.WorkflowJob.ID)
 				}
 			} else {
 				if previousRegistrationState != "waiting" {
