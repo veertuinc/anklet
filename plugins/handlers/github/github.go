@@ -554,6 +554,7 @@ func checkForCompletedJobs(
 		existingJobString, err := databaseContainer.RetryLIndex(checkCtx, pluginQueueName, 0)
 		if err == redis.Nil || existingJobString == "" {
 			// logging.Debug(checkCtx, "checkForCompletedJobs -> no job found in pluginQueue")
+			pluginGlobals.ResetStillInProgressPollCount()
 		} else {
 			hasJob = true
 			// logging.Debug(checkCtx, "checkForCompletedJobs -> job found in pluginQueue")
@@ -618,8 +619,15 @@ func checkForCompletedJobs(
 					"run_count", pluginGlobals.GetCheckForCompletedJobsRunCount(),
 					"raw_payload", mainInProgressQueueJobJSON,
 				)
-				if pluginGlobals.GetCheckForCompletedJobsRunCount()%5 == 0 {
-					logging.Info(checkCtx, "job is still in progress", "run_count", pluginGlobals.GetCheckForCompletedJobsRunCount())
+				inProgressPollCount := pluginGlobals.IncrementStillInProgressPollCount()
+				// Use a per-streak counter so we log at least once soon after the job lands in
+				// mainInProgressQueue. The global CheckForCompletedJobsRunCount often skips
+				// multiples of 5 during short in_progress windows (flaky integration tests).
+				if inProgressPollCount%5 == 0 || inProgressPollCount == 1 {
+					logging.Info(checkCtx, "job is still in progress",
+						"run_count", pluginGlobals.GetCheckForCompletedJobsRunCount(),
+						"in_progress_poll_count", inProgressPollCount,
+					)
 				}
 				// fmt.Println(pluginConfig.Name, " checkForCompletedJobs -> job is in mainInProgressQueue", randomInt)
 				mainInProgressQueueJob, err, typeErr := database.Unwrap[internalGithub.QueueJob](mainInProgressQueueJobJSON)
@@ -632,6 +640,8 @@ func checkForCompletedJobs(
 				}
 				queuedJob.Action = "in_progress"
 				queuedJob.WorkflowJob.Status = github.Ptr("in_progress")
+			} else {
+				pluginGlobals.ResetStillInProgressPollCount()
 			}
 
 			var mainCompletedQueueJobJSON string
@@ -1211,6 +1221,7 @@ func Run(
 		ReturnToMainQueue:             make(chan string, 1),
 		PausedCancellationJobChannel:  make(chan internalGithub.QueueJob, 1),
 		CheckForCompletedJobsRunCount: 0, // atomic counter
+		StillInProgressPollCount:      0,
 		Unreturnable:                  false,
 	}
 	// TODO: replace this with workerGlobals
