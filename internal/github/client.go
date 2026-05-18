@@ -15,7 +15,6 @@ import (
 	"github.com/google/go-github/v74/github"
 	"github.com/veertuinc/anklet/internal/config"
 	"github.com/veertuinc/anklet/internal/logging"
-	"github.com/veertuinc/anklet/internal/metrics"
 )
 
 type GitHubClientWrapper struct {
@@ -141,39 +140,10 @@ func executeGitHubClientFunctionWithRetry[T any](
 			"limit", response.Rate.Limit,
 		)
 		if response.Rate.Remaining <= 10 { // handle primary rate limiting
-			sleepDuration := time.Until(response.Rate.Reset.Time) + time.Second // Adding a second to ensure we're past the reset time
-			logging.Warn(executeGitHubClientFunctionCtx, "GitHub API rate limit exceeded, sleeping until reset",
-				"sleepDuration", sleepDuration.String(),
-			)
-			// Metrics are stored on workerCtx, not pluginCtx (see main.go).
-			if metricsData, metricsErr := metrics.GetMetricsDataFromContext(workerCtx); metricsErr == nil {
-				if ctxPlugin, pluginErr := config.GetPluginFromContext(pluginCtx); pluginErr == nil {
-					if updateErr := metricsData.UpdatePlugin(workerCtx, pluginCtx, metrics.PluginBase{
-						Name:        ctxPlugin.Name,
-						Status:      "limit_paused",
-						StatusSince: time.Now(),
-					}); updateErr != nil {
-						logging.Error(workerCtx, "error updating plugin metrics to limit_paused", "error", updateErr)
-					}
-				}
+			if err := waitForGitHubAPIRateLimitReset(workerCtx, executeGitHubClientFunctionCtx, response.Rate.Reset.Time); err != nil {
+				return pluginCtx, nil, nil, err
 			}
-			select {
-			case <-time.After(sleepDuration):
-				if metricsData, metricsErr := metrics.GetMetricsDataFromContext(workerCtx); metricsErr == nil {
-					if ctxPlugin, pluginErr := config.GetPluginFromContext(pluginCtx); pluginErr == nil {
-						if updateErr := metricsData.UpdatePlugin(workerCtx, pluginCtx, metrics.PluginBase{
-							Name:        ctxPlugin.Name,
-							Status:      "running",
-							StatusSince: time.Now(),
-						}); updateErr != nil {
-							logging.Error(workerCtx, "error updating plugin metrics to running", "error", updateErr)
-						}
-					}
-				}
-				return executeGitHubClientFunctionWithRetry(workerCtx, executeGitHubClientFunctionCtx, executeFunc, retryAttempt) // Retry the function after waiting
-			case <-pluginCtx.Done():
-				return pluginCtx, nil, nil, pluginCtx.Err()
-			}
+			return executeGitHubClientFunctionWithRetry(workerCtx, executeGitHubClientFunctionCtx, executeFunc, retryAttempt) // Retry the function after waiting
 		}
 	}
 

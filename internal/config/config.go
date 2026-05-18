@@ -485,6 +485,10 @@ type Globals struct {
 	RunPluginsOnce bool
 	// block the second plugin until the first plugin is done
 	ReturnAllToMainQueue atomic.Bool
+	// GitHubAPIRateLimitResetUnix is the Unix time when the primary GitHub API rate limit resets (0 if not paused).
+	GitHubAPIRateLimitResetUnix atomic.Int64
+	// LastGitHubAPIRateLimitNoticeUnix throttles shared rate-limit log lines across handler plugins.
+	LastGitHubAPIRateLimitNoticeUnix atomic.Int64
 	PluginsPath          string
 	DebugEnabled         bool
 	// block other plugins from running until the currently running

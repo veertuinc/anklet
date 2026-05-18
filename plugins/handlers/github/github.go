@@ -1253,7 +1253,9 @@ func Run(
 	pluginCancel context.CancelFunc,
 ) (context.Context, error) {
 
-	logging.Info(pluginCtx, "starting github plugin")
+	if !internalGithub.LogGitHubAPIRateLimitStatusAtRunStart(workerCtx, pluginCtx) {
+		logging.Info(pluginCtx, "starting github plugin")
+	}
 
 	pluginConfig, err := config.GetPluginFromContext(pluginCtx)
 	if err != nil {
