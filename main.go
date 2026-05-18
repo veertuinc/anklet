@@ -561,6 +561,12 @@ func worker(
 							workerCancel()
 							return
 						}
+						if len(plugin.HostToGuestFolderMounts) > 0 {
+							logging.Info(pluginCtx, "plugin host-to-guest folder mounts configured", "mounts", plugin.HostToGuestFolderMounts)
+						}
+						if len(loadedConfig.GlobalHostToGuestFolderMounts) > 0 {
+							logging.Info(pluginCtx, "global host-to-guest folder mounts configured", "mounts", loadedConfig.GlobalHostToGuestFolderMounts)
+						}
 					}
 
 					// Discover and populate existing templates in the TemplateTracker

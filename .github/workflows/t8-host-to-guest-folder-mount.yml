@@ -15,7 +15,7 @@ jobs:
           ls -laht
           sw_vers
           hostname
-      - name: Verify host /tmp is mounted in guest
+      - name: Verify host folder is mounted in guest
         run: |
           set -eo pipefail
           MARKER_NAME=".anklet_ci_mount_probe"
@@ -24,10 +24,12 @@ jobs:
           MOUNT_DIR="/Volumes/My Shared Files/anklet_mount_test"
           MARKER_PATH="${MOUNT_DIR}/${MARKER_NAME}"
 
+          echo "Volumes on guest:"
+          ls -la "/Volumes/" || true
+          ls -la "/Volumes/My Shared Files/" 2>/dev/null || true
+
           if [[ ! -d "$MOUNT_DIR" ]]; then
             echo "Expected mount directory missing: ${MOUNT_DIR}"
-            ls -la "/Volumes/" || true
-            ls -la "/Volumes/My Shared Files/" 2>/dev/null || true
             exit 1
           fi
 

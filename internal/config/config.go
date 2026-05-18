@@ -376,6 +376,11 @@ func applyPluginEnvOverrides(plugin *Plugin, pluginEnvPrefix string) error {
 			continue
 		}
 
+		// Ignore empty values so unset env vars do not wipe YAML configuration.
+		if strings.TrimSpace(envValue) == "" {
+			continue
+		}
+
 		if err := setStructFieldByEnvKey(pluginValue, pluginType, suffix, envValue); err != nil {
 			return err
 		}

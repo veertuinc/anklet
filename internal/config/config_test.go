@@ -412,3 +412,18 @@ func TestApplyPluginEnvOverrides_HostToGuestFolderMountsSlice(t *testing.T) {
 		t.Errorf("HostToGuestFolderMounts = %v", plugin.HostToGuestFolderMounts)
 	}
 }
+
+func TestApplyPluginEnvOverrides_EmptyEnvDoesNotClearYAMLMounts(t *testing.T) {
+	t.Setenv("TEST_HANDLER_HOST_TO_GUEST_FOLDER_MOUNTS", "")
+	plugin := Plugin{
+		Name:                        "TEST_HANDLER",
+		HostToGuestFolderMounts:     []string{"/tmp/anklet_ci_mount_host:anklet_mount_test"},
+	}
+	err := applyPluginEnvOverrides(&plugin, "TEST_HANDLER")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plugin.HostToGuestFolderMounts) != 1 || plugin.HostToGuestFolderMounts[0] != "/tmp/anklet_ci_mount_host:anklet_mount_test" {
+		t.Errorf("empty env must not clear YAML HostToGuestFolderMounts, got %v", plugin.HostToGuestFolderMounts)
+	}
+}

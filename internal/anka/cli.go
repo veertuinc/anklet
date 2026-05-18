@@ -631,6 +631,7 @@ func (cli *Cli) ObtainAnkaVM(
 		return vm, fmt.Errorf("host-to-guest folder mounts: %w", mergeErr)
 	}
 	if len(mergedMounts) > 0 {
+		logging.Info(pluginCtx, "applying host-to-guest folder mounts to vm", "vm", vmName, "mounts", mergedMounts)
 		err = cli.mountHostToGuestFolders(pluginCtx, vmName, mergedMounts)
 		if err != nil {
 			logging.Error(pluginCtx, "host-to-guest folder mounts failed; deleting vm", "vm", vmName, "err", err)

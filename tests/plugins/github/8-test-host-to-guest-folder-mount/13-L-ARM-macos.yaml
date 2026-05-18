@@ -3,5 +3,5 @@ plugins:
   - name: GITHUB_HANDLER1
     plugin: github
     host_to_guest_folder_mounts:
-      # /tmp exists on macOS CI hosts; guest_folder_name must appear in logged mountSpec.
-      - "/tmp:anklet_mount_test"
+      # Dedicated host dir (not /tmp); guest_folder_name must appear in logged mountSpec.
+      - "/tmp/anklet_ci_mount_host:anklet_mount_test"
