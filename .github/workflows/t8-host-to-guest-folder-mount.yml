@@ -33,13 +33,18 @@ jobs:
             exit 1
           fi
 
+          echo "Contents of ${MOUNT_DIR}:"
+          ls -la "$MOUNT_DIR" || true
+
           if [[ ! -f "$MARKER_PATH" ]]; then
             echo "Marker missing under mount (expected ${MARKER_PATH})"
-            ls -la "$MOUNT_DIR"
             exit 1
           fi
 
-          IFS= read -r actual < "$MARKER_PATH"
+          if ! actual="$(<"$MARKER_PATH")"; then
+            echo "Failed to read marker at ${MARKER_PATH} (check permissions on host mount path)"
+            exit 1
+          fi
           if [[ "$actual" != "$EXPECTED_BODY" ]]; then
             echo "Marker content mismatch at ${MARKER_PATH}: expected '${EXPECTED_BODY}', got '${actual}'"
             exit 1

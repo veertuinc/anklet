@@ -55,7 +55,8 @@ assert_redis_key_exists "anklet/metrics/veertuinc/GITHUB_RECEIVER1"
 ############
 begin_test "t8-host-to-guest-folder-mount"
 echo "] Creating marker file on handler ${HOST_MOUNT_HOST_DIR}/${HOST_MOUNT_MARKER_FILENAME} (must appear inside guest via mount)..."
-ssh_to_host "handler-8-16" "rm -rf '${HOST_MOUNT_HOST_DIR}' && mkdir -p '${HOST_MOUNT_HOST_DIR}' && printf '%s' '${HOST_MOUNT_MARKER_BODY}' > '${HOST_MOUNT_HOST_DIR}/${HOST_MOUNT_MARKER_FILENAME}'"
+# World-readable marker: guest Actions runner (anka) must read host-owned mount contents.
+ssh_to_host "handler-8-16" "rm -rf '${HOST_MOUNT_HOST_DIR}' && mkdir -p '${HOST_MOUNT_HOST_DIR}' && printf '%s' '${HOST_MOUNT_MARKER_BODY}' > '${HOST_MOUNT_HOST_DIR}/${HOST_MOUNT_MARKER_FILENAME}' && chmod 755 '${HOST_MOUNT_HOST_DIR}' && chmod 644 '${HOST_MOUNT_HOST_DIR}/${HOST_MOUNT_MARKER_FILENAME}'"
 echo "] Verifying handler config includes host_to_guest_folder_mounts..."
 ssh_to_host "handler-8-16" "grep -q 'host_to_guest_folder_mounts' ~/.config/anklet/config.yml && grep -q 'anklet_ci_mount_host' ~/.config/anklet/config.yml"
 if run_workflow_and_get_logs "veertuinc" "anklet" "t8-host-to-guest-folder-mount" "success"; then
