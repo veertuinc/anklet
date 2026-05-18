@@ -155,6 +155,30 @@ func watchJobIsTerminal(status *string) bool {
 	return status != nil && (*status == "completed" || *status == "failed")
 }
 
+// syncJobInDBBeforeWatchComplete persists terminal job state when watchJobStatus exits.
+// UpdateJobInDB returns a non-nil completed error when the queue head is already
+// completed (e.g. checkForCompletedJobs updated it first); that is success, not failure.
+func syncJobInDBBeforeWatchComplete(
+	pluginCtx context.Context,
+	pluginQueueName string,
+	queuedJob *internalGithub.QueueJob,
+) error {
+	err, completed := internalGithub.UpdateJobInDB(pluginCtx, pluginQueueName, queuedJob)
+	if completed != nil {
+		logging.Debug(
+			pluginCtx,
+			"job already completed in DB before watchJobStatus exit",
+			"job_id", queuedJob.WorkflowJob.ID,
+		)
+		return nil
+	}
+	if err != nil {
+		logging.Error(pluginCtx, "error updating job in db before watch completion", "error", err)
+		return err
+	}
+	return nil
+}
+
 // watchJobStatus is the main loop that watches for job completion
 // It checks the plugin's queue for the job and then examines the status of the job, handling appropriately
 func watchJobStatus(
@@ -204,12 +228,8 @@ func watchJobStatus(
 				return pluginCtx, nil
 			}
 			if watchJobIsTerminal(chJob.WorkflowJob.Status) {
-				err, completed := internalGithub.UpdateJobInDB(pluginCtx, pluginQueueName, &chJob)
-				if completed != nil {
-					return pluginCtx, fmt.Errorf("job found completed in DB")
-				}
-				if err != nil {
-					logging.Error(pluginCtx, "error updating job in db before completion", "error", err)
+				if err := syncJobInDBBeforeWatchComplete(pluginCtx, pluginQueueName, &chJob); err != nil {
+					return pluginCtx, err
 				}
 				return handleWatchJobCompleted(workerCtx, pluginCtx, pluginConfig, chJob)
 			}
@@ -328,14 +348,16 @@ func watchJobStatus(
 				// after X seconds, check to see if the job has started in the in_progress queue
 				// if not, then the runner registration failed
 				if mainInProgressQueueJobJSON == "" {
+					if watchJobIsTerminal(queuedJob.WorkflowJob.Status) {
+						if err := syncJobInDBBeforeWatchComplete(pluginCtx, pluginQueueName, &queuedJob); err != nil {
+							return pluginCtx, err
+						}
+						return handleWatchJobCompleted(workerCtx, pluginCtx, pluginConfig, queuedJob)
+					}
 					logging.Error(pluginCtx, "waiting for runner registration timed out, will retry")
 					queuedJob.Action = "remove_self_hosted_runner" // required or removeSelfHostedRunner won't run
-					err, completed := internalGithub.UpdateJobInDB(pluginCtx, pluginQueueName, &queuedJob)
-					if completed != nil {
-						return pluginCtx, fmt.Errorf("job found completed in DB")
-					}
-					if err != nil {
-						logging.Error(pluginCtx, "error updating job in db", "error", err)
+					if err := syncJobInDBBeforeWatchComplete(pluginCtx, pluginQueueName, &queuedJob); err != nil {
+						return pluginCtx, err
 					}
 					pluginGlobals.RetryChannel <- "waiting_for_runner_registration_timed_out"
 					return pluginCtx, nil
