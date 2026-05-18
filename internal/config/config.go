@@ -308,6 +308,15 @@ func LoadInEnvs(config Config) (Config, error) {
 		}
 	}
 
+	for i := range config.Plugins {
+		if config.Plugins[i].PrivateKey == "" && config.GlobalPrivateKey != "" {
+			config.Plugins[i].PrivateKey = config.GlobalPrivateKey
+		}
+		if config.Plugins[i].Token == "" && config.GlobalToken != "" {
+			config.Plugins[i].Token = config.GlobalToken
+		}
+	}
+
 	// pidFileDir := os.Getenv("ANKLET_PID_FILE_DIR")
 	// if pidFileDir != "" {
 	// 	config.PidFileDir = pidFileDir
