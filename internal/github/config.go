@@ -20,8 +20,9 @@ type PluginGlobals struct {
 	JobChannel                    chan QueueJob // Used in the CheckForCompletedJobs to handle logic specific to the job
 	PausedCancellationJobChannel  chan QueueJob // If a job is paused on the host, getting a job in this channel cleans it up so another host can continue to handle it
 	ReturnToMainQueue             chan string   // Similar to the RetryChannel, but used to acually send the job back to the main queue
-	CheckForCompletedJobsRunCount int32         // atomic counter - Used to track how many times the CheckForCompletedJobs function has run so we can log every 5 runs the "job is still in progress" message
-	Unreturnable                  bool          // Used to prevent a job from being returned to the main queue if it's not returnable
+	CheckForCompletedJobsRunCount int32 // atomic counter: increments every CheckForCompletedJobs loop iteration (e.g. "checking for completed jobs" every 10th)
+	StillInProgressPollCount      int32 // atomic counter: consecutive polls where the active job is in mainInProgressQueue; resets when no job or job not in that queue — used for "job is still in progress" INFO logs
+	Unreturnable                  bool  // Used to prevent a job from being returned to the main queue if it's not returnable
 }
 
 func (p *PluginGlobals) SetUnreturnable(unreturnable bool) {
@@ -38,6 +39,14 @@ func (p *PluginGlobals) IncrementCheckForCompletedJobsRunCount() {
 
 func (p *PluginGlobals) GetCheckForCompletedJobsRunCount() int32 {
 	return atomic.LoadInt32(&p.CheckForCompletedJobsRunCount)
+}
+
+func (p *PluginGlobals) ResetStillInProgressPollCount() {
+	atomic.StoreInt32(&p.StillInProgressPollCount, 0)
+}
+
+func (p *PluginGlobals) IncrementStillInProgressPollCount() int32 {
+	return atomic.AddInt32(&p.StillInProgressPollCount, 1)
 }
 
 func (p *PluginGlobals) SetFirstCheckForCompletedJobsRan(ran bool) {

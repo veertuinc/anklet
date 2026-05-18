@@ -1,0 +1,45 @@
+name: 't8-host-to-guest-folder-mount'
+on:
+  workflow_dispatch:
+
+jobs:
+  t8-host-to-guest-folder-mount:
+    runs-on: [
+      "${{ github.run_id }}-${{ strategy.job-index }}",
+      "anka-template:84266873-da90-4e0d-903b-ed0233471f9f",
+      "anka-template-tag:6c14r",
+    ]
+    steps:
+      - uses: actions/checkout@v3
+      - run: |
+          ls -laht
+          sw_vers
+          hostname
+      - name: Verify host /tmp is mounted in guest
+        run: |
+          set -eo pipefail
+          MARKER_NAME=".anklet_ci_mount_probe"
+          EXPECTED_BODY="anklet-ci-mount-ok"
+          # Anka exposes host folder mounts under this volume (guest_folder_name is the last segment).
+          MOUNT_DIR="/Volumes/My Shared Files/anklet_mount_test"
+          MARKER_PATH="${MOUNT_DIR}/${MARKER_NAME}"
+
+          if [[ ! -d "$MOUNT_DIR" ]]; then
+            echo "Expected mount directory missing: ${MOUNT_DIR}"
+            ls -la "/Volumes/" || true
+            ls -la "/Volumes/My Shared Files/" 2>/dev/null || true
+            exit 1
+          fi
+
+          if [[ ! -f "$MARKER_PATH" ]]; then
+            echo "Marker missing under mount (expected ${MARKER_PATH})"
+            ls -la "$MOUNT_DIR"
+            exit 1
+          fi
+
+          IFS= read -r actual < "$MARKER_PATH"
+          if [[ "$actual" != "$EXPECTED_BODY" ]]; then
+            echo "Marker content mismatch at ${MARKER_PATH}: expected '${EXPECTED_BODY}', got '${actual}'"
+            exit 1
+          fi
+          echo "Host-to-guest mount OK: read '${EXPECTED_BODY}' from ${MARKER_PATH}"

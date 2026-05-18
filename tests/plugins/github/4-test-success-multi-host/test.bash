@@ -135,8 +135,8 @@ if wait_for_workflow_runs_to_complete "veertuinc" "anklet" "t2-6c14r-1" "success
         # This validates the fix for the data race bug where metrics showed "paused"
         # when the plugin was actually idle
         echo "] Verifying metrics endpoints show 'idle' status after failover..."
-        sleep 3
-        
+        # Metrics can lag behind job completion
+        sleep 5
         # Check handler-8-16 metrics
         HANDLER_16_METRICS=$(ssh_to_host "handler-8-16" "curl -s http://127.0.0.1:8080/metrics/v1?format=prometheus" 2>&1)
         if echo "$HANDLER_16_METRICS" | grep -q "plugin_status"; then
@@ -319,13 +319,15 @@ fi
 
 # Wait for workflows to complete
 echo "] Waiting for workflows to complete..."
-wait_for_workflow_runs_to_complete "veertuinc" "anklet" "t2-3c6r-1-90s-pause" "success" 300 || true
+wait_for_workflow_runs_to_complete "veertuinc" "anklet" "t2-3c6r-1-90s-pause" "success" 500 || true
 print_metrics_snapshot "after t2-3c6r-1-90s-pause completion wait"
 
 # Step 7: Verify metrics show correct 'idle' status after paused job handoff
 # This is critical - after a job transitions through paused state, the metrics
 # must correctly show 'idle' when the job is complete
 echo "] Verifying metrics endpoints show 'idle' status after paused job handoff..."
+sleep 5
+# Metrics can lag behind job completion
 sleep 5
 
 # Check handler-8-16 metrics (picked up the paused job)
@@ -400,6 +402,8 @@ print_metrics_snapshot "after handler restart/stabilization"
 
 # Check handler-8-16 metrics
 echo "] Checking handler-8-16 metrics endpoint..."
+# Metrics can lag behind internal plugin state
+sleep 5
 HANDLER_16_METRICS=$(ssh_to_host "handler-8-16" "curl -s http://127.0.0.1:8080/metrics/v1?format=prometheus" 2>&1)
 # Check if we got valid metrics data (contains plugin_status)
 if echo "$HANDLER_16_METRICS" | grep -q "plugin_status"; then

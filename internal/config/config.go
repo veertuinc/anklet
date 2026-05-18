@@ -41,6 +41,8 @@ type Config struct {
 	GlobalReceiverSecret             string   `yaml:"global_receiver_secret"`
 	GlobalTemplateDiskBuffer         float64  `yaml:"global_template_disk_buffer"` // Global disk buffer percentage (e.g., 10.0 for 10%)
 	GlobalSkipCPUAndMemoryResourceChecks bool `yaml:"global_skip_cpu_and_memory_resource_checks"` // Global override to skip CPU/RAM resource admission checks
+	// GlobalHostToGuestFolderMounts lists host folders mounted into each guest VM (host_path[:guest_folder_name]); requires Anka >= 3.9.0 on Apple Silicon.
+	GlobalHostToGuestFolderMounts []string `yaml:"global_host_to_guest_folder_mounts"`
 }
 
 type Log struct {
@@ -100,6 +102,8 @@ type Plugin struct {
 	TemplateDiskBuffer         float64  `yaml:"template_disk_buffer"` // Plugin-specific disk buffer percentage (e.g., 10.0 for 10%)
 	JobRetryAttempts           int      `yaml:"job_retry_attempts"`   // Maximum number of retry attempts for failed jobs
 	SkipCPUAndMemoryResourceChecks bool `yaml:"skip_cpu_and_memory_resource_checks"` // Skip CPU/RAM resource admission checks for this plugin
+	// HostToGuestFolderMounts adds host folders mounted into guests for this plugin’s VMs, merged with global_host_to_guest_folder_mounts; requires Anka >= 3.9.0 on Apple Silicon.
+	HostToGuestFolderMounts []string `yaml:"host_to_guest_folder_mounts"`
 }
 
 // GetQueueOwner returns QueueName if set, otherwise returns Owner.
@@ -109,6 +113,19 @@ func (p Plugin) GetQueueOwner() string {
 		return p.QueueName
 	}
 	return p.Owner
+}
+
+// AnyHostToGuestFolderMountsConfigured reports whether any global or per-plugin host-to-guest folder mounts are set.
+func AnyHostToGuestFolderMountsConfigured(cfg Config) bool {
+	if len(cfg.GlobalHostToGuestFolderMounts) > 0 {
+		return true
+	}
+	for i := range cfg.Plugins {
+		if len(cfg.Plugins[i].HostToGuestFolderMounts) > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func LoadConfig(configPath string) (Config, error) {
@@ -257,6 +274,18 @@ func LoadInEnvs(config Config) (Config, error) {
 		config.GlobalSkipCPUAndMemoryResourceChecks = envGlobalSkipCPUAndMemoryResourceChecks == "true"
 	}
 
+	envGlobalHostToGuestFolderMounts := os.Getenv("ANKLET_GLOBAL_HOST_TO_GUEST_FOLDER_MOUNTS")
+	if envGlobalHostToGuestFolderMounts != "" {
+		var entries []string
+		for _, part := range strings.Split(envGlobalHostToGuestFolderMounts, ",") {
+			trimmed := strings.TrimSpace(part)
+			if trimmed != "" {
+				entries = append(entries, trimmed)
+			}
+		}
+		config.GlobalHostToGuestFolderMounts = entries
+	}
+
 	envJobRetryAttempts := os.Getenv("ANKLET_JOB_RETRY_ATTEMPTS")
 	if envJobRetryAttempts != "" {
 		attempts, err := strconv.Atoi(envJobRetryAttempts)
@@ -276,6 +305,15 @@ func LoadInEnvs(config Config) (Config, error) {
 		}
 		if err := applyPluginEnvOverrides(&config.Plugins[i], pluginEnvPrefix); err != nil {
 			return Config{}, err
+		}
+	}
+
+	for i := range config.Plugins {
+		if config.Plugins[i].PrivateKey == "" && config.GlobalPrivateKey != "" {
+			config.Plugins[i].PrivateKey = config.GlobalPrivateKey
+		}
+		if config.Plugins[i].Token == "" && config.GlobalToken != "" {
+			config.Plugins[i].Token = config.GlobalToken
 		}
 	}
 
@@ -395,6 +433,17 @@ func setValueFromString(fieldValue reflect.Value, rawValue string) error {
 			return err
 		}
 		fieldValue.SetFloat(parsed)
+	case reflect.Slice:
+		if fieldValue.Type().Elem().Kind() != reflect.String {
+			return fmt.Errorf("unsupported slice field type for env override")
+		}
+		var parts []string
+		for _, part := range strings.Split(rawValue, ",") {
+			if trimmed := strings.TrimSpace(part); trimmed != "" {
+				parts = append(parts, trimmed)
+			}
+		}
+		fieldValue.Set(reflect.ValueOf(parts))
 	}
 	return nil
 }
@@ -436,6 +485,10 @@ type Globals struct {
 	RunPluginsOnce bool
 	// block the second plugin until the first plugin is done
 	ReturnAllToMainQueue atomic.Bool
+	// GitHubAPIRateLimitResetUnix is the Unix time when the primary GitHub API rate limit resets (0 if not paused).
+	GitHubAPIRateLimitResetUnix atomic.Int64
+	// LastGitHubAPIRateLimitNoticeUnix throttles shared rate-limit log lines across handler plugins.
+	LastGitHubAPIRateLimitNoticeUnix atomic.Int64
 	PluginsPath          string
 	DebugEnabled         bool
 	// block other plugins from running until the currently running

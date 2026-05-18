@@ -1,0 +1,12 @@
+description: "Github Actions host-to-guest folder mount tests"
+tests:
+    - name: "Host-to-guest folder mount test"
+      hosts:
+        - name: "receiver"
+          id: "ubuntu-22.04-linux"
+          config: ubuntu-22.04-linux.yaml
+          tester: true
+
+        - name: "handler-8-16"
+          id: "13-L-ARM-macos"
+          config: 13-L-ARM-macos.yaml
