@@ -1,15 +1,20 @@
 #!/usr/bin/env bash
-# Usage: ./cli-test.bash [test_name]
+# Usage: ./tests/cli-tests/run.bash [test_name]
 # If test_name is provided, run only that test. Otherwise, run all tests.
 # Available test names: empty, no-log-directory, no-plugins, no-plugin-name,
 #                      non-existent-plugin, no-db, capacity, start-stop
-set -exo pipefail
+set -eo pipefail
 TESTS_DIR=$(cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd)
-cd $TESTS_DIR/.. # make sure we're in the root
+ROOT_DIR=$(cd "${TESTS_DIR}/../.." && pwd)
+cd "${ROOT_DIR}"
 
 TEST_VM_ID="84266873-da90-4e0d-903b-ed0233471f9f"
 TEST_VM_NAME="${TEST_VM_ID}"
 TEST_FAILED=0
+TEST_ASSERTION_FAILED=0
+LAST_TEST_FAILURE=""
+PASSED_TESTS=()
+FAILED_TESTS=()
 LAST_COMMAND=""
 LAST_COMMAND_OUTPUT=""
 
@@ -23,6 +28,7 @@ on_error() {
     echo "  Line: $line_no"
     if [[ -n "$LAST_COMMAND" ]]; then
         echo "  Command: $LAST_COMMAND"
+        LAST_TEST_FAILURE="command failed: $LAST_COMMAND (exit $exit_code)"
     fi
     if [[ -n "$LAST_COMMAND_OUTPUT" ]]; then
         echo "  Output: $LAST_COMMAND_OUTPUT"
@@ -77,6 +83,14 @@ if ! anka version &> /dev/null; then
     echo "ERROR: Anka CLI not found"
     exit 1
 fi
+
+ANKLET_PRIVATE_KEY="${HOME}/anklet-private-key.pem"
+if [[ ! -f "${ANKLET_PRIVATE_KEY}" ]]; then
+    echo "ERROR: GitHub app private key not found at ${ANKLET_PRIVATE_KEY}"
+    exit 1
+fi
+ln -sf "${ANKLET_PRIVATE_KEY}" /tmp/private-key.pem
+
 detect_registry_url() {
     if [[ -n "${ANKA_REGISTRY_URL:-}" ]]; then
         echo "${ANKA_REGISTRY_URL}"
@@ -168,6 +182,7 @@ cleanup() {
     pwd
     echo "] Cleaning up..."
     rm -rf dist || true
+    rm -f /tmp/private-key.pem || true
     rm -f ~/.config/anklet/config.yml || true
     mv ~/.config/anklet/config.yml.bak ~/.config/anklet/config.yml &> /dev/null || true
     anka delete --yes "${TEST_VM_NAME}-1" &> /dev/null || true
@@ -179,24 +194,48 @@ trap cleanup EXIT
 log_contains() {
     local LOG_FILE="/tmp/${TEST_NAME}.log"
     if grep "$1" "$LOG_FILE" &> /dev/null; then
-        echo "  - SUCCESS: Log contains '$1'"
+        echo "    PASS: log contains '$1'"
     else
-        echo "  - ERROR: Log does not contain '$1'"
-        echo "Open the log file to see the full output: $LOG_FILE"
+        echo "    FAIL: log does not contain '$1'"
+        echo "          log: $LOG_FILE"
+        TEST_ASSERTION_FAILED=1
+        LAST_TEST_FAILURE="log does not contain '$1'"
         TEST_FAILED=1
-        exit 1
+        return 1
     fi
 }
 
 log_does_not_contain() {
     local LOG_FILE="/tmp/${TEST_NAME}.log"
     if ! grep "$1" "$LOG_FILE" &> /dev/null; then
-        echo "  - SUCCESS: Log does not contain '$1'"
+        echo "    PASS: log does not contain '$1'"
     else
-        echo "  - ERROR: Log contains '$1'"
-        echo "Open the log file to see the full output: $LOG_FILE"
+        echo "    FAIL: log contains '$1'"
+        echo "          log: $LOG_FILE"
+        TEST_ASSERTION_FAILED=1
+        LAST_TEST_FAILURE="log contains '$1'"
         TEST_FAILED=1
-        exit 1
+        return 1
+    fi
+}
+
+log_contains_at_least() {
+    local min_count=$1
+    local pattern=$2
+    local LOG_FILE="/tmp/${TEST_NAME}.log"
+    local count
+    count=$(grep -c "$pattern" "$LOG_FILE" 2>/dev/null || true)
+    count=${count:-0}
+
+    if [[ "${count}" -ge "${min_count}" ]]; then
+        echo "    PASS: log contains '${pattern}' at least ${min_count} time(s) (found ${count})"
+    else
+        echo "    FAIL: log contains '${pattern}' only ${count} time(s), expected at least ${min_count}"
+        echo "          log: $LOG_FILE"
+        TEST_ASSERTION_FAILED=1
+        LAST_TEST_FAILURE="log contains '${pattern}' only ${count} time(s), expected at least ${min_count}"
+        TEST_FAILED=1
+        return 1
     fi
 }
 
@@ -222,8 +261,99 @@ run_test() {
     fi
     # Wait for process to exit before checking logs
     wait $BINARY_PID 2>/dev/null || true
+    TEST_ASSERTION_FAILED=0
+    set +e
     eval "${TESTS}"
+    set -e
     rm -f ~/.config/anklet/config.yml
+
+    if [[ "${TEST_ASSERTION_FAILED}" -eq 1 ]]; then
+        return 1
+    fi
+    return 0
+}
+
+record_test_result() {
+    local test_name=$1
+    local status=$2
+
+    echo ""
+    if [[ "${status}" == "pass" ]]; then
+        PASSED_TESTS+=("${test_name}")
+        echo "========================================="
+        echo "PASS: ${test_name}"
+        echo "========================================="
+    else
+        FAILED_TESTS+=("${test_name}")
+        echo "========================================="
+        echo "FAIL: ${test_name}"
+        if [[ -n "${LAST_TEST_FAILURE}" ]]; then
+            echo "  ${LAST_TEST_FAILURE}"
+        fi
+        echo "========================================="
+    fi
+}
+
+run_test_case_with_result() {
+    local test_name=$1
+    local test_rc=0
+
+    echo ""
+    echo "-----------------------------------------"
+    echo "TEST: ${test_name}"
+    echo "-----------------------------------------"
+
+    LAST_TEST_FAILURE=""
+    set +e
+    run_test_case "${test_name}"
+    test_rc=$?
+    set -e
+
+    if [[ "${test_rc}" -eq 0 ]]; then
+        record_test_result "${test_name}" pass
+    else
+        if [[ -z "${LAST_TEST_FAILURE}" ]]; then
+            LAST_TEST_FAILURE="test case exited with status ${test_rc}"
+        fi
+        record_test_result "${test_name}" fail
+    fi
+
+    return 0
+}
+
+print_test_summary() {
+    local total=$(( ${#PASSED_TESTS[@]} + ${#FAILED_TESTS[@]} ))
+
+    echo ""
+    echo "========================================="
+    echo "CLI TEST SUMMARY (${total} total)"
+    echo "========================================="
+
+    if [[ ${#PASSED_TESTS[@]} -gt 0 ]]; then
+        echo "Passed (${#PASSED_TESTS[@]}):"
+        local test_name
+        for test_name in "${PASSED_TESTS[@]}"; do
+            echo "  PASS  ${test_name}"
+        done
+    fi
+
+    if [[ ${#FAILED_TESTS[@]} -gt 0 ]]; then
+        if [[ ${#PASSED_TESTS[@]} -gt 0 ]]; then
+            echo ""
+        fi
+        echo "Failed (${#FAILED_TESTS[@]}):"
+        for test_name in "${FAILED_TESTS[@]}"; do
+            echo "  FAIL  ${test_name}"
+        done
+    fi
+
+    echo "========================================="
+    if [[ ${#FAILED_TESTS[@]} -gt 0 ]]; then
+        echo "RESULT: FAILED (${#FAILED_TESTS[@]} of ${total})"
+        return 1
+    fi
+    echo "RESULT: PASSED (${total}/${total})"
+    return 0
 }
 
 run_test_case() {
@@ -270,7 +400,7 @@ TESTS
     log_contains "ERROR"
     log_contains "plugin not supported"
     log_contains "\"name\":\"RUNNER1\""
-    log_contains "\"name\":\"RUNNER2\""
+    log_contains "\"Name\":\"RUNNER2\""
     log_contains "anklet (and all plugins) shut down"
 TESTS
             ;;
@@ -288,9 +418,10 @@ TESTS
             run_cmd anka start "${TEST_VM_NAME}-1"
             run_cmd anka clone "${TEST_VM_NAME}" "${TEST_VM_NAME}-2"
             run_cmd anka start "${TEST_VM_NAME}-2"
-            run_test cli-test-capacity.yml 20 <<TESTS
-    log_contains "ERROR"
-    log_contains "host does not have vm capacity"
+            run_test cli-test-capacity.yml 25 <<TESTS
+    log_does_not_contain "ERROR"
+    log_contains_at_least 2 "host does not have vm capacity"
+    log_contains_at_least 2 "starting github plugin"
     log_contains "anklet (and all plugins) shut down"
 TESTS
             run_cmd anka delete --yes "${TEST_VM_NAME}-1"
@@ -315,15 +446,14 @@ TESTS
 
 run_single_test() {
     local test_name=$1
-    run_test_case "$test_name"
+    run_test_case_with_result "$test_name"
 }
 
-# Binary is pre-built and copied by run.bash
 BINARY="/tmp/anklet"
-if [[ ! -x "$BINARY" ]]; then
-    echo "ERROR: Binary not found at $BINARY (should be built by run.bash)"
-    exit 1
-fi
+echo "] Building binary..."
+VERSION="$(cat VERSION)"
+go build -ldflags "-X main.version=${VERSION}" -o "${BINARY}" .
+chmod +x "${BINARY}"
 echo "] Using binary: $BINARY"
 
 # Run tests based on the SINGLE_TEST variable
@@ -332,12 +462,15 @@ if [[ -n "$SINGLE_TEST" ]]; then
 else
     echo "] Running all tests..."
 
-    run_test_case "empty"
-    run_test_case "no-log-directory"
-    run_test_case "no-plugins"
-    run_test_case "no-plugin-name"
-    run_test_case "non-existent-plugin"
-    run_test_case "no-db"
-    run_test_case "capacity"
-    run_test_case "start-stop"
+    run_test_case_with_result "empty"
+    run_test_case_with_result "no-log-directory"
+    run_test_case_with_result "no-plugins"
+    run_test_case_with_result "no-plugin-name"
+    run_test_case_with_result "non-existent-plugin"
+    run_test_case_with_result "no-db"
+    run_test_case_with_result "capacity"
+    run_test_case_with_result "start-stop"
 fi
+
+print_test_summary
+exit $?

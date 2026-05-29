@@ -819,13 +819,13 @@ Tests are located in the `tests/` directory and are organized into two categorie
 CLI tests validate Anklet's startup behavior, configuration parsing, and error handling. Run all CLI tests with:
 
 ```bash
-./tests/cli-test.bash
+./tests/cli-tests/run.bash
 ```
 
 Or run a specific test:
 
 ```bash
-./tests/cli-test.bash start-stop
+./tests/cli-tests/run.bash start-stop
 ```
 
 **Available CLI tests:**
