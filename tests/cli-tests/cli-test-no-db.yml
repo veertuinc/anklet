@@ -1,5 +1,5 @@
 ---
-global_private_key: /tmp/private-key.pem
+global_private_key: /tmp/secrets-core/anklet-private-key.pem
 plugins:
   - name: RUNNER1
     plugin: github

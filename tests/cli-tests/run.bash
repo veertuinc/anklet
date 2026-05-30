@@ -85,15 +85,17 @@ if ! anka version &> /dev/null; then
 fi
 
 SECRETS_DIR="${SECRETS_DIR:-/tmp/secrets-core}"
-ANKLET_PRIVATE_KEY="${ANKLET_PRIVATE_KEY_PATH:-${SECRETS_DIR}/anklet-private-key.pem}"
+ANKLET_PRIVATE_KEY="${SECRETS_DIR}/anklet-private-key.pem"
+mkdir -p "${SECRETS_DIR}"
 if [[ ! -f "${ANKLET_PRIVATE_KEY}" ]]; then
-    ANKLET_PRIVATE_KEY="${HOME}/anklet-private-key.pem"
+    if [[ -f "${HOME}/anklet-private-key.pem" ]]; then
+        cp -f "${HOME}/anklet-private-key.pem" "${ANKLET_PRIVATE_KEY}"
+    else
+        echo "ERROR: GitHub app private key not found at ${ANKLET_PRIVATE_KEY}"
+        echo "Copy your GitHub App key to ${ANKLET_PRIVATE_KEY} or ${HOME}/anklet-private-key.pem"
+        exit 1
+    fi
 fi
-if [[ ! -f "${ANKLET_PRIVATE_KEY}" ]]; then
-    echo "ERROR: GitHub app private key not found at ${SECRETS_DIR}/anklet-private-key.pem or ${HOME}/anklet-private-key.pem"
-    exit 1
-fi
-ln -sf "${ANKLET_PRIVATE_KEY}" /tmp/private-key.pem
 
 detect_registry_url() {
     if [[ -n "${ANKA_REGISTRY_URL:-}" ]]; then
@@ -187,7 +189,6 @@ cleanup() {
     pwd
     echo "] Cleaning up..."
     rm -rf dist || true
-    rm -f /tmp/private-key.pem || true
     rm -f ~/.config/anklet/config.yml || true
     mv ~/.config/anklet/config.yml.bak ~/.config/anklet/config.yml &> /dev/null || true
     anka delete --yes "${TEST_VM_NAME}-1" &> /dev/null || true
