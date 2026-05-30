@@ -129,13 +129,14 @@ resolve_template_name_from_registry() {
         return 1
     fi
 
-    if command -v python3 >/dev/null 2>&1; then
-        vm_name="$(python3 - <<'PY'
-import json,sys
-data=json.load(sys.stdin)
-print(data.get("name",""))
-PY
-<<< "${vm_json}")"
+    if command -v jq >/dev/null 2>&1; then
+        vm_name="$(echo "${vm_json}" | jq -r '.name // empty' 2>/dev/null)"
+    elif command -v python3 >/dev/null 2>&1; then
+        vm_name="$(echo "${vm_json}" | python3 -c 'import json,sys
+try:
+    print(json.load(sys.stdin).get("name", ""))
+except (json.JSONDecodeError, ValueError):
+    pass' 2>/dev/null)"
     fi
 
     if [[ -z "${vm_name}" ]]; then
