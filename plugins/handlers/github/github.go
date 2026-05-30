@@ -18,6 +18,7 @@ import (
 	internalAnka "github.com/veertuinc/anklet/internal/anka"
 	"github.com/veertuinc/anklet/internal/config"
 	"github.com/veertuinc/anklet/internal/database"
+	"github.com/veertuinc/anklet/internal/drain"
 	internalGithub "github.com/veertuinc/anklet/internal/github"
 	"github.com/veertuinc/anklet/internal/logging"
 	"github.com/veertuinc/anklet/internal/metrics"
@@ -1469,6 +1470,20 @@ func Run(
 		// logging.Warn(pluginCtx, "context canceled before completed job found")
 		return pluginCtx, nil
 	default:
+	}
+
+	// Reject new jobs (but keep anklet running) when the host is draining.
+	// Operators create the drain file to free VM capacity for manual work
+	// (e.g. building templates/images) without stopping anklet entirely.
+	// In-progress jobs handled earlier in Run() still finish and clean up.
+	if drain.IsDraining() {
+		drainFilePath, _ := drain.DrainFilePath()
+		logging.Warn(pluginCtx, "drain file present; not picking up new jobs", "path", drainFilePath)
+		if err := metricsData.SetStatus(pluginCtx, "draining"); err != nil {
+			logging.Error(pluginCtx, "error setting plugin status", "error", err)
+		}
+		pluginGlobals.JobChannel <- internalGithub.QueueJob{Action: "finish"}
+		return pluginCtx, nil
 	}
 
 	// Reject new jobs (but keep anklet running) when the host is at VM capacity.

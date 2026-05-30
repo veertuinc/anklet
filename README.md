@@ -673,6 +673,32 @@ Important metrics are:
 
 ---
 
+## Draining a host
+
+Sometimes you need to use an Anklet host for VM work outside of Anklet (for example, building a new template/image). Because Apple's SLA limits a host to **2 running VMs at a time**, Anklet handlers competing for that capacity can cause `more than 2 VMs are running` failures.
+
+To temporarily stop handlers on a host from picking up **new** jobs without stopping Anklet, create the **drain file**:
+
+```bash
+touch ~/.config/anklet/.drain
+```
+
+While the drain file exists:
+
+- Handler plugins on that host stop claiming new jobs and report a `draining` status in metrics. The log shows `drain file present; not picking up new jobs`.
+- Jobs already in progress continue to run and clean up normally, so VM capacity drains naturally.
+- Receiver plugins are unaffected and keep queuing jobs in Redis; those jobs are picked up once you resume.
+
+Once capacity is free, do your manual VM work. To resume normal operation, remove the file:
+
+```bash
+rm ~/.config/anklet/.drain
+```
+
+Handlers pick up jobs again on their next loop iteration. No restart required.
+
+---
+
 ## Upgrading
 
 ### For AWS EC2 Mac (using the Cloud Connect [`ANKA_EXECUTE_SCRIPT`](https://docs.veertu.com/anka/aws-ec2-mac/#anka_execute_script-string))
