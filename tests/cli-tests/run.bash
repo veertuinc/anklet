@@ -441,7 +441,9 @@ TESTS
             run_cmd anka start "${TEST_VM_NAME}-1"
             run_cmd anka clone "${TEST_VM_NAME}" "${TEST_VM_NAME}-2"
             run_cmd anka start "${TEST_VM_NAME}-2"
-            run_test cli-test-capacity.yml 30 <<TESTS
+            # First plugin run skips capacity checks (~20s). Need 2 post-init cycles
+            # (sleep_interval 5s) before SIGINT, so 30s was too short by ~1s.
+            run_test cli-test-capacity.yml 40 <<TESTS
     log_does_not_contain "ERROR"
     log_contains_at_least 2 "host does not have vm capacity"
     log_contains_at_least 2 "starting github plugin"
