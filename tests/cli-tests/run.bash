@@ -84,9 +84,13 @@ if ! anka version &> /dev/null; then
     exit 1
 fi
 
-ANKLET_PRIVATE_KEY="${HOME}/anklet-private-key.pem"
+SECRETS_DIR="${SECRETS_DIR:-/tmp/secrets-core}"
+ANKLET_PRIVATE_KEY="${ANKLET_PRIVATE_KEY_PATH:-${SECRETS_DIR}/anklet-private-key.pem}"
 if [[ ! -f "${ANKLET_PRIVATE_KEY}" ]]; then
-    echo "ERROR: GitHub app private key not found at ${ANKLET_PRIVATE_KEY}"
+    ANKLET_PRIVATE_KEY="${HOME}/anklet-private-key.pem"
+fi
+if [[ ! -f "${ANKLET_PRIVATE_KEY}" ]]; then
+    echo "ERROR: GitHub app private key not found at ${SECRETS_DIR}/anklet-private-key.pem or ${HOME}/anklet-private-key.pem"
     exit 1
 fi
 ln -sf "${ANKLET_PRIVATE_KEY}" /tmp/private-key.pem
