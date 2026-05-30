@@ -451,10 +451,17 @@ run_single_test() {
 }
 
 BINARY="/tmp/anklet"
-echo "] Building binary..."
-VERSION="$(cat VERSION)"
-go build -ldflags "-X main.version=${VERSION}" -o "${BINARY}" .
-chmod +x "${BINARY}"
+if [[ -f "main.go" ]] && [[ -f "VERSION" ]]; then
+    echo "] Building binary..."
+    VERSION="$(cat VERSION)"
+    go build -ldflags "-X main.version=${VERSION}" -o "${BINARY}" .
+    chmod +x "${BINARY}"
+elif [[ -x "${BINARY}" ]]; then
+    echo "] Using pre-built binary: ${BINARY}"
+else
+    echo "ERROR: No anklet binary at ${BINARY} and cannot build from source (missing main.go or VERSION)" >&2
+    exit 1
+fi
 echo "] Using binary: $BINARY"
 
 # Run tests based on the SINGLE_TEST variable
