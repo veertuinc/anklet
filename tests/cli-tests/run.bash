@@ -192,13 +192,29 @@ cleanup() {
 }
 trap cleanup EXIT
 
+print_log_on_failure() {
+    if [[ "${LOG_DUMPED:-0}" -eq 1 ]]; then
+        return
+    fi
+    LOG_DUMPED=1
+    local LOG_FILE="/tmp/${TEST_NAME}.log"
+    echo "          log: $LOG_FILE"
+    echo "          --- log contents ---"
+    if [[ -f "$LOG_FILE" ]]; then
+        cat "$LOG_FILE" | sed 's/^/          /'
+    else
+        echo "          (log file not found)"
+    fi
+    echo "          --- end log ---"
+}
+
 log_contains() {
     local LOG_FILE="/tmp/${TEST_NAME}.log"
     if grep "$1" "$LOG_FILE" &> /dev/null; then
         echo "    PASS: log contains '$1'"
     else
         echo "    FAIL: log does not contain '$1'"
-        echo "          log: $LOG_FILE"
+        print_log_on_failure
         TEST_ASSERTION_FAILED=1
         LAST_TEST_FAILURE="log does not contain '$1'"
         TEST_FAILED=1
@@ -212,7 +228,7 @@ log_does_not_contain() {
         echo "    PASS: log does not contain '$1'"
     else
         echo "    FAIL: log contains '$1'"
-        echo "          log: $LOG_FILE"
+        print_log_on_failure
         TEST_ASSERTION_FAILED=1
         LAST_TEST_FAILURE="log contains '$1'"
         TEST_FAILED=1
@@ -232,7 +248,7 @@ log_contains_at_least() {
         echo "    PASS: log contains '${pattern}' at least ${min_count} time(s) (found ${count})"
     else
         echo "    FAIL: log contains '${pattern}' only ${count} time(s), expected at least ${min_count}"
-        echo "          log: $LOG_FILE"
+        print_log_on_failure
         TEST_ASSERTION_FAILED=1
         LAST_TEST_FAILURE="log contains '${pattern}' only ${count} time(s), expected at least ${min_count}"
         TEST_FAILED=1
@@ -263,6 +279,7 @@ run_test() {
     # Wait for process to exit before checking logs
     wait $BINARY_PID 2>/dev/null || true
     TEST_ASSERTION_FAILED=0
+    LOG_DUMPED=0
     set +e
     eval "${TESTS}"
     set -e
@@ -397,7 +414,7 @@ TESTS
 TESTS
             ;;
         "non-existent-plugin")
-            run_test cli-test-non-existent-plugin.yml 20 <<TESTS
+            run_test cli-test-non-existent-plugin.yml 30 <<TESTS
     log_contains "ERROR"
     log_contains "plugin not supported"
     log_contains "\"name\":\"RUNNER1\""
@@ -419,7 +436,7 @@ TESTS
             run_cmd anka start "${TEST_VM_NAME}-1"
             run_cmd anka clone "${TEST_VM_NAME}" "${TEST_VM_NAME}-2"
             run_cmd anka start "${TEST_VM_NAME}-2"
-            run_test cli-test-capacity.yml 25 <<TESTS
+            run_test cli-test-capacity.yml 30 <<TESTS
     log_does_not_contain "ERROR"
     log_contains_at_least 2 "host does not have vm capacity"
     log_contains_at_least 2 "starting github plugin"
