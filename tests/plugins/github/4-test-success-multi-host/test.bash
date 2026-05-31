@@ -221,6 +221,12 @@ print_metrics_snapshot "start different-sized-templates-paused-job-handoff"
 echo "] Stopping handler-8-16 for this test..."
 stop_anklet_on_host "handler-8-16" || true
 sleep 5
+if ssh_to_host "handler-8-16" "pgrep -f '^/tmp/anklet\$' > /dev/null" 2>/dev/null; then
+    echo "] ERROR: handler-8-16 is still running after stop"
+    record_fail "handler-8-16 still running after stop"
+    end_test
+    exit 1
+fi
 print_metrics_snapshot "after stopping handler-8-16"
 
 # Verify handler-8-8 is still running (it should be from previous tests)
@@ -258,8 +264,36 @@ done
 echo "] ✓ handler-8-8 picked up a job"
 print_metrics_snapshot "after handler-8-8 picked up paused-handoff workload"
 
-# need some time for the job to be picked up by handler-8-8 and the next job to be paused
-sleep 10
+# Wait for handler-8-8 to pause the second job before starting handler-8-16.
+# VmHasEnoughResources only counts running VMs, and HANDLER2 cannot run while
+# HANDLER1 is preparing. If handler-8-16 starts too early it steals job 2 from
+# the main queue instead of picking it up from the paused queue.
+echo "] Waiting for handler-8-8 to pause the second job..."
+wait_elapsed=0
+wait_timeout=240
+wait_interval=5
+handler_8_8_paused_second_job=false
+while [[ "${handler_8_8_paused_second_job}" != "true" ]]; do
+    if check_remote_log_contains "handler-8-8" "pushed job to paused queue"; then
+        handler_8_8_paused_second_job=true
+        break
+    fi
+    if check_remote_log_contains "handler-8-8" "cannot run vm yet, waiting for enough resources to be available"; then
+        handler_8_8_paused_second_job=true
+        break
+    fi
+    sleep $wait_interval
+    wait_elapsed=$((wait_elapsed + wait_interval))
+    if [[ $wait_elapsed -ge $wait_timeout ]]; then
+        echo "] ERROR: handler-8-8 did not pause second job within ${wait_timeout}s"
+        record_fail "handler-8-8 did not pause second job within timeout"
+        end_test
+        exit 1
+    fi
+    echo "]] Still waiting for handler-8-8 to pause second job... (${wait_elapsed}s/${wait_timeout}s)"
+done
+echo "] ✓ handler-8-8 paused the second job after ${wait_elapsed}s"
+print_metrics_snapshot "after handler-8-8 paused second job"
 
 # Step 3: Start handler-8-16 (13-L-ARM config)
 echo "] Starting handler-8-16 (should pick up paused job)..."
@@ -268,10 +302,10 @@ sleep 5
 assert_redis_key_exists "anklet/metrics/veertuinc/GITHUB_HANDLER_13_L_ARM_MACOS"
 print_metrics_snapshot "after starting handler-8-16 for paused-handoff test"
 
-# Step 4: Wait for handler-8-16 to pick up the paused job (poll with 5 min timeout)
+# Step 4: Wait for handler-8-16 to pick up the paused job (poll with 3 min timeout)
 echo "] Waiting for handler-8-16 to pick up paused job..."
 wait_elapsed=0
-wait_timeout=60  # 5 minutes
+wait_timeout=180
 wait_interval=10
 while ! check_remote_log_contains "handler-8-16" "paused job found to run"; do
     sleep $wait_interval
