@@ -78,23 +78,7 @@ If your plugin uses the Anka CLI to create VMs, Anklet handles VM [Templates/Tag
 
 #### Host-to-guest folder mounts
 
-Expose folders from the **host Mac** inside **handler VMs** (Apple Silicon only). Requires **Anka ≥ 3.9**; see Veertu’s [host directory mounts](https://docs.veertu.com/anka/whats-new/anka-3.9.0/#ability-to-mount-host-directories-inside-of-the-vm). Not supported on Intel hosts; if mounts are configured but Anka is too old, handler plugins will not start. Receiver plugins ignore these options.
-
-**Guest paths:** Mounts show up under **`/Volumes/My Shared Files/<guest_folder_name>`** (Apple’s shared-folder layout).
-
-**YAML**
-
-| Scope | Key |
-| ----- | --- |
-| All handlers on this host | `global_host_to_guest_folder_mounts` |
-| One handler plugin only | `host_to_guest_folder_mounts` (under that plugin) |
-
-Each list entry is **`host_path`** or **`host_path:guest_folder_name`** (use **`guest_folder_name`** so jobs know where to look under `/Volumes/My Shared Files/`). Globals mount first; duplicate host paths are only mounted once.
-
-**Environment (optional)** — comma-separated list; if set, replaces the matching YAML list for that scope:
-
-- `ANKLET_GLOBAL_HOST_TO_GUEST_FOLDER_MOUNTS`
-- `<PLUGIN_NAME>_HOST_TO_GUEST_FOLDER_MOUNTS` (same plugin name prefix rules as other Anklet env overrides)
+The GitHub handler plugin can expose folders from the host Mac inside guest VMs. See [Host-to-guest folder mounts](./plugins/handlers/github/README.md#host-to-guest-folder-mounts) in the GitHub Handler Plugin README.
 
 
 
@@ -127,7 +111,7 @@ pid_file_dir: /tmp/
 # global_private_key: /Users/{YOUR USER HERE}/.private-key.pem # If you use the same key for all your plugins, you can set it here.
 # global_token: github_pat_XXX # If you use the same token for all your plugins, you can set it here.
 # global_skip_cpu_and_memory_resource_checks: true # Optional; skip VM CPU/RAM admission checks for all handler plugins (allows overcommit).
-# global_host_to_guest_folder_mounts: # Optional; Anka 3.9+ on Apple Silicon; mount host dirs into each guest VM (see "Host-to-guest folder mounts").
+# global_host_to_guest_folder_mounts: # Optional; see GitHub Handler Plugin README (Host-to-guest folder mounts).
 #   - /path/on/host
 #   - /another/path:GuestFolderName
 # Per-plugin: host_to_guest_folder_mounts under a plugin entry (merged with global; same format).
@@ -227,7 +211,7 @@ You can control the location plugins are stored on the host by setting the `plug
 #### Github Actions
 
 - [**`Webhook Receiver Plugin`**](./plugins/receivers/github/README.md)
-- [**`Workflow Run Job Handler Plugin`**](./plugins/handlers/github/README.md)
+- [**`Workflow Run Job Handler Plugin`**](./plugins/handlers/github/README.md) — includes [draining a host](./plugins/handlers/github/README.md#draining-a-host) and [host-to-guest folder mounts](./plugins/handlers/github/README.md#host-to-guest-folder-mounts)
 
 #### Docker / Containers
 
@@ -670,32 +654,6 @@ last_update{name=GITHUB_RECEIVER,owner=veertuinc} 2025-01-07T12:01:46-06:00
 Important metrics are:
 
 - `last_update` - updated every 10 seconds, you can use this to determine if the Anklet is sending metrics at all to the database by alarming if the timestamp is <= 11 seconds ago.
-
----
-
-## Draining a host
-
-Sometimes you need to use an Anklet host for VM work outside of Anklet (for example, building a new template/image). Because Apple's SLA limits a host to **2 running VMs at a time**, Anklet handlers competing for that capacity can cause `more than 2 VMs are running` failures.
-
-To temporarily stop handlers on a host from picking up **new** jobs without stopping Anklet, create the **drain file**:
-
-```bash
-touch ~/.config/anklet/.drain
-```
-
-While the drain file exists:
-
-- Handler plugins on that host stop claiming new jobs and report a `draining` status in metrics. The log shows `drain file present; not picking up new jobs`.
-- Jobs already in progress continue to run and clean up normally, so VM capacity drains naturally.
-- Receiver plugins are unaffected and keep queuing jobs in Redis; those jobs are picked up once you resume.
-
-Once capacity is free, do your manual VM work. To resume normal operation, remove the file:
-
-```bash
-rm ~/.config/anklet/.drain
-```
-
-Handlers pick up jobs again on their next loop iteration. No restart required.
 
 ---
 

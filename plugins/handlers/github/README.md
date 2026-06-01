@@ -62,6 +62,54 @@ plugins:
 
 ---
 
+## Host-to-guest folder mounts
+
+Expose folders from the **host Mac** inside **handler VMs** (Apple Silicon only). Requires **Anka ≥ 3.9**; see Veertu’s [host directory mounts](https://docs.veertu.com/anka/whats-new/anka-3.9.0/#ability-to-mount-host-directories-inside-of-the-vm). Not supported on Intel hosts; if mounts are configured but Anka is too old, handler plugins will not start. Receiver plugins ignore these options.
+
+**Guest paths:** Mounts show up under **`/Volumes/My Shared Files/<guest_folder_name>`** (Apple’s shared-folder layout).
+
+**YAML**
+
+| Scope | Key |
+| ----- | --- |
+| All handlers on this host | `global_host_to_guest_folder_mounts` |
+| One handler plugin only | `host_to_guest_folder_mounts` (under that plugin) |
+
+Each list entry is **`host_path`** or **`host_path:guest_folder_name`** (use **`guest_folder_name`** so jobs know where to look under `/Volumes/My Shared Files/`). Globals mount first; duplicate host paths are only mounted once.
+
+**Environment (optional)** — comma-separated list; if set, replaces the matching YAML list for that scope:
+
+- `ANKLET_GLOBAL_HOST_TO_GUEST_FOLDER_MOUNTS`
+- `<PLUGIN_NAME>_HOST_TO_GUEST_FOLDER_MOUNTS` (same plugin name prefix rules as other Anklet env overrides)
+
+---
+
+## Draining a host
+
+Sometimes you need to use an Anklet host for VM work outside of Anklet (for example, building a new template/image). Because Apple's SLA limits a host to **2 running VMs at a time**, Anklet handlers competing for that capacity can cause `more than 2 VMs are running` failures.
+
+To temporarily stop handlers on a host from picking up **new** jobs without stopping Anklet, create the **drain file**:
+
+```bash
+touch ~/.config/anklet/.drain
+```
+
+While the drain file exists:
+
+- Handler plugins on that host stop claiming new jobs and report a `draining` status in metrics. The log shows `drain file present; not picking up new jobs`.
+- Jobs already in progress continue to run and clean up normally, so VM capacity drains naturally.
+- Receiver plugins are unaffected and keep queuing jobs in Redis; those jobs are picked up once you resume.
+
+Once capacity is free, do your manual VM work. To resume normal operation, remove the file:
+
+```bash
+rm ~/.config/anklet/.drain
+```
+
+Handlers pick up jobs again on their next loop iteration. No restart required.
+
+---
+
 Next, in your Github Actions workflow yml you need to/can add several labels to `runs-on`. Here is the list:
 
 1. `${{ github.run_id }}-${{ strategy.job-index }}` (required; prevents others jobs with the same `anka-template` and `anka-template-tag` from competing for the current runner)
@@ -139,7 +187,7 @@ This means worst case scenario it could make a total of 3 api calls total. Other
 | plugin_plugin_name | Name of the plugin |
 | plugin_owner_name | Name of the owner |
 | plugin_repo_name | Name of the repo |
-| plugin_status | Status of the plugin (running, in_progress, limit_paused, idle, stopped) |
+| plugin_status | Status of the plugin (running, in_progress, limit_paused, idle, draining, stopped) |
 | plugin_last_successful_run_job_url | Last successful run job url of the plugin |
 | plugin_last_failed_run_job_url | Last failed run job url of the plugin |
 | plugin_last_successful_run | Timestamp of last successful run of the plugin (RFC3339) |
@@ -177,11 +225,12 @@ Check that:
 
 2. Debug logging can be enabled with `LOG_LEVEL=dev` in the environment. All output of debug logging will be in JSON.
 
-3. Available `plugin_status` values are: `running`, `in_progress`, `limit_paused`, `idle`, `stopped`.
+3. Available `plugin_status` values are: `running`, `in_progress`, `limit_paused`, `idle`, `draining`, `stopped`.
   - `running`: The plugin has started and is available to run a job.
   - `in_progress`: The plugin has picked up a job to run.
   - `limit_paused`: The plugin is paused because of Github API rate limits. (will continue once the rate limits are reset after the specific github duration)
   - `idle`: The plugin is idle.
+  - `draining`: The host drain file is present; the handler is not picking up new jobs.
   - `stopped`: The plugin is stopped.
 
 ## Development
