@@ -77,6 +77,25 @@ Expose folders from the **host Mac** inside **handler VMs** (Apple Silicon only)
 
 Each list entry is **`host_path`** or **`host_path:guest_folder_name`** (use **`guest_folder_name`** so jobs know where to look under `/Volumes/My Shared Files/`). Globals mount first; duplicate host paths are only mounted once.
 
+```yaml
+---
+# Mount these folders into every handler VM on this host
+global_host_to_guest_folder_mounts:
+  - /var/cache/anka:anka_cache   # guest: /Volumes/My Shared Files/anka_cache
+  - /data/builds:build_cache     # guest: /Volumes/My Shared Files/build_cache
+
+plugins:
+  - name: RUNNER1
+    plugin: github
+    owner: veertuinc
+    registration: repo
+    # Merged with global_host_to_guest_folder_mounts (plugin entries after globals)
+    host_to_guest_folder_mounts:
+      - /Users/runner/.ssh:ssh_keys  # guest: /Volumes/My Shared Files/ssh_keys
+```
+
+In a workflow job, read shared data under `/Volumes/My Shared Files/build_cache` or `/Volumes/My Shared Files/ssh_keys`.
+
 **Environment (optional)** — comma-separated list; if set, replaces the matching YAML list for that scope:
 
 - `ANKLET_GLOBAL_HOST_TO_GUEST_FOLDER_MOUNTS`
