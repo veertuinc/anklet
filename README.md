@@ -76,12 +76,6 @@ If your plugin uses the Anka CLI to create VMs, Anklet handles VM [Templates/Tag
     - Two consecutive pulls cannot happen on the same host or else the data may become corrupt. If a second job is picked up that requires a pull, it will send it back to the queue so another host can handle it.
 2. If the Template *AND* Tag already exist, it does *not* issue a pull from the Registry (which therefore doesn't require maintaining a Registry at all; useful for users who use `anka export/import`). Important: You must define the tag, or else it will attempt to use "latest" and forcefully issue a pull.
 
-#### Host-to-guest folder mounts
-
-The GitHub handler plugin can expose folders from the host Mac inside guest VMs. See [Host-to-guest folder mounts](./plugins/handlers/github/README.md#host-to-guest-folder-mounts) in the GitHub Handler Plugin README.
-
-
-
 ---
 
 ## Setup Guide
