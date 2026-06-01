@@ -23,6 +23,7 @@ import (
 	"github.com/veertuinc/anklet/internal/anka"
 	"github.com/veertuinc/anklet/internal/config"
 	"github.com/veertuinc/anklet/internal/database"
+	"github.com/veertuinc/anklet/internal/drain"
 	"github.com/veertuinc/anklet/internal/host"
 	"github.com/veertuinc/anklet/internal/logging"
 	"github.com/veertuinc/anklet/internal/metrics"
@@ -53,6 +54,16 @@ var (
 // 		return daemon.ErrStop
 // 	}
 // }
+
+// steadyStatus returns the status a plugin should report between runs:
+// "draining" for handler plugins while the drain file is present, otherwise
+// "idle". Receiver plugins are never marked draining (they only queue jobs).
+func steadyStatus(plugin config.Plugin) string {
+	if !strings.Contains(plugin.Plugin, "_receiver") && drain.IsDraining() {
+		return "draining"
+	}
+	return "idle"
+}
 
 func main() {
 
@@ -726,8 +737,8 @@ func worker(
 							time.Sleep(time.Second * 3)
 							continue
 						}
-						// Set status back to idle after exiting the preparing wait loop
-						err = metricsData.SetStatus(pluginCtx, "idle")
+						// Set status back to idle (or draining) after exiting the preparing wait loop
+						err = metricsData.SetStatus(pluginCtx, steadyStatus(plugin))
 						if err != nil {
 							logging.Error(pluginCtx, "error setting plugin status", "error", err)
 						}
@@ -763,7 +774,7 @@ func worker(
 							pluginCancel()
 							break
 						}
-						err = metricsData.SetStatus(updatedPluginCtx, "idle")
+						err = metricsData.SetStatus(updatedPluginCtx, steadyStatus(plugin))
 						if err != nil {
 							logging.Error(updatedPluginCtx, "error setting plugin status", "error", err)
 						}

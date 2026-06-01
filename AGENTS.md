@@ -49,7 +49,7 @@ Anklet is a tool that runs custom plugins to communicate with CI platforms/tools
 │   └── receivers/             # Receiver plugins (webhook listeners)
 │       └── github/            # GitHub webhook receiver
 └── tests/
-    ├── cli-test.bash          # CLI integration tests
+    ├── cli-tests/run.bash     # CLI integration tests
     └── plugins/               # Plugin-specific tests
 ```
 
@@ -63,7 +63,7 @@ Anklet is a tool that runs custom plugins to communicate with CI platforms/tools
 ### Build & Test
 - **`make go.lint`** - Run golangci-lint (REQUIRED after all code changes)
 - **`make go.test`** - Run unit tests
-- **`./tests/cli-test.bash`** - Run CLI integration tests
+- **`./tests/cli-tests/run.bash`** - Run CLI integration tests
 - **`go run main.go`** - Run Anklet locally (requires `~/.config/anklet/config.yml`)
 - **`go mod tidy`** - Update and clean Go module dependencies
 

@@ -76,28 +76,6 @@ If your plugin uses the Anka CLI to create VMs, Anklet handles VM [Templates/Tag
     - Two consecutive pulls cannot happen on the same host or else the data may become corrupt. If a second job is picked up that requires a pull, it will send it back to the queue so another host can handle it.
 2. If the Template *AND* Tag already exist, it does *not* issue a pull from the Registry (which therefore doesn't require maintaining a Registry at all; useful for users who use `anka export/import`). Important: You must define the tag, or else it will attempt to use "latest" and forcefully issue a pull.
 
-#### Host-to-guest folder mounts
-
-Expose folders from the **host Mac** inside **handler VMs** (Apple Silicon only). Requires **Anka ≥ 3.9**; see Veertu’s [host directory mounts](https://docs.veertu.com/anka/whats-new/anka-3.9.0/#ability-to-mount-host-directories-inside-of-the-vm). Not supported on Intel hosts; if mounts are configured but Anka is too old, handler plugins will not start. Receiver plugins ignore these options.
-
-**Guest paths:** Mounts show up under **`/Volumes/My Shared Files/<guest_folder_name>`** (Apple’s shared-folder layout).
-
-**YAML**
-
-| Scope | Key |
-| ----- | --- |
-| All handlers on this host | `global_host_to_guest_folder_mounts` |
-| One handler plugin only | `host_to_guest_folder_mounts` (under that plugin) |
-
-Each list entry is **`host_path`** or **`host_path:guest_folder_name`** (use **`guest_folder_name`** so jobs know where to look under `/Volumes/My Shared Files/`). Globals mount first; duplicate host paths are only mounted once.
-
-**Environment (optional)** — comma-separated list; if set, replaces the matching YAML list for that scope:
-
-- `ANKLET_GLOBAL_HOST_TO_GUEST_FOLDER_MOUNTS`
-- `<PLUGIN_NAME>_HOST_TO_GUEST_FOLDER_MOUNTS` (same plugin name prefix rules as other Anklet env overrides)
-
-
-
 ---
 
 ## Setup Guide
@@ -127,7 +105,7 @@ pid_file_dir: /tmp/
 # global_private_key: /Users/{YOUR USER HERE}/.private-key.pem # If you use the same key for all your plugins, you can set it here.
 # global_token: github_pat_XXX # If you use the same token for all your plugins, you can set it here.
 # global_skip_cpu_and_memory_resource_checks: true # Optional; skip VM CPU/RAM admission checks for all handler plugins (allows overcommit).
-# global_host_to_guest_folder_mounts: # Optional; Anka 3.9+ on Apple Silicon; mount host dirs into each guest VM (see "Host-to-guest folder mounts").
+# global_host_to_guest_folder_mounts: # Optional; see GitHub Handler Plugin README (Host-to-guest folder mounts).
 #   - /path/on/host
 #   - /another/path:GuestFolderName
 # Per-plugin: host_to_guest_folder_mounts under a plugin entry (merged with global; same format).
@@ -227,7 +205,7 @@ You can control the location plugins are stored on the host by setting the `plug
 #### Github Actions
 
 - [**`Webhook Receiver Plugin`**](./plugins/receivers/github/README.md)
-- [**`Workflow Run Job Handler Plugin`**](./plugins/handlers/github/README.md)
+- [**`Workflow Run Job Handler Plugin`**](./plugins/handlers/github/README.md) — includes [draining a host](./plugins/handlers/github/README.md#draining-a-host) and [host-to-guest folder mounts](./plugins/handlers/github/README.md#host-to-guest-folder-mounts)
 
 #### Docker / Containers
 
@@ -819,13 +797,13 @@ Tests are located in the `tests/` directory and are organized into two categorie
 CLI tests validate Anklet's startup behavior, configuration parsing, and error handling. Run all CLI tests with:
 
 ```bash
-./tests/cli-test.bash
+./tests/cli-tests/run.bash
 ```
 
 Or run a specific test:
 
 ```bash
-./tests/cli-test.bash start-stop
+./tests/cli-tests/run.bash start-stop
 ```
 
 **Available CLI tests:**
