@@ -918,6 +918,39 @@ func checkForCompletedJobs(
 	}
 }
 
+// cleanupShouldLog reports whether cleanup-related logs should be emitted for this cycle.
+// Idle runs with nothing to clean up stay silent; logs appear when a job ran this cycle,
+// something is in the cleaning queue, or a queued job is ready for terminal cleanup.
+func cleanupShouldLog(
+	pluginGlobals *internalGithub.PluginGlobals,
+	originalQueuedJob *internalGithub.QueueJob,
+	cleaningJobJSON string,
+) bool {
+	if pluginGlobals.GetRanJobThisRun() {
+		return true
+	}
+	if cleaningJobJSON != "" {
+		return true
+	}
+	if originalQueuedJob == nil {
+		return false
+	}
+	if originalQueuedJob.Type == "anka.VM" {
+		return true
+	}
+	switch originalQueuedJob.Action {
+	case "finish", "cancel", "timed_out":
+		return true
+	}
+	if originalQueuedJob.WorkflowJob.Status != nil {
+		switch *originalQueuedJob.WorkflowJob.Status {
+		case "completed", "failed", "timed_out":
+			return true
+		}
+	}
+	return false
+}
+
 // cleanup will pop off the last item from the list and, based on its type, perform the appropriate cleanup action
 // this assumes the plugin code created a list item to represent the thing to clean up
 func cleanup(
@@ -999,27 +1032,48 @@ func cleanup(
 	}
 
 	// get the original job with the latest status
-	originalJobJSON, err := databaseContainer.RetryLIndex(cleanupContext, pluginQueueName, 0)
-	if err != nil && err != redis.Nil {
+	originalJobJSON, originalJobErr := databaseContainer.RetryLIndex(cleanupContext, pluginQueueName, 0)
+	if originalJobErr != nil && originalJobErr != redis.Nil {
 		// During cleanup, database errors are not fatal - log as warning and skip cleanup
-		logging.Warn(pluginCtx, "unable to get job from database during cleanup, skipping", "error", err)
+		logging.Warn(pluginCtx, "unable to get job from database during cleanup, skipping", "error", originalJobErr)
 		return
-	}
-	if err == redis.Nil {
-		logging.Debug(pluginCtx, "cleanup | nothing to clean up (or redis returned nil)")
-		return // nothing to clean up
 	}
 
-	logging.Info(pluginCtx, "cleanup | started", "onStartRun", onStartRun)
-	originalQueuedJob, err, typeErr := database.Unwrap[internalGithub.QueueJob](originalJobJSON)
-	if err != nil || typeErr != nil {
-		logging.Error(pluginCtx, "error unmarshalling job", "error", err, "typeErr", typeErr, "originalJobJSON", originalJobJSON)
+	var originalQueuedJob internalGithub.QueueJob
+	if originalJobErr != redis.Nil {
+		var typeErr error
+		var unwrapErr error
+		originalQueuedJob, unwrapErr, typeErr = database.Unwrap[internalGithub.QueueJob](originalJobJSON)
+		if unwrapErr != nil || typeErr != nil {
+			logging.Error(pluginCtx, "error unmarshalling job", "error", unwrapErr, "typeErr", typeErr, "originalJobJSON", originalJobJSON)
+			return
+		}
+	}
+
+	cleaningJobJSON, cleaningJobErr := databaseContainer.RetryLIndex(cleanupContext, pluginQueueName+"/cleaning", 0)
+	if cleaningJobErr != nil && cleaningJobErr != redis.Nil {
+		logging.Error(pluginCtx, "error getting job from the cleaning list", "error", cleaningJobErr)
 		return
+	}
+
+	var originalQueuedJobPtr *internalGithub.QueueJob
+	if originalJobErr != redis.Nil {
+		originalQueuedJobPtr = &originalQueuedJob
+	}
+	shouldLogCleanup := cleanupShouldLog(pluginGlobals, originalQueuedJobPtr, cleaningJobJSON)
+
+	if originalJobErr == redis.Nil && cleaningJobJSON == "" {
+		if shouldLogCleanup {
+			logging.Debug(pluginCtx, "cleanup | nothing to clean up (or redis returned nil)")
+		}
+		return // nothing to clean up
 	}
 
 	select {
 	case <-pluginGlobals.PausedCancellationJobChannel: // no cleanup necessary, it was picked up by another host
-		logging.Debug(pluginCtx, "cleanup | pausedCancellationJobChannel")
+		if shouldLogCleanup {
+			logging.Debug(pluginCtx, "cleanup | pausedCancellationJobChannel")
+		}
 		// remove from paused queue so other hosts won't try to pick it up anymore.
 		err = internalGithub.DeleteFromQueue(pluginCtx, *originalQueuedJob.WorkflowJob.ID, pausedQueueName)
 		if err != nil {
@@ -1030,10 +1084,13 @@ func cleanup(
 	}
 
 	// if the job is running, we don't need to clean it up yet
-	if originalQueuedJob.WorkflowJob.Status != nil &&
+	if originalQueuedJobPtr != nil &&
+		originalQueuedJob.WorkflowJob.Status != nil &&
 		(*originalQueuedJob.WorkflowJob.Status == "in_progress" ||
 			(workerGlobals.ReturnAllToMainQueue.Load() && originalQueuedJob.Action == "in_progress")) {
-		logging.Warn(pluginCtx, "cleanup | job is still running; skipping cleanup")
+		if shouldLogCleanup {
+			logging.Warn(pluginCtx, "cleanup | job is still running; skipping cleanup")
+		}
 		return
 	}
 
@@ -1042,14 +1099,13 @@ func cleanup(
 
 		var queuedJob internalGithub.QueueJob
 		var typeErr error
-		var cleaningJobJSON string
 
-		// get the cleaning job from the cleaning list
 		cleaningJobJSON, err = databaseContainer.RetryLIndex(cleanupContext, pluginQueueName+"/cleaning", 0)
 		if err != nil && err != redis.Nil {
 			logging.Error(pluginCtx, "error getting job from the list", "error", err)
 			return
 		}
+
 		if cleaningJobJSON == "" {
 			if onStartRun {
 				return
@@ -1061,7 +1117,9 @@ func cleanup(
 				pluginQueueName+"/cleaning",
 			)
 			if err == redis.Nil {
-				logging.Debug(pluginCtx, "cleanup | no job to clean up from "+pluginQueueName)
+				if shouldLogCleanup {
+					logging.Debug(pluginCtx, "cleanup | no job to clean up from "+pluginQueueName)
+				}
 				return // nothing to clean up
 			} else if err != nil {
 				logging.Error(pluginCtx, "error popping job from the list", "error", err)
@@ -1072,7 +1130,9 @@ func cleanup(
 		queuedJob, err, typeErr = database.Unwrap[internalGithub.QueueJob](cleaningJobJSON)
 		if err != nil || typeErr != nil {
 			if err == redis.Nil {
-				logging.Debug(pluginCtx, "no job to clean up from "+pluginQueueName)
+				if shouldLogCleanup {
+					logging.Debug(pluginCtx, "no job to clean up from "+pluginQueueName)
+				}
 				return // nothing to clean up
 			}
 			logging.Error(pluginCtx,
@@ -1254,10 +1314,6 @@ func Run(
 	pluginCancel context.CancelFunc,
 ) (context.Context, error) {
 
-	if !internalGithub.LogGitHubAPIRateLimitStatusAtRunStart(workerCtx, pluginCtx) {
-		logging.Info(pluginCtx, "starting github plugin")
-	}
-
 	pluginConfig, err := config.GetPluginFromContext(pluginCtx)
 	if err != nil {
 		return pluginCtx, err
@@ -1277,6 +1333,12 @@ func Run(
 	workerGlobals, err := config.GetWorkerGlobalsFromContext(pluginCtx)
 	if err != nil {
 		return pluginCtx, err
+	}
+
+	if !workerGlobals.Plugins[pluginConfig.Plugin][pluginConfig.Name].FinishedInitialRun.Load() {
+		if !internalGithub.LogGitHubAPIRateLimitStatusAtRunStart(workerCtx, pluginCtx) {
+			logging.Info(pluginCtx, "starting github plugin")
+		}
 	}
 
 	// Mark this plugin as preparing to prevent race conditions with sibling plugins
@@ -1425,6 +1487,7 @@ func Run(
 		}
 		if *jobFromJobChannel.WorkflowJob.Status == "in_progress" { // TODO: make this the same as the loop later on
 			workerGlobals.Plugins[pluginConfig.Plugin][pluginConfig.Name].Preparing.Store(false)
+			pluginGlobals.SetRanJobThisRun(true)
 			logging.Info(pluginCtx, "watching for job completion", "jobFromJobChannel", jobFromJobChannel)
 			pluginCtx, err = watchJobStatus(
 				workerCtx,
@@ -1510,6 +1573,14 @@ func Run(
 
 	var queuedJobString string
 	var queuedJob internalGithub.QueueJob
+
+	logging.Info(
+		pluginCtx,
+		"checking for jobs in database queue",
+		"pluginQueue", pluginQueueName,
+		"pausedQueue", pausedQueueName,
+		"mainQueue", mainQueueName,
+	)
 
 	// allow picking up where we left off
 	// always get -1 so we get the eldest job in the queue
@@ -1630,6 +1701,7 @@ func Run(
 				}
 			}
 
+			pluginGlobals.SetRanJobThisRun(true)
 			logging.Info(pluginCtx, "paused job found to run", "pausedQueuedJob", pausedQueuedJob)
 
 			pluginCtx = logging.AppendCtx(pluginCtx, slog.String("wasPausedOn", pausedQueuedJob.PausedOn))
@@ -1904,6 +1976,7 @@ func Run(
 			return pluginCtx, nil
 		}
 		if queuedJob.WorkflowJob.Status != nil && *queuedJob.WorkflowJob.Status == "in_progress" {
+			pluginGlobals.SetRanJobThisRun(true)
 			logging.Info(pluginCtx, "job is in progress, so we'll wait for it to finish")
 			workerGlobals.Plugins[pluginConfig.Plugin][pluginConfig.Name].Preparing.Store(false)
 			pluginCtx, err = watchJobStatus(
@@ -1950,6 +2023,7 @@ func Run(
 		return pluginCtx, err
 	}
 
+	pluginGlobals.SetRanJobThisRun(true)
 	logging.Info(pluginCtx, "handling anka workflow run job")
 	err = metricsData.SetStatus(pluginCtx, "in_progress")
 	if err != nil {

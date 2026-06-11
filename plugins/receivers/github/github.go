@@ -19,6 +19,7 @@ import (
 	internalGithub "github.com/veertuinc/anklet/internal/github"
 	"github.com/veertuinc/anklet/internal/logging"
 	"github.com/veertuinc/anklet/internal/metrics"
+	"github.com/veertuinc/anklet/internal/network"
 )
 
 // Server defines the structure for the API server
@@ -102,6 +103,10 @@ func Run(
 	}
 
 	queueOwner := pluginConfig.GetQueueOwner()
+
+	if err := network.CheckTCPPortAvailable(pluginConfig.Port, "GitHub webhook receiver"); err != nil {
+		return pluginCtx, err
+	}
 
 	server := &http.Server{Addr: ":" + pluginConfig.Port}
 	http.HandleFunc("/healthcheck", func(w http.ResponseWriter, r *http.Request) {

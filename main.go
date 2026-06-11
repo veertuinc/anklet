@@ -27,6 +27,7 @@ import (
 	"github.com/veertuinc/anklet/internal/host"
 	"github.com/veertuinc/anklet/internal/logging"
 	"github.com/veertuinc/anklet/internal/metrics"
+	"github.com/veertuinc/anklet/internal/network"
 	"github.com/veertuinc/anklet/internal/run"
 )
 
@@ -370,14 +371,8 @@ func worker(
 			metricsPort = strconv.Itoa(port)
 		}
 	}
-	ln, err := net.Listen("tcp", ":"+metricsPort)
-	if err != nil {
-		parentLogger.ErrorContext(workerCtx, "metrics port already in use", "port", metricsPort, "error", err)
-		os.Exit(1)
-	}
-	err = ln.Close()
-	if err != nil {
-		parentLogger.ErrorContext(workerCtx, "error closing metrics port", "port", metricsPort, "error", err)
+	if err := network.CheckTCPPortAvailable(metricsPort, "metrics"); err != nil {
+		parentLogger.ErrorContext(workerCtx, err.Error(), "port", metricsPort, "error", err)
 		os.Exit(1)
 	}
 	metricsService := metrics.NewServer(metricsPort)

@@ -21,6 +21,7 @@ type PluginGlobals struct {
 	ReturnToMainQueue             chan string   // Similar to the RetryChannel, but used to acually send the job back to the main queue
 	CheckForCompletedJobsRunCount int32 // atomic counter: increments every CheckForCompletedJobs loop iteration (e.g. "checking for completed jobs" every 10th)
 	StillInProgressPollCount      int32 // atomic counter: consecutive polls where the active job is in mainInProgressQueue; resets when no job or job not in that queue — used for "job is still in progress" INFO logs
+	RanJobThisRun                 int32 // atomic flag: set when this Run() cycle picked up and handled a job; used to suppress idle cleanup logs
 	Unreturnable                  bool  // Used to prevent a job from being returned to the main queue if it's not returnable
 }
 
@@ -58,6 +59,18 @@ func (p *PluginGlobals) SetFirstCheckForCompletedJobsRan(ran bool) {
 
 func (p *PluginGlobals) GetFirstCheckForCompletedJobsRan() bool {
 	return atomic.LoadInt32(&p.FirstCheckForCompletedJobsRan) == 1
+}
+
+func (p *PluginGlobals) SetRanJobThisRun(ran bool) {
+	var value int32
+	if ran {
+		value = 1
+	}
+	atomic.StoreInt32(&p.RanJobThisRun, value)
+}
+
+func (p *PluginGlobals) GetRanJobThisRun() bool {
+	return atomic.LoadInt32(&p.RanJobThisRun) == 1
 }
 
 func GetPluginGlobalsFromContext(ctx context.Context) (*PluginGlobals, error) {
