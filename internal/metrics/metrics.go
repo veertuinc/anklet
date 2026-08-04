@@ -891,7 +891,7 @@ func Cleanup(ctx context.Context, owner string, name string) {
 	}
 
 	// During cleanup, skip database operations if they fail - they're not critical for shutdown
-	cleanupKey := "anklet/metrics/" + owner + "/" + name
+	cleanupKey := redisMetricsKey(owner, name)
 	_, result := databaseContainer.RetryDel(ctx, cleanupKey)
 	if result != nil {
 		// Database errors during cleanup are not critical - just log at debug level and continue
@@ -899,6 +899,15 @@ func Cleanup(ctx context.Context, owner string, name string) {
 		return
 	}
 	logging.Dev(ctx, "successfully deleted metrics data from Redis", "key", cleanupKey)
+}
+
+// redisMetricsKey builds anklet/metrics/{owner}/{name}, omitting an empty owner segment
+// so enterprise-scoped plugins (owner unset) do not produce a double slash.
+func redisMetricsKey(owner, name string) string {
+	if owner == "" {
+		return "anklet/metrics/" + name
+	}
+	return "anklet/metrics/" + owner + "/" + name
 }
 
 func ExportMetricsToDB(workerCtx context.Context, pluginCtx context.Context, keyEnding string) {
@@ -911,7 +920,7 @@ func ExportMetricsToDB(workerCtx context.Context, pluginCtx context.Context, key
 	ticker := time.NewTicker(10 * time.Second)
 	amountOfErrorsAllowed := 60
 	atLeastOneRun := false
-	metricsKey := "anklet/metrics/" + keyEnding
+	metricsKey := "anklet/metrics/" + strings.TrimPrefix(keyEnding, "/")
 	go func() {
 		for {
 			metricsData, err := GetMetricsDataFromContext(workerCtx)

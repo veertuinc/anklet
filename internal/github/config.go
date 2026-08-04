@@ -78,6 +78,17 @@ type QueueJob struct {
 	Attempts    int                   `json:"attempts"`
 }
 
+// RepositoryOwnerAndName returns the job's repository owner and name for Actions API calls.
+func (q QueueJob) RepositoryOwnerAndName() (owner string, name string, err error) {
+	if q.Repository.Owner == nil || *q.Repository.Owner == "" {
+		return "", "", fmt.Errorf("job repository owner is missing")
+	}
+	if q.Repository.Name == nil || *q.Repository.Name == "" {
+		return "", "", fmt.Errorf("job repository name is missing")
+	}
+	return *q.Repository.Owner, *q.Repository.Name, nil
+}
+
 type Repository struct {
 	Name       *string `json:"name"`
 	Owner      *string `json:"owner"`

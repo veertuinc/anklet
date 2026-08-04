@@ -267,13 +267,21 @@ func UpdateJobsWorkflowJobStatus(
 		logging.Error(pluginCtx, "error getting github client from context", "err", err)
 		return *queuedJob, err
 	}
-	pluginConfig, err := config.GetPluginFromContext(pluginCtx)
+	jobOwner, jobRepo, err := queuedJob.RepositoryOwnerAndName()
 	if err != nil {
-		logging.Error(pluginCtx, "error getting plugin from context", "err", err)
+		logging.Error(pluginCtx, "error getting job repository owner and name", "err", err)
 		return *queuedJob, err
 	}
+	if wrapper, wrapperErr := GetGitHubClientWrapperFromContext(pluginCtx); wrapperErr == nil {
+		orgClient, orgErr := wrapper.ClientForOrganization(pluginCtx, jobOwner)
+		if orgErr != nil {
+			logging.Error(pluginCtx, "error getting GitHub client for job organization", "org", jobOwner, "err", orgErr)
+			return *queuedJob, orgErr
+		}
+		githubClient = orgClient
+	}
 	pluginCtx, currentWorkflowJob, _, err := ExecuteGitHubClientFunction(workerCtx, pluginCtx, func() (*github.WorkflowJob, *github.Response, error) {
-		workflowJob, response, err := githubClient.Actions.GetWorkflowJobByID(pluginCtx, pluginConfig.Owner, *queuedJob.Repository.Name, *queuedJob.WorkflowJob.ID)
+		workflowJob, response, err := githubClient.Actions.GetWorkflowJobByID(pluginCtx, jobOwner, jobRepo, *queuedJob.WorkflowJob.ID)
 		return workflowJob, response, err
 	})
 	if err != nil {

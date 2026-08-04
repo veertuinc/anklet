@@ -4,6 +4,49 @@ import (
 	"testing"
 )
 
+func TestPlugin_MetricsKeyEnding(t *testing.T) {
+	tests := []struct {
+		name   string
+		plugin Plugin
+		want   string
+	}{
+		{
+			name:   "org owner and name",
+			plugin: Plugin{Owner: "veertuinc", Name: "GITHUB_RECEIVER"},
+			want:   "veertuinc/GITHUB_RECEIVER",
+		},
+		{
+			name:   "enterprise scope uses enterprise as owner segment",
+			plugin: Plugin{Enterprise: "veertu-inc", Name: "GITHUB_RECEIVER"},
+			want:   "veertu-inc/GITHUB_RECEIVER",
+		},
+		{
+			name:   "owner preferred over enterprise",
+			plugin: Plugin{Owner: "veertuinc", Enterprise: "veertu-inc", Name: "GITHUB_HANDLER"},
+			want:   "veertuinc/GITHUB_HANDLER",
+		},
+		{
+			name:   "queue_name does not affect metrics key",
+			plugin: Plugin{Owner: "veertuinc", QueueName: "shared_queue", Name: "GITHUB_RECEIVER"},
+			want:   "veertuinc/GITHUB_RECEIVER",
+		},
+		{
+			name:   "name only when no scope set",
+			plugin: Plugin{Name: "GITHUB_RECEIVER"},
+			want:   "GITHUB_RECEIVER",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.plugin.MetricsKeyEnding()
+			if got != tt.want {
+				t.Errorf("MetricsKeyEnding() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestPlugin_GetQueueOwner(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -34,6 +77,21 @@ func TestPlugin_GetQueueOwner(t *testing.T) {
 			want: "veertuinc",
 		},
 		{
+			name: "returns Enterprise when set and QueueName empty",
+			plugin: Plugin{
+				Enterprise: "veertu-inc",
+			},
+			want: "veertu-inc",
+		},
+		{
+			name: "returns QueueName over Enterprise",
+			plugin: Plugin{
+				Enterprise: "veertu-inc",
+				QueueName:  "shared_queue",
+			},
+			want: "shared_queue",
+		},
+		{
 			name: "returns empty string when both are empty",
 			plugin: Plugin{
 				Owner:     "",
@@ -48,6 +106,155 @@ func TestPlugin_GetQueueOwner(t *testing.T) {
 			got := tt.plugin.GetQueueOwner()
 			if got != tt.want {
 				t.Errorf("GetQueueOwner() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestPlugin_ValidateGitHubScope(t *testing.T) {
+	tests := []struct {
+		name    string
+		plugin  Plugin
+		wantErr bool
+	}{
+		{
+			name:   "enterprise only",
+			plugin: Plugin{Enterprise: "veertu-inc"},
+		},
+		{
+			name:   "organization only",
+			plugin: Plugin{Owner: "veertuinc"},
+		},
+		{
+			name:   "repository",
+			plugin: Plugin{Owner: "veertuinc", Repo: "anklet"},
+		},
+		{
+			name:    "enterprise with owner",
+			plugin:  Plugin{Enterprise: "veertu-inc", Owner: "veertuinc"},
+			wantErr: true,
+		},
+		{
+			name:    "enterprise with repo",
+			plugin:  Plugin{Enterprise: "veertu-inc", Repo: "anklet"},
+			wantErr: true,
+		},
+		{
+			name:    "repo without owner",
+			plugin:  Plugin{Repo: "anklet"},
+			wantErr: true,
+		},
+		{
+			name:    "neither enterprise nor owner",
+			plugin:  Plugin{},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.plugin.ValidateGitHubScope()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ValidateGitHubScope() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestPlugin_ValidateEnterpriseGitHubCredentials(t *testing.T) {
+	tests := []struct {
+		name    string
+		plugin  Plugin
+		wantErr bool
+	}{
+		{
+			name: "org scope skips check",
+			plugin: Plugin{
+				Owner: "veertuinc",
+				Token: "",
+			},
+		},
+		{
+			name: "enterprise with token and app",
+			plugin: Plugin{
+				Enterprise: "veertu-inc",
+				Token:      "ghp_xxx",
+				PrivateKey: "/tmp/key.pem",
+				AppID:      1,
+			},
+		},
+		{
+			name: "enterprise missing token",
+			plugin: Plugin{
+				Enterprise: "veertu-inc",
+				PrivateKey: "/tmp/key.pem",
+				AppID:      1,
+			},
+			wantErr: true,
+		},
+		{
+			name: "enterprise missing private_key",
+			plugin: Plugin{
+				Enterprise: "veertu-inc",
+				Token:      "ghp_xxx",
+				AppID:      1,
+			},
+			wantErr: true,
+		},
+		{
+			name: "enterprise missing app_id",
+			plugin: Plugin{
+				Enterprise: "veertu-inc",
+				Token:      "ghp_xxx",
+				PrivateKey: "/tmp/key.pem",
+			},
+			wantErr: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.plugin.ValidateEnterpriseGitHubCredentials()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ValidateEnterpriseGitHubCredentials() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestPlugin_GitHubScopeAndRegistrationURL(t *testing.T) {
+	tests := []struct {
+		name string
+		plugin Plugin
+		wantScope GitHubScope
+		wantURL string
+	}{
+		{
+			name:      "enterprise",
+			plugin:    Plugin{Enterprise: "veertu-inc"},
+			wantScope: GitHubScopeEnterprise,
+			wantURL:   "https://github.com/enterprises/veertu-inc",
+		},
+		{
+			name:      "organization",
+			plugin:    Plugin{Owner: "veertuinc"},
+			wantScope: GitHubScopeOrganization,
+			wantURL:   "https://github.com/veertuinc",
+		},
+		{
+			name:      "repository",
+			plugin:    Plugin{Owner: "veertuinc", Repo: "anklet"},
+			wantScope: GitHubScopeRepository,
+			wantURL:   "https://github.com/veertuinc/anklet",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.plugin.GitHubScope(); got != tt.wantScope {
+				t.Errorf("GitHubScope() = %q, want %q", got, tt.wantScope)
+			}
+			if got := tt.plugin.GitHubRegistrationURL(); got != tt.wantURL {
+				t.Errorf("GitHubRegistrationURL() = %q, want %q", got, tt.wantURL)
 			}
 		})
 	}

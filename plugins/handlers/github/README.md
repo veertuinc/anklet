@@ -2,7 +2,7 @@
 
 **Be sure to set up the [Github Receiver Plugin](../../receivers/github/README.md) first!**
 
-The Github Handler Plugin is responsible for pulling a job from the database/queue, preparing a macOS VM, and registering it to the github repo or organization as an action runner so it can execute the job inside.
+The Github Handler Plugin is responsible for pulling a job from the database/queue, preparing a macOS VM, and registering it to the github repo, organization, or enterprise as an action runner so it can execute the job inside.
 
 The Github Handler Plugin will pull jobs from the database/queue in order of creation. The Github Webhook Receiver Plugin will place the jobs in the database/queue in the order they're created. 
 
@@ -10,55 +10,188 @@ Note: Our [Build Cloud Controller](https://docs.veertu.com/anka/anka-build-cloud
 
 For help setting up the database, see [Database Setup](https://github.com/veertuinc/anklet/tree/main?tab=readme-ov-file#database-setup).
 
-In the `config.yml`, you can define the `github` plugin as follows:
-
 **NOTE: Plugin `name` MUST be unique across all hosts and plugins.**
 
-```yaml
+Pair each handler with a [receiver](../../receivers/github/README.md) at the **same scope** (same Redis queue namespace). Do not mix `enterprise` with `owner`/`repo` on one plugin.
+
+## Choosing a GitHub scope
+
+| Scope | Config | Runner registration URL | Use when |
+| ----- | ------ | ----------------------- | -------- |
+| Repository | `owner` + `repo` | `https://github.com/{owner}/{repo}` | One repo should own its runners; keep blast radius small |
+| Organization | `owner` only | `https://github.com/{owner}` | One org, many repos, shared runner pool |
+| Enterprise | `enterprise` only | `https://github.com/enterprises/{enterprise}` | GitHub Enterprise Cloud; one pool for many orgs |
+
+Most teams start with **organization**. Use **repository** for isolation. Use **enterprise** when you already have Enterprise Cloud and want one webhook + one handler pool across orgs.
+
+Shared options (any scope): `registry_url`, `skip_pull`, `runner_group`, `sleep_interval`, `registration_timeout_seconds`, `template_disk_buffer`, `job_retry_attempts`, `skip_cpu_and_memory_resource_checks`, `queue_name`, and `database` / `global_database_*`. See the examples below and notes at the end of this section.
+
 ---
 
-. . .
+## Repository scope
 
+### When to use
+
+Use `owner` + `repo` when Anklet should register runners only for that repository. Good for a single product repo, a high-security repo that must not share org runners, or testing Anklet against one repo before wider rollout.
+
+### Pros
+
+- Narrowest access and failure domain
+- Runner list and permissions stay on one repo
+- Simpler mental model for small setups
+
+### Cons
+
+- One webhook + handler config per repo if you grow
+- No shared pool across repos in the same org
+- You still manage PAT/App credentials per handler (or globals)
+
+### Config
+
+```yaml
+plugins:
+  - name: RUNNER_REPO
+    plugin: github
+    owner: veertuinc
+    repo: anklet
+    # token: github_pat_XXX
+    # or GitHub App:
+    # private_key: /path/to/private-key.pem
+    # app_id: 12345678
+    # installation_id: 12345678  # or omit to resolve from owner
+    registry_url: http://anka.registry:8089
+```
+
+### Auth
+
+PAT **or** GitHub App. App Repository permissions need **Actions** and **Administration** Read and write (get/cancel). Install the App on the org (or that repo) and accept permission updates on the install. Target the repo in the install’s repository access list (or use **All repositories**).
+
+### Setup
+
+1. Create a [repo webhook](../../receivers/github/README.md#organization-or-repository-webhook) (or use a receiver already pointed at this repo).
+2. Configure a matching `github_receiver` with the same `owner` + `repo` (and same Redis).
+3. Set handler `owner` + `repo` and credentials as above.
+4. Confirm runners appear under the repo’s Settings → Actions → Runners.
+
+---
+
+## Organization scope
+
+### When to use
+
+Use `owner` alone (no `repo`, no `enterprise`) when one GitHub organization should share a runner pool across its repositories. This is the common production shape for a single org.
+
+### Pros
+
+- One webhook and one queue serve every repo in the org
+- Shared capacity across repos; fewer Anklet instances than per-repo
+- Org runner groups (Enterprise Cloud) can still restrict which repos see the pool
+
+### Cons
+
+- Broader credential and runner blast radius than repo scope
+- Public-repo pickup needs **Allow public repositories** on the org runner group
+- Multiple orgs need multiple receivers/handlers (or move to enterprise / shared `queue_name` — see [running multiple instances](../../../docs/running-multiple-instances.md))
+
+### Config
+
+```yaml
 plugins:
   - name: RUNNER1
     plugin: github
-    # token: github_pat_XXX
-    # Instead of PAT, you can create a github app for your org/repo and use its credentials instead.
-    # private_key: /path/to/private/key
-    # app_id: 12345678 # Org > Settings > Developer settings > GitHub Apps > New GitHub App
-    # installation_id: 12345678 # You need to install the app (Org > Settings > Developer settings > GitHub Apps > click Edit for the app > Install App > select your Repo > then check the URL bar for the installation ID)
-    registration: repo
-    # repo: anklet # Optional; only needed if registering a specific runner for a repo, otherwise it will be an org level runner.
     owner: veertuinc
-    # queue_name: shared_queue # Optional; override the queue namespace (defaults to owner). Useful for multiple orgs sharing a queue.
-    registry_url: http://anka.registry:8089 # Optional; use `skip_pull` to skip pulling the template.
-    # skip_pull: true # Optional; skips pulling the template from the Anka Build Cloud Registry
-    runner_group: macOS # requires Enterprise github
-    # sleep_interval: 5 # Optional; defaults to 1 second.
-    # registration_timeout_seconds: 80 # Optional; defaults to 80 seconds.
-    # template_disk_buffer: 10.0 # Optional; defaults to 10.0%. How much disk space to leave free on the host for templates.
-    # job_retry_attempts: 10  # Override the default of 5
-    # skip_cpu_and_memory_resource_checks: true # Optional; allows CPU/RAM overcommit by skipping VM admission checks on this host.
-    #database:
-    #  enabled: true
-    #  url: localhost
-    #  port: 6379
-    #  user: ""
-    #  password: ""
-    #  database: 0
-    #  max_retries: 5 # when a database operation fails due to a recoverable error, how many times to retry it before giving up
-    #  retry_delay: 1000 # how long to wait between retries
-    #  retry_backoff_factor: 2.0 # how much to multiply the retry delay by each time
-    # template_disk_buffer: 10.0 # Optional; defaults to 10.0%. How much disk space to leave available and not allow templates to consume. Important when you have long running jobs that consume a lot of disk space while they run.
+    # token: github_pat_XXX
+    # or GitHub App:
+    # private_key: /path/to/private-key.pem
+    # app_id: 12345678
+    # installation_id: 12345678  # Install App URL ID; or omit to resolve from owner
+    # App Repository permissions: Actions + Administration Read and write
+    # App Organization permissions: Self-hosted runners Read and write
+    registry_url: http://anka.registry:8089
+    runner_group: macOS # optional; GitHub Enterprise (Cloud) runner groups
+    # queue_name: shared_queue # optional; override queue namespace (defaults to owner)
 ```
 
-- Your PAT or Github App must have **Actions** and **Administration** Read & Write permissions.
-- To avoid 404s from the Github API, you need to be sure the app is installed on the repos you want to run jobs on.
-- You must define the database in the config.yml file either using the `database` section or the `global_database_*` variables. You can find installation instructions in the anklet main [README.md](../../README.md#database-setup).
-- If you are attempting to register runners for an entire organization, do NOT set `repo` and make sure your Github App has `Self-hosted runners` > `Read and write` permissions.
-- If your Organization level runner is registered and your public repo jobs are not picking it up even though the labels are a perfect match, make sure the Runner groups (likely `Default`) has `Allow public repositories`.
-- There are times when github will not register the runner for some reason. `registration_timeout_seconds` is available to set the custom seconds to wait before considering the runner registration failed (and retry on a new VM).
-- `skip_cpu_and_memory_resource_checks` (or global `global_skip_cpu_and_memory_resource_checks`) is intended for overcommit fleets. It allows multiple VMs to start even when host CPU/RAM capacity checks would normally block them, which can improve throughput in bursty workloads but may increase contention and job runtime variance under sustained load.
+### Auth
+
+PAT **or** GitHub App with **Actions** + **Administration** Read and write, and **Self-hosted runners** Read and write at the organization level. Install the App on the org, accept permission updates on that install, and include every repo that runs jobs (or **All repositories**). An install with empty permissions or zero selected repos will 403 on cancel.
+
+### Setup
+
+1. Create an [org webhook](../../receivers/github/README.md#organization-or-repository-webhook).
+2. Configure a matching `github_receiver` with the same `owner` (no `repo`).
+3. Set handler `owner` only; do **not** set `repo`.
+4. Confirm runners under the org’s Settings → Actions → Runners.
+5. If public repo jobs stay “Waiting for a runner…” while labels match, enable **Allow public repositories** on that org’s runner group (often `Default`).
+
+---
+
+## Enterprise scope (GitHub Enterprise Cloud)
+
+### When to use
+
+Use `enterprise` alone when your orgs live under one Enterprise Cloud account and you want **one** enterprise Hooks webhook and **one** handler pool for jobs from any org under that enterprise. Pair with an enterprise receiver. Do not set `owner` or `repo` on the same plugin.
+
+GitHub Enterprise Server (self-hosted GHES) and custom hosts are out of scope.
+
+### Pros
+
+- One webhook covers every org under the enterprise
+- One Redis queue / handler fleet instead of per-org Anklet stacks
+- Central enterprise runner list and runner groups
+
+### Cons
+
+- Requires Enterprise Cloud and more GitHub admin surface (enterprise Hooks, runner groups at enterprise **and** org)
+- Handler auth is stricter: classic PAT **and** GitHub App (enforced at startup)
+- No API redelivery for enterprise hook deliveries (UI only; receiver always skips redeliver)
+- Runners show on the **enterprise** runners page, not each org’s runners page — easy to miss while debugging
+- Misconfigured enterprise/org runner-group access leaves jobs waiting even when the runner is online
+
+### Config
+
+```yaml
+plugins:
+  - name: RUNNER_ENTERPRISE
+    plugin: github
+    enterprise: veertu-inc
+    runner_group: macOS
+    registry_url: http://anka.registry:8089
+    token: ghp_XXX # classic PAT with manage_runners:enterprise
+    private_key: /path/to/private-key.pem
+    app_id: 4487835
+    # installation_id unused for hybrid enterprise (org installs resolved per job)
+```
+
+### Auth (both required)
+
+Anklet will not start an enterprise handler if either piece is missing.
+
+1. **Classic PAT** with `manage_runners:enterprise` — enterprise runner register/list/remove. Create at [github.com/settings/tokens](https://github.com/settings/tokens) → **Tokens (classic)**. Set `token` or `global_token`. Fine-grained PATs and GitHub App tokens cannot call these APIs (`403 Resource not accessible by integration`).
+2. **GitHub App** (`private_key` / `global_private_key` + `app_id`) — per-org Actions get/cancel via each org’s App install. Do not rely on the PAT for cancel/get.
+   - Repository permissions: **Actions** and **Administration** → Read and write.
+   - Install the App on **each organization** that will run jobs. After changing App permissions, open each org install (Org → Settings → GitHub Apps → Configure) and **Accept** the update. Use **All repositories** or select every job repo. Empty `permissions` / zero repos still 403 on cancel.
+   - Enterprise-level App install is optional for this hybrid path (runners use the PAT). Useful if you manage org installs from the enterprise account.
+
+### Setup
+
+1. Create an [enterprise Hooks webhook](../../receivers/github/README.md#enterprise-global-webhook) (Workflow jobs). Enterprise App installs cannot receive App webhooks; use enterprise Hooks.
+2. Configure a matching `github_receiver` with `enterprise` only (secret is enough on the receiver).
+3. Configure the handler with `enterprise` only plus classic PAT + App as above.
+4. Find registered runners at `https://github.com/enterprises/{enterprise}/settings/actions/runners` (not under org/repo Settings → Actions → Runners).
+5. Configure the runner group Anklet uses (`Default` unless you set `runner_group`) at **both** levels:
+   1. **Enterprise:** Policies → Actions → Runner groups (`https://github.com/enterprises/{enterprise}/settings/actions/runner-groups`). Grant organization access to the orgs that run jobs. For public repos, enable **Allow public repositories**.
+   2. **Each organization:** Settings → Actions → Runner groups → **Shared by the Enterprise** → that same group. Enable **Allow public repositories** if needed, and set repository access to **All repositories** (or the repos that need runners). Example URL: `https://github.com/organizations/{org}/settings/actions/runner-groups`.
+6. Without step 5, jobs stay “Waiting for a runner…” even when the enterprise runner is online and labels match. Private-only orgs can skip **Allow public repositories** but still need org-level repository access set.
+
+---
+
+## Notes (all scopes)
+
+- You must define the database via the `database` section or `global_database_*` variables ([README.md](../../README.md#database-setup)).
+- `registration_timeout_seconds` sets how long to wait before treating runner registration as failed (then retry on a new VM). GitHub occasionally fails to register for no obvious reason.
+- `skip_cpu_and_memory_resource_checks` (or global `global_skip_cpu_and_memory_resource_checks`) skips host CPU/RAM admission checks so more VMs can start under burst load; sustained overcommit can increase contention and job runtime variance.
+- To avoid `404` / `403 Resource not accessible by integration` on get/cancel: grant Repository **Actions** + **Administration** Read and write, install the App on the relevant org(s), accept permission updates on each install, and include the target repos in the install’s repository access list.
 
 ---
 
@@ -88,7 +221,6 @@ plugins:
   - name: RUNNER1
     plugin: github
     owner: veertuinc
-    registration: repo
     # Merged with global_host_to_guest_folder_mounts (plugin entries after globals)
     host_to_guest_folder_mounts:
       - /Users/runner/.ssh:ssh_keys  # guest: /Volumes/My Shared Files/ssh_keys
@@ -251,6 +383,8 @@ Check that:
   - `idle`: The plugin is idle.
   - `draining`: The host drain file is present; the handler is not picking up new jobs.
   - `stopped`: The plugin is stopped.
+
+---
 
 ## Development
 

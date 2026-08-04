@@ -531,7 +531,10 @@ func worker(
 
 				logging.Info(pluginCtx, "starting plugin")
 
-				if plugin.Repo == "" {
+				switch plugin.GitHubScope() {
+				case config.GitHubScopeEnterprise:
+					logging.Info(pluginCtx, "enterprise set for plugin; using enterprise level plugin")
+				case config.GitHubScopeOrganization:
 					logging.Info(pluginCtx, "no repo set for plugin; assuming it's an organization level plugin")
 				}
 
@@ -640,7 +643,7 @@ func worker(
 					// cleanup metrics data when the plugin is stopped (otherwise it's orphaned in the aggregator)
 					if index == 0 {
 						// Capture values needed for cleanup
-						capturedOwner := plugin.Owner
+						capturedOwner := plugin.MetricsOwner()
 						capturedName := plugin.Name
 						capturedLogger := pluginLogger
 						capturedDatabase := databaseClient
@@ -666,7 +669,7 @@ func worker(
 						Name:        plugin.Name,
 						PluginName:  plugin.Plugin,
 						RepoName:    plugin.Repo,
-						OwnerName:   plugin.Owner,
+						OwnerName:   plugin.MetricsOwner(),
 						Status:      "idle",
 						StatusSince: time.Now(),
 					},
@@ -680,7 +683,7 @@ func worker(
 				// the key is the first plugin in the list's name
 				// The goRoutine inside shouild continue to run so only run this once
 				if index == 0 {
-					metrics.ExportMetricsToDB(workerCtx, pluginCtx, loadedConfig.Plugins[0].Owner+"/"+loadedConfig.Plugins[0].Name)
+					metrics.ExportMetricsToDB(workerCtx, pluginCtx, loadedConfig.Plugins[0].MetricsKeyEnding())
 				}
 
 				for {

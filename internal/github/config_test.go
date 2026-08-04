@@ -90,3 +90,26 @@ func TestRepositoryMarshalJSON(t *testing.T) {
 		t.Errorf("roundtrip Owner = %v, want %q", roundTripped.Owner, owner)
 	}
 }
+
+func TestQueueJob_RepositoryOwnerAndName(t *testing.T) {
+	owner := "veertuinc"
+	name := "anklet"
+	job := QueueJob{
+		Repository: Repository{
+			Owner: &owner,
+			Name:  &name,
+		},
+	}
+	gotOwner, gotName, err := job.RepositoryOwnerAndName()
+	if err != nil {
+		t.Fatalf("RepositoryOwnerAndName() error = %v", err)
+	}
+	if gotOwner != owner || gotName != name {
+		t.Errorf("RepositoryOwnerAndName() = %q, %q; want %q, %q", gotOwner, gotName, owner, name)
+	}
+
+	_, _, err = QueueJob{}.RepositoryOwnerAndName()
+	if err == nil {
+		t.Fatal("expected error for missing owner/name")
+	}
+}

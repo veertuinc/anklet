@@ -84,7 +84,8 @@ type Plugin struct {
 	Token                      string   `yaml:"token"`
 	Repo                       string   `yaml:"repo"`
 	Owner                      string   `yaml:"owner"`
-	QueueName                  string   `yaml:"queue_name"` // Optional: override queue namespace (defaults to Owner)
+	Enterprise                 string   `yaml:"enterprise"` // Optional: GitHub Enterprise Cloud slug (enterprise > org > repo)
+	QueueName                  string   `yaml:"queue_name"` // Optional: override queue namespace (defaults to Enterprise or Owner)
 	Database                   Database `yaml:"database"`
 	RegistryURL                string   `yaml:"registry_url"`
 	SkipPull                   bool     `yaml:"skip_pull"`
@@ -106,13 +107,108 @@ type Plugin struct {
 	HostToGuestFolderMounts []string `yaml:"host_to_guest_folder_mounts"`
 }
 
-// GetQueueOwner returns QueueName if set, otherwise returns Owner.
-// This allows multiple organizations to share a single queue namespace.
+// GitHubScope is the registration/webhook level for a GitHub plugin.
+type GitHubScope string
+
+const (
+	GitHubScopeEnterprise    GitHubScope = "enterprise"
+	GitHubScopeOrganization  GitHubScope = "organization"
+	GitHubScopeRepository    GitHubScope = "repository"
+	GitHubScopeUnspecified   GitHubScope = ""
+)
+
+// ValidateGitHubScope checks enterprise/owner/repo combinations.
+// Rejects repo without owner, and enterprise combined with owner or repo.
+func (p Plugin) ValidateGitHubScope() error {
+	if p.Enterprise != "" && (p.Owner != "" || p.Repo != "") {
+		return fmt.Errorf("enterprise cannot be combined with owner or repo; pick one scope level")
+	}
+	if p.Repo != "" && p.Owner == "" {
+		return fmt.Errorf("repo requires owner to be set")
+	}
+	if p.Enterprise == "" && p.Owner == "" {
+		return fmt.Errorf("enterprise or owner must be set")
+	}
+	return nil
+}
+
+// GitHubScope returns the resolved scope for this plugin.
+// Call ValidateGitHubScope first for invalid combinations.
+func (p Plugin) GitHubScope() GitHubScope {
+	if p.Enterprise != "" {
+		return GitHubScopeEnterprise
+	}
+	if p.Repo != "" {
+		return GitHubScopeRepository
+	}
+	if p.Owner != "" {
+		return GitHubScopeOrganization
+	}
+	return GitHubScopeUnspecified
+}
+
+// IsEnterpriseScope reports whether the plugin is enterprise-scoped.
+func (p Plugin) IsEnterpriseScope() bool {
+	return p.GitHubScope() == GitHubScopeEnterprise
+}
+
+// ValidateEnterpriseGitHubCredentials requires both a classic PAT and GitHub App
+// credentials for enterprise-scoped handlers. Non-enterprise plugins always pass.
+func (p Plugin) ValidateEnterpriseGitHubCredentials() error {
+	if !p.IsEnterpriseScope() {
+		return nil
+	}
+	if p.Token == "" {
+		return fmt.Errorf("enterprise scope requires a classic PAT (token or global_token) with manage_runners:enterprise")
+	}
+	if p.PrivateKey == "" || p.AppID == 0 {
+		return fmt.Errorf("enterprise scope requires GitHub App auth (private_key or global_private_key, plus app_id) for org Actions get/cancel")
+	}
+	return nil
+}
+
+// GitHubRegistrationURL returns the Actions runner registration URL for this plugin's scope.
+func (p Plugin) GitHubRegistrationURL() string {
+	switch p.GitHubScope() {
+	case GitHubScopeEnterprise:
+		return fmt.Sprintf("https://github.com/enterprises/%s", p.Enterprise)
+	case GitHubScopeRepository:
+		return fmt.Sprintf("https://github.com/%s/%s", p.Owner, p.Repo)
+	case GitHubScopeOrganization:
+		return fmt.Sprintf("https://github.com/%s", p.Owner)
+	default:
+		return ""
+	}
+}
+
+// GetQueueOwner returns QueueName if set, otherwise Enterprise if set, otherwise Owner.
+// This allows multiple organizations (or an enterprise) to share a single queue namespace.
 func (p Plugin) GetQueueOwner() string {
 	if p.QueueName != "" {
 		return p.QueueName
 	}
+	if p.Enterprise != "" {
+		return p.Enterprise
+	}
 	return p.Owner
+}
+
+// MetricsOwner returns the scope segment for Redis metrics keys: Owner, else Enterprise.
+// Unlike GetQueueOwner, this ignores QueueName so shared queues still get distinct metrics keys.
+func (p Plugin) MetricsOwner() string {
+	if p.Owner != "" {
+		return p.Owner
+	}
+	return p.Enterprise
+}
+
+// MetricsKeyEnding returns "{owner|enterprise}/{name}", or just "{name}" if neither scope is set.
+// Used as the suffix for Redis keys: anklet/metrics/{MetricsKeyEnding}.
+func (p Plugin) MetricsKeyEnding() string {
+	if owner := p.MetricsOwner(); owner != "" {
+		return owner + "/" + p.Name
+	}
+	return p.Name
 }
 
 // AnyHostToGuestFolderMountsConfigured reports whether any global or per-plugin host-to-guest folder mounts are set.

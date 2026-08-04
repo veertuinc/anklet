@@ -2,6 +2,8 @@
 
 You can run multiple Anklet instances on the same host with different configurations. This is useful when you need to service multiple GitHub organizations, each with their own receiver and handler setup.
 
+If all organizations sit under one GitHub Enterprise Cloud account, you can instead use a single enterprise-scoped receiver and handler (`enterprise: your-enterprise-slug`) so one webhook covers every org. Scope chooser, when-to-use, pros/cons, and setup: [handler scopes](../plugins/handlers/github/README.md#choosing-a-github-scope) and [receiver scopes](../plugins/receivers/github/README.md#choosing-a-github-scope).
+
 ## Starting Multiple Instances
 
 Use the `-c` flag to specify different config files for each instance:
@@ -88,11 +90,13 @@ Each organization needs its own webhook configured in GitHub pointing to its res
 - **Org 1**: `http://your-host:54321/jobs/v1/receiver`
 - **Org 2**: `http://your-host:54322/jobs/v1/receiver`
 
+Alternatively, configure one **enterprise** webhook under Enterprise → Settings → Hooks pointing at a single receiver (`enterprise: your-enterprise-slug`). That replaces per-org webhooks when one Anklet queue/handler pool should serve the whole enterprise.
+
 ## Shared Resources
 
 ### Redis Database
 
-Both instances can share the same Redis database (see below). However, by default, job queues are namespaced by owner (e.g., `anklet/jobs/github/queued/org1` vs `anklet/jobs/github/queued/org2`), so there are no conflicts.
+Both instances can share the same Redis database (see below). However, by default, job queues are namespaced by owner or enterprise (e.g., `anklet/jobs/github/queued/org1` vs `anklet/jobs/github/queued/org2`, or `anklet/jobs/github/queued/veertu-inc` for enterprise scope), so there are no conflicts.
 
 ### Anka CLI
 

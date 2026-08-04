@@ -433,10 +433,21 @@ func sendCancelWorkflowRun(
 	if err != nil {
 		return err
 	}
+	jobOwner, jobRepo, err := queuedJob.RepositoryOwnerAndName()
+	if err != nil {
+		return err
+	}
+	if wrapper, wrapperErr := internalGithub.GetGitHubClientWrapperFromContext(pluginCtx); wrapperErr == nil {
+		orgClient, orgErr := wrapper.ClientForOrganization(pluginCtx, jobOwner)
+		if orgErr != nil {
+			return orgErr
+		}
+		githubClient = orgClient
+	}
 	cancelSent := false
 	for {
 		newPluginCtx, workflowRun, _, err := internalGithub.ExecuteGitHubClientFunction(workerCtx, pluginCtx, func() (*github.WorkflowRun, *github.Response, error) {
-			workflowRun, resp, err := githubClient.Actions.GetWorkflowRunByID(context.Background(), pluginConfig.Owner, *queuedJob.Repository.Name, *queuedJob.WorkflowJob.RunID)
+			workflowRun, resp, err := githubClient.Actions.GetWorkflowRunByID(context.Background(), jobOwner, jobRepo, *queuedJob.WorkflowJob.RunID)
 			return workflowRun, resp, err
 		})
 		if err != nil {
@@ -463,12 +474,15 @@ func sendCancelWorkflowRun(
 			logging.Warn(pluginCtx, "workflow run is still active... waiting for cancellation so we can clean up...", "workflow_run_id", *queuedJob.WorkflowJob.RunID)
 			if !cancelSent { // this has to happen here so that it doesn't error with "409 Cannot cancel a workflow run that is completed. " if the job is already cancelled
 				newPluginCtx, cancelResponse, _, cancelErr := internalGithub.ExecuteGitHubClientFunction(workerCtx, pluginCtx, func() (*github.Response, *github.Response, error) {
-					resp, err := githubClient.Actions.CancelWorkflowRunByID(context.Background(), pluginConfig.Owner, *queuedJob.Repository.Name, *queuedJob.WorkflowJob.RunID)
+					resp, err := githubClient.Actions.CancelWorkflowRunByID(context.Background(), jobOwner, jobRepo, *queuedJob.WorkflowJob.RunID)
 					return resp, nil, err
 				})
 				// don't use cancelResponse.Response.StatusCode or else it'll error with SIGSEV
 				if cancelErr != nil && !strings.Contains(cancelErr.Error(), "try again later") {
-					logging.Error(newPluginCtx, "error executing githubClient.Actions.CancelWorkflowRunByID", "error", cancelErr, "response", cancelResponse)
+					if strings.Contains(cancelErr.Error(), "Resource not accessible by integration") {
+						cancelErr = fmt.Errorf("%w (GitHub App needs Repository permissions Actions + Administration Read and write on org %s, and must be installed on that org/repos; accept any pending permission update)", cancelErr, jobOwner)
+					}
+					logging.Error(newPluginCtx, "error executing githubClient.Actions.CancelWorkflowRunByID", "error", cancelErr, "response", cancelResponse, "owner", jobOwner, "repo", jobRepo)
 					return cancelErr
 				}
 				pluginCtx = newPluginCtx
@@ -1309,11 +1323,17 @@ func Run(
 		return pluginCtx, err
 	}
 
-	if pluginConfig.Token == "" && pluginConfig.PrivateKey == "" {
+	if err := pluginConfig.ValidateGitHubScope(); err != nil {
+		return pluginCtx, fmt.Errorf("invalid github scope in %s:plugins:%s: %w", configFileName, pluginConfig.Name, err)
+	}
+	if err := pluginConfig.ValidateEnterpriseGitHubCredentials(); err != nil {
+		return pluginCtx, fmt.Errorf("%s:plugins:%s: %w", configFileName, pluginConfig.Name, err)
+	}
+	if !pluginConfig.IsEnterpriseScope() && pluginConfig.Token == "" && pluginConfig.PrivateKey == "" {
 		return pluginCtx, fmt.Errorf("token or private_key are not set at global level or in %s:plugins:%s<token/private_key>", configFileName, pluginConfig.Name)
 	}
-	if pluginConfig.PrivateKey != "" && (pluginConfig.AppID == 0 || pluginConfig.InstallationID == 0) {
-		return pluginCtx, fmt.Errorf("private_key, app_id, and installation_id must all be set in %s:plugins:%s<token/private_key>", configFileName, pluginConfig.Name)
+	if pluginConfig.PrivateKey != "" && pluginConfig.AppID == 0 {
+		return pluginCtx, fmt.Errorf("private_key and app_id must both be set in %s:plugins:%s (for org/repo App-only auth, set installation_id or omit it to resolve from owner; enterprise hybrid ignores installation_id on the default client)", configFileName, pluginConfig.Name)
 	}
 	if strings.HasPrefix(pluginConfig.PrivateKey, "~/") {
 		homeDir, err := os.UserHomeDir()
@@ -1322,33 +1342,22 @@ func Run(
 		}
 		pluginConfig.PrivateKey = filepath.Join(homeDir, pluginConfig.PrivateKey[2:])
 	}
-	if pluginConfig.Owner == "" {
-		return pluginCtx, fmt.Errorf("owner is not set in %s:plugins:%s<owner>", configFileName, pluginConfig.Name)
-	}
-	// if pluginConfig.Repo == "" {
-	// 	logging.Panic(workerCtx, pluginCtx, "repo is not set in anklet.yaml:plugins:"+pluginConfig.Name+":repo")
-	// }
 
-	var githubClient *github.Client
-	githubClient, err = internalGithub.AuthenticateAndReturnGitHubClient(
+	_, githubWrapperClient, err := internalGithub.AuthenticateAndReturnGitHubClient(
 		pluginCtx,
 		pluginConfig.PrivateKey,
 		pluginConfig.AppID,
 		pluginConfig.InstallationID,
 		pluginConfig.Token,
+		pluginConfig.Enterprise,
+		pluginConfig.Owner,
 	)
 	if err != nil {
 		// logging.Error(pluginCtx, "error authenticating github client", "error", err)
 		return pluginCtx, fmt.Errorf("error authenticating github client: %s", err.Error())
 	}
-	githubWrapperClient := internalGithub.NewGitHubClientWrapper(githubClient)
 	pluginCtx = context.WithValue(pluginCtx, config.ContextKey("githubwrapperclient"), githubWrapperClient)
-	var repositoryURL string
-	if pluginConfig.Repo != "" {
-		repositoryURL = fmt.Sprintf("https://github.com/%s/%s", pluginConfig.Owner, pluginConfig.Repo)
-	} else {
-		repositoryURL = fmt.Sprintf("https://github.com/%s", pluginConfig.Owner)
-	}
+	repositoryURL := pluginConfig.GitHubRegistrationURL()
 	// pluginCtx = logging.AppendCtx(pluginCtx, slog.String("owner", pluginConfig.Owner))
 
 	// wait group so we can wait for the goroutine to finish before exiting the service
@@ -1740,8 +1749,9 @@ func Run(
 			}
 
 			// Check if this job belongs to this handler's organization
-			// If queue_name is used for shared queues, only process jobs matching this handler's owner
-			if queuedJob.Repository.Owner != nil && *queuedJob.Repository.Owner != pluginConfig.Owner {
+			// If queue_name is used for shared queues, only process jobs matching this handler's owner.
+			// Enterprise handlers accept jobs from any org under the enterprise.
+			if !pluginConfig.IsEnterpriseScope() && queuedJob.Repository.Owner != nil && *queuedJob.Repository.Owner != pluginConfig.Owner {
 				logging.Debug(pluginCtx, "skipping job from different organization",
 					"jobOwner", *queuedJob.Repository.Owner,
 					"handlerOwner", pluginConfig.Owner,
@@ -2241,20 +2251,35 @@ func Run(
 	}
 
 	// Get runner registration token
+	githubClient, err := internalGithub.GetGitHubClientFromContext(pluginCtx)
+	if err != nil {
+		logging.Error(pluginCtx, "error getting github client from context", "error", err)
+		pluginGlobals.RetryChannel <- "error_getting_github_client"
+		return pluginCtx, nil
+	}
 	var runnerRegistration *github.RegistrationToken
 	var response *github.Response
-	if pluginConfig.Repo != "" {
+	switch pluginConfig.GitHubScope() {
+	case config.GitHubScopeRepository:
 		pluginCtx, runnerRegistration, response, err = internalGithub.ExecuteGitHubClientFunction(workerCtx, pluginCtx, func() (*github.RegistrationToken, *github.Response, error) {
 			runnerRegistration, resp, err := githubClient.Actions.CreateRegistrationToken(context.Background(), pluginConfig.Owner, pluginConfig.Repo)
 			return runnerRegistration, resp, err
 		})
-	} else {
+	case config.GitHubScopeEnterprise:
+		pluginCtx, runnerRegistration, response, err = internalGithub.ExecuteGitHubClientFunction(workerCtx, pluginCtx, func() (*github.RegistrationToken, *github.Response, error) {
+			runnerRegistration, resp, err := githubClient.Enterprise.CreateRegistrationToken(context.Background(), pluginConfig.Enterprise)
+			return runnerRegistration, resp, err
+		})
+	default:
 		pluginCtx, runnerRegistration, response, err = internalGithub.ExecuteGitHubClientFunction(workerCtx, pluginCtx, func() (*github.RegistrationToken, *github.Response, error) {
 			runnerRegistration, resp, err := githubClient.Actions.CreateOrganizationRegistrationToken(context.Background(), pluginConfig.Owner)
 			return runnerRegistration, resp, err
 		})
 	}
 	if err != nil {
+		if pluginConfig.IsEnterpriseScope() && strings.Contains(err.Error(), "Resource not accessible by integration") {
+			err = fmt.Errorf("%w (GitHub Apps cannot call enterprise runner APIs; set plugins.%s.token to a classic PAT with manage_runners:enterprise — App private_key can stay for org Actions)", err, pluginConfig.Name)
+		}
 		logging.Error(pluginCtx, "error creating registration token", "error", err, "response", response)
 		metricsData.IncrementTotalFailedRunsSinceStart(workerCtx, pluginCtx)
 		pluginGlobals.RetryChannel <- "error_creating_registration_token"
@@ -2509,12 +2534,18 @@ func removeSelfHostedRunner(
 	if (queuedJob.WorkflowJob.Conclusion != nil && *queuedJob.WorkflowJob.Conclusion == "failure") ||
 		(queuedJob.Action != "" && queuedJob.Action == "remove_self_hosted_runner") {
 		logging.Info(pluginCtx, "removeSelfHostedRunner | checking for runners to delete", "queuedJob", queuedJob)
-		if pluginConfig.Repo != "" {
+		switch pluginConfig.GitHubScope() {
+		case config.GitHubScopeRepository:
 			pluginCtx, runnersList, response, err = internalGithub.ExecuteGitHubClientFunction(workerCtx, pluginCtx, func() (*github.Runners, *github.Response, error) {
 				runnersList, resp, err := githubClient.Actions.ListRunners(context.Background(), pluginConfig.Owner, pluginConfig.Repo, &github.ListRunnersOptions{})
 				return runnersList, resp, err
 			})
-		} else {
+		case config.GitHubScopeEnterprise:
+			pluginCtx, runnersList, response, err = internalGithub.ExecuteGitHubClientFunction(workerCtx, pluginCtx, func() (*github.Runners, *github.Response, error) {
+				runnersList, resp, err := githubClient.Enterprise.ListRunners(context.Background(), pluginConfig.Enterprise, &github.ListRunnersOptions{})
+				return runnersList, resp, err
+			})
+		default:
 			pluginCtx, runnersList, response, err = internalGithub.ExecuteGitHubClientFunction(workerCtx, pluginCtx, func() (*github.Runners, *github.Response, error) {
 				runnersList, resp, err := githubClient.Actions.ListOrganizationRunners(context.Background(), pluginConfig.Owner, &github.ListRunnersOptions{})
 				return runnersList, resp, err
@@ -2534,17 +2565,7 @@ func removeSelfHostedRunner(
 					// found = true
 					// First attempt to remove the runner without canceling
 					var removeErr error
-					if pluginConfig.Repo != "" {
-						pluginCtx, _, _, removeErr = internalGithub.ExecuteGitHubClientFunction(workerCtx, pluginCtx, func() (*github.Response, *github.Response, error) {
-							response, err := githubClient.Actions.RemoveRunner(context.Background(), pluginConfig.Owner, pluginConfig.Repo, *runner.ID)
-							return response, nil, err
-						})
-					} else {
-						pluginCtx, _, _, removeErr = internalGithub.ExecuteGitHubClientFunction(workerCtx, pluginCtx, func() (*github.Response, *github.Response, error) {
-							response, err := githubClient.Actions.RemoveOrganizationRunner(context.Background(), pluginConfig.Owner, *runner.ID)
-							return response, nil, err
-						})
-					}
+					pluginCtx, removeErr = removeRunnerByScope(workerCtx, pluginCtx, githubClient, pluginConfig, *runner.ID)
 
 					// Only cancel workflow if we get the specific "runner is currently running a job" error
 					if removeErr != nil && strings.Contains(removeErr.Error(), "is currently running a job and cannot be deleted") {
@@ -2556,17 +2577,7 @@ func removeSelfHostedRunner(
 						}
 
 						// Retry removing the runner after cancellation
-						if pluginConfig.Repo != "" {
-							pluginCtx, _, _, removeErr = internalGithub.ExecuteGitHubClientFunction(workerCtx, pluginCtx, func() (*github.Response, *github.Response, error) {
-								response, err := githubClient.Actions.RemoveRunner(context.Background(), pluginConfig.Owner, pluginConfig.Repo, *runner.ID)
-								return response, nil, err
-							})
-						} else {
-							pluginCtx, _, _, removeErr = internalGithub.ExecuteGitHubClientFunction(workerCtx, pluginCtx, func() (*github.Response, *github.Response, error) {
-								response, err := githubClient.Actions.RemoveOrganizationRunner(context.Background(), pluginConfig.Owner, *runner.ID)
-								return response, nil, err
-							})
-						}
+						pluginCtx, removeErr = removeRunnerByScope(workerCtx, pluginCtx, githubClient, pluginConfig, *runner.ID)
 					}
 
 					if removeErr != nil {
@@ -2583,4 +2594,32 @@ func removeSelfHostedRunner(
 			// }
 		}
 	}
+}
+
+func removeRunnerByScope(
+	workerCtx context.Context,
+	pluginCtx context.Context,
+	githubClient *github.Client,
+	pluginConfig config.Plugin,
+	runnerID int64,
+) (context.Context, error) {
+	var removeErr error
+	switch pluginConfig.GitHubScope() {
+	case config.GitHubScopeRepository:
+		pluginCtx, _, _, removeErr = internalGithub.ExecuteGitHubClientFunction(workerCtx, pluginCtx, func() (*github.Response, *github.Response, error) {
+			response, err := githubClient.Actions.RemoveRunner(context.Background(), pluginConfig.Owner, pluginConfig.Repo, runnerID)
+			return response, nil, err
+		})
+	case config.GitHubScopeEnterprise:
+		pluginCtx, _, _, removeErr = internalGithub.ExecuteGitHubClientFunction(workerCtx, pluginCtx, func() (*github.Response, *github.Response, error) {
+			response, err := githubClient.Enterprise.RemoveRunner(context.Background(), pluginConfig.Enterprise, runnerID)
+			return response, nil, err
+		})
+	default:
+		pluginCtx, _, _, removeErr = internalGithub.ExecuteGitHubClientFunction(workerCtx, pluginCtx, func() (*github.Response, *github.Response, error) {
+			response, err := githubClient.Actions.RemoveOrganizationRunner(context.Background(), pluginConfig.Owner, runnerID)
+			return response, nil, err
+		})
+	}
+	return pluginCtx, removeErr
 }

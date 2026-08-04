@@ -137,6 +137,7 @@ func GetPluginAttributes(ctx context.Context) map[string]any {
 	if pluginConfig.Name != "" {
 		attributes["repo"] = pluginConfig.Repo
 		attributes["owner"] = pluginConfig.Owner
+		attributes["enterprise"] = pluginConfig.Enterprise
 		attributes["plugin"] = pluginConfig.Plugin
 		attributes["name"] = pluginConfig.Name
 	}

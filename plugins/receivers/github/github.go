@@ -67,7 +67,21 @@ func Run(
 		return pluginCtx, err
 	}
 
-	if pluginConfig.Token == "" && pluginConfig.PrivateKey == "" {
+	if err := pluginConfig.ValidateGitHubScope(); err != nil {
+		return pluginCtx, fmt.Errorf("invalid github scope in %s:plugins:%s: %w", configFileName, pluginConfig.Name, err)
+	}
+	if pluginConfig.Secret == "" {
+		return pluginCtx, fmt.Errorf("secret is not set in %s:plugins:%s<secret>", configFileName, pluginConfig.Name)
+	}
+	// Enterprise Cloud has no public hook-delivery REST API; redelivery is UI-only.
+	// Webhook ingest only needs the shared secret — no GitHub App/PAT auth required.
+	if pluginConfig.IsEnterpriseScope() {
+		if !pluginConfig.SkipRedeliver {
+			logging.Info(pluginCtx, "enterprise scope has no hook delivery API; skipping webhook redelivery (use GitHub UI to redeliver failed deliveries)")
+		}
+		pluginConfig.SkipRedeliver = true
+	}
+	if !pluginConfig.IsEnterpriseScope() && pluginConfig.Token == "" && pluginConfig.PrivateKey == "" {
 		return pluginCtx, fmt.Errorf("token or private_key are not set at global level or in %s:plugins:%s<token/private_key>", configFileName, pluginConfig.Name)
 	}
 	if strings.HasPrefix(pluginConfig.PrivateKey, "~/") {
@@ -77,12 +91,6 @@ func Run(
 		}
 		pluginConfig.PrivateKey = filepath.Join(homeDir, pluginConfig.PrivateKey[2:])
 	}
-	if pluginConfig.Owner == "" {
-		return pluginCtx, fmt.Errorf("owner is not set in %s:plugins:%s<owner>", configFileName, pluginConfig.Name)
-	}
-	if pluginConfig.Secret == "" {
-		return pluginCtx, fmt.Errorf("secret is not set in %s:plugins:%s<secret>", configFileName, pluginConfig.Name)
-	}
 
 	databaseContainer, err := database.GetDatabaseFromContext(pluginCtx)
 	if err != nil {
@@ -90,15 +98,23 @@ func Run(
 	}
 
 	var githubClient *github.Client
-	githubClient, err = internalGithub.AuthenticateAndReturnGitHubClient(
-		pluginCtx,
-		pluginConfig.PrivateKey,
-		pluginConfig.AppID,
-		pluginConfig.InstallationID,
-		pluginConfig.Token,
-	)
-	if err != nil {
-		return pluginCtx, fmt.Errorf("error authenticating github client: %s", err.Error())
+	var githubWrapperClient *internalGithub.GitHubClientWrapper
+	if !pluginConfig.IsEnterpriseScope() {
+		githubClient, githubWrapperClient, err = internalGithub.AuthenticateAndReturnGitHubClient(
+			pluginCtx,
+			pluginConfig.PrivateKey,
+			pluginConfig.AppID,
+			pluginConfig.InstallationID,
+			pluginConfig.Token,
+			pluginConfig.Enterprise,
+			pluginConfig.Owner,
+		)
+		if err != nil {
+			return pluginCtx, fmt.Errorf("error authenticating github client: %s", err.Error())
+		}
+		pluginCtx = context.WithValue(pluginCtx, config.ContextKey("githubwrapperclient"), githubWrapperClient)
+	} else {
+		logging.Debug(pluginCtx, "enterprise receiver skipping GitHub API authentication (webhook secret only)")
 	}
 
 	queueOwner := pluginConfig.GetQueueOwner()
@@ -168,17 +184,20 @@ func Run(
 				slog.Any("ankaVM", simplifiedWorkflowJobEvent.AnkaVM),
 			))
 			webhookCtx = logging.AppendCtx(webhookCtx, slog.String("deliveryID", deliveryID))
+			if simplifiedWorkflowJobEvent.WorkflowJob.ID != nil {
+				webhookCtx = logging.AppendCtx(webhookCtx, slog.Int64("workflowJobID", *simplifiedWorkflowJobEvent.WorkflowJob.ID))
+			}
+			if simplifiedWorkflowJobEvent.WorkflowJob.RunID != nil {
+				webhookCtx = logging.AppendCtx(webhookCtx, slog.Int64("workflowJobRunID", *simplifiedWorkflowJobEvent.WorkflowJob.RunID))
+			}
+			if simplifiedWorkflowJobEvent.WorkflowJob.WorkflowName != nil {
+				webhookCtx = logging.AppendCtx(webhookCtx, slog.String("workflowName", *simplifiedWorkflowJobEvent.WorkflowJob.WorkflowName))
+			}
+			if simplifiedWorkflowJobEvent.Repository.Name != nil && simplifiedWorkflowJobEvent.Repository.Owner != nil {
+				webhookCtx = logging.AppendCtx(webhookCtx, slog.String("repository", *simplifiedWorkflowJobEvent.Repository.Owner+"/"+*simplifiedWorkflowJobEvent.Repository.Name))
+			}
 
 			logging.Info(webhookCtx, "received workflow job to consider")
-			if workflowJob.WorkflowJob.ID != nil {
-				logging.Info(webhookCtx, "workflow job ID", "workflowJobID", *workflowJob.WorkflowJob.ID)
-			}
-			if workflowJob.WorkflowJob.RunID != nil {
-				logging.Info(webhookCtx, "workflow job run ID", "workflowJobRunID", *workflowJob.WorkflowJob.RunID)
-			}
-			if workflowJob.WorkflowJob.WorkflowName != nil {
-				logging.Info(webhookCtx, "workflow job workflow name", "workflowJobWorkflowName", *workflowJob.WorkflowJob.WorkflowName)
-			}
 			if workflowJob.WorkflowJob.HTMLURL != nil {
 				logging.Info(webhookCtx, "workflow job HTML URL", "workflowJobHTMLURL", *workflowJob.WorkflowJob.HTMLURL)
 			}
@@ -225,7 +244,10 @@ func Run(
 							logging.Error(webhookCtx, "error pushing job to queue", "error", pushErr)
 							return
 						}
-						logging.Info(webhookCtx, "job pushed to queued queue", "queue", queuedQueueName, "queue_length", queueLength)
+						logging.Info(webhookCtx, "job pushed to queued queue",
+							"queue", queuedQueueName,
+							"queue_length", queueLength,
+						)
 					} else {
 						if inHandlerQueue {
 							logging.Warn(webhookCtx, "job already being processed by a handler, rejecting duplicate queued event", "queue", queuedQueueName)
@@ -380,126 +402,12 @@ func Run(
 		}
 	}()
 
-	// var allHooks []map[string]any
-
-	/// OLD STUFF
-
-	// if !pluginConfig.SkipRedeliver {
-	// 	// Redeliver queued jobs
-	// 	githubWrapperClient := internalGithub.NewGitHubClientWrapper(githubClient)
-	// 	pluginCtx = context.WithValue(pluginCtx, config.ContextKey("githubwrapperclient"), githubWrapperClient)
-	// 	limitForHooks := time.Now().Add(-time.Hour * time.Duration(pluginConfig.RedeliverHours)) // the time we want the stop search for redeliveries
-	// 	opts := &github.ListCursorOptions{PerPage: 10}
-	// 	logger.InfoContext(pluginCtx, fmt.Sprintf("listing hook deliveries for the last %d hours to see if any need redelivery (may take a while)...", pluginConfig.RedeliverHours))
-	// 	reachedLimitTime := false
-
-	// 	for {
-	// 		if reachedLimitTime {
-	// 			break
-	// 		}
-	// 		var hookDeliveries *[]*github.HookDelivery
-	// 		var response *github.Response
-	// 		var err error
-	// 		if isRepoSet {
-	// 			pluginCtx, hookDeliveries, response, err = ExecuteGitHubClientFunction(pluginCtx, logger, func() (*[]*github.HookDelivery, *github.Response, error) {
-	// 				hookDeliveries, response, err := githubClient.Repositories.ListHookDeliveries(pluginCtx, pluginConfig.Owner, pluginConfig.Repo, pluginConfig.HookID, opts)
-	// 				if err != nil {
-	// 					return nil, nil, err
-	// 				}
-	// 				return &hookDeliveries, response, nil
-	// 			})
-	// 		} else {
-	// 			pluginCtx, hookDeliveries, response, err = ExecuteGitHubClientFunction(pluginCtx, logger, func() (*[]*github.HookDelivery, *github.Response, error) {
-	// 				hookDeliveries, response, err := githubClient.Organizations.ListHookDeliveries(pluginCtx, pluginConfig.Owner, pluginConfig.HookID, opts)
-	// 				if err != nil {
-	// 					return nil, nil, err
-	// 				}
-	// 				return &hookDeliveries, response, nil
-	// 			})
-	// 		}
-	// 		if err != nil {
-	// 			logger.ErrorContext(pluginCtx, "error listing hooks", "error", err)
-	// 			return
-	// 		}
-
-	// 		// // Filter out any objects in hookDeliveries that have status_code != 200
-	// 		// var failedHookDeliveries []*github.HookDelivery
-	// 		// for _, hookDelivery := range *hookDeliveries {
-	// 		// 	if hookDelivery.StatusCode != nil && *hookDelivery.StatusCode != 200 {
-	// 		// 		failedHookDeliveries = append(failedHookDeliveries, hookDelivery)
-	// 		// 	}
-	// 		// }
-
-	// 		// // Pretty print hookDeliveries
-	// 		// hookDeliveriesJSON, err := json.MarshalIndent(failedHookDeliveries, "", "  ")
-	// 		// if err != nil {
-	// 		// 	logger.ErrorContext(pluginCtx, "error marshalling hook deliveries to JSON", "error", err)
-	// 		// 	return
-	// 		// }
-	// 		// fmt.Println("Hook Deliveries:", string(hookDeliveriesJSON))
-
-	// 		for _, hookDelivery := range *hookDeliveries {
-	// 			if hookDelivery.Action == nil { // this prevents webhooks like the ping which might be in the list from causing errors since they dont have an action
-	// 				continue
-	// 			}
-	// 			fmt.Println("hookDelivery", hookDelivery)
-	// 			if limitForHooks.After(hookDelivery.DeliveredAt.Time) {
-	// 				fmt.Println("reached end of time")
-	// 				reachedLimitTime = true
-	// 				break
-	// 			}
-	// 			if hookDelivery.StatusCode != nil && !*hookDelivery.Redelivery && *hookDelivery.Action != "in_progress" {
-	// 				var gottenHookDelivery *github.HookDelivery
-	// 				var err error
-	// 				if isRepoSet {
-	// 					pluginCtx, gottenHookDelivery, _, err = ExecuteGitHubClientFunction(pluginCtx, logger, func() (*github.HookDelivery, *github.Response, error) {
-	// 						gottenHookDelivery, response, err := githubClient.Repositories.GetHookDelivery(pluginCtx, pluginConfig.Owner, pluginConfig.Repo, pluginConfig.HookID, *hookDelivery.ID)
-	// 						if err != nil {
-	// 							return nil, nil, err
-	// 						}
-	// 						return gottenHookDelivery, response, nil
-	// 					})
-	// 				} else {
-	// 					pluginCtx, gottenHookDelivery, _, err = ExecuteGitHubClientFunction(pluginCtx, logger, func() (*github.HookDelivery, *github.Response, error) {
-	// 						gottenHookDelivery, response, err := githubClient.Organizations.GetHookDelivery(pluginCtx, pluginConfig.Owner, pluginConfig.HookID, *hookDelivery.ID)
-	// 						if err != nil {
-	// 							return nil, nil, err
-	// 						}
-	// 						return gottenHookDelivery, response, nil
-	// 					})
-	// 				}
-	// 				if err != nil {
-	// 					logger.ErrorContext(pluginCtx, "error listing hooks", "error", err)
-	// 					return
-	// 				}
-	// 				var workflowJobEvent github.WorkflowJobEvent
-	// 				err = json.Unmarshal(*gottenHookDelivery.Request.RawPayload, &workflowJobEvent)
-	// 				if err != nil {
-	// 					logger.ErrorContext(pluginCtx, "error unmarshalling hook request raw payload to HookResponse", "error", err)
-	// 					return
-	// 				}
-	// 				if !exists_in_array_partial(workflowJobEvent.WorkflowJob.Labels, []string{"anka-template"}) {
-	// 					continue
-	// 				}
-	// 				allHooks = append(allHooks, map[string]any{
-	// 					"hookDelivery":     gottenHookDelivery,
-	// 					"workflowJobEvent": workflowJobEvent,
-	// 				})
-	// 			}
-	// 		}
-	// 		if response.Cursor == "" {
-	// 			break
-	// 		}
-	// 		opts.Cursor = response.Cursor
-	// 	}
-	// }
-
 	var allHookDeliveries []*github.HookDelivery
 	toRedeliver := []*github.HookDelivery{}
 
 	if !pluginConfig.SkipRedeliver {
 		// Redeliver queued jobs
-		githubWrapperClient := internalGithub.NewGitHubClientWrapper(githubClient)
+		// Keep the authenticated wrapper (includes Apps transport for dynamic org installs).
 		pluginCtx = context.WithValue(pluginCtx, config.ContextKey("githubwrapperclient"), githubWrapperClient)
 		limitForHooks := time.Now().Add(-time.Hour * time.Duration(pluginConfig.RedeliverHours)) // the time we want the stop search for redeliveries
 		opts := &github.ListCursorOptions{PerPage: 100}                                          // Use max page size to minimize API calls

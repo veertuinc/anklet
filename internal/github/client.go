@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/bradleyfalzon/ghinstallation/v2"
@@ -18,7 +19,9 @@ import (
 )
 
 type GitHubClientWrapper struct {
-	client *github.Client
+	client        *github.Client
+	appsTransport *ghinstallation.AppsTransport // set when using GitHub App auth; enables per-org clients
+	orgClients    sync.Map                      // org login -> *github.Client
 }
 
 func NewGitHubClientWrapper(client *github.Client) *GitHubClientWrapper {
@@ -27,12 +30,63 @@ func NewGitHubClientWrapper(client *github.Client) *GitHubClientWrapper {
 	}
 }
 
-func GetGitHubClientFromContext(ctx context.Context) (*github.Client, error) {
+func GetGitHubClientWrapperFromContext(ctx context.Context) (*GitHubClientWrapper, error) {
 	wrapper, ok := ctx.Value(config.ContextKey("githubwrapperclient")).(*GitHubClientWrapper)
 	if !ok {
+		return nil, fmt.Errorf("GetGitHubClientWrapperFromContext failed")
+	}
+	return wrapper, nil
+}
+
+func GetGitHubClientFromContext(ctx context.Context) (*github.Client, error) {
+	wrapper, err := GetGitHubClientWrapperFromContext(ctx)
+	if err != nil {
 		return nil, fmt.Errorf("GetGitHubClientFromContext failed")
 	}
 	return wrapper.client, nil
+}
+
+// newSecondaryRateLimitedClient wraps base with GitHub secondary rate-limit waiting.
+// Always create a new client; never mutate a shared rateLimiter.Transport.
+func newSecondaryRateLimitedClient(ctx context.Context, base http.RoundTripper) *http.Client {
+	if base == nil {
+		base = http.DefaultTransport
+	}
+	return github_ratelimit.NewClient(
+		base,
+		github_secondary_ratelimit.WithLimitDetectedCallback(func(cbCtx *github_secondary_ratelimit.CallbackContext) {
+			logging.Warn(ctx, "GitHub secondary rate limit detected, sleeping until reset",
+				"resetTime", cbCtx.ResetTime,
+				"totalSleepTime", cbCtx.TotalSleepTime,
+			)
+		}),
+	)
+}
+
+// ClientForOrganization returns a client authenticated as the App installation for org.
+// When not using App auth (PAT) or appsTransport is unset, returns the default client.
+func (w *GitHubClientWrapper) ClientForOrganization(ctx context.Context, org string) (*github.Client, error) {
+	if w == nil {
+		return nil, fmt.Errorf("github client wrapper is nil")
+	}
+	if w.appsTransport == nil || org == "" {
+		return w.client, nil
+	}
+	if cached, ok := w.orgClients.Load(org); ok {
+		return cached.(*github.Client), nil
+	}
+	appClient := github.NewClient(&http.Client{Transport: w.appsTransport})
+	installation, _, err := appClient.Apps.FindOrganizationInstallation(ctx, org)
+	if err != nil {
+		return nil, fmt.Errorf("finding GitHub App installation for org %s: %w", org, err)
+	}
+	if installation.GetID() == 0 {
+		return nil, fmt.Errorf("GitHub App is not installed on organization %s", org)
+	}
+	itr := ghinstallation.NewFromAppsTransport(w.appsTransport, installation.GetID())
+	client := github.NewClient(newSecondaryRateLimitedClient(ctx, itr))
+	actual, _ := w.orgClients.LoadOrStore(org, client)
+	return actual.(*github.Client), nil
 }
 
 func GetRateLimitWaiterClientFromContext(ctx context.Context) (*http.Client, error) {
@@ -51,62 +105,232 @@ func GetHttpTransportFromContext(ctx context.Context) (*http.Transport, error) {
 	return httpTransport, nil
 }
 
+// AuthenticateAndReturnGitHubClient builds a GitHub API client.
+// When privateKey is set, appID is required. installationID may be 0: in that case the
+// installation is resolved from enterprise (GET /enterprises/{enterprise}/installation)
+// or owner (FindOrganizationInstallation). The returned wrapper can mint per-org clients
+// when App auth was used (appsTransport is set).
+//
+// Enterprise runner APIs (registration/list/remove) are not accessible to GitHub App
+// installation tokens ("Resource not accessible by integration"). When enterprise is set
+// and a classic PAT (token) is also provided, the default client uses the PAT for those
+// APIs while appsTransport remains available for per-org Actions calls via
+// ClientForOrganization. In that hybrid mode, installation_id is unused for the default
+// client (org installs are resolved per job owner).
 func AuthenticateAndReturnGitHubClient(
 	ctx context.Context,
 	privateKey string,
 	appID int64,
 	installationID int64,
 	token string,
-) (*github.Client, error) {
+	enterprise string,
+	owner string,
+) (*github.Client, *GitHubClientWrapper, error) {
 
 	var client *github.Client
 	var err error
 	var rateLimiter *http.Client
 	rateLimiter, err = GetRateLimitWaiterClientFromContext(ctx)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	var httpTransport *http.Transport
 	httpTransport, err = GetHttpTransportFromContext(ctx)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if httpTransport == nil {
 		httpTransport = http.DefaultTransport.(*http.Transport)
 	}
 	if rateLimiter == nil {
-		rateLimiter = github_ratelimit.NewClient(
-			httpTransport,
-			github_secondary_ratelimit.WithLimitDetectedCallback(func(cbCtx *github_secondary_ratelimit.CallbackContext) {
-				logging.Warn(ctx, "GitHub secondary rate limit detected, sleeping until reset",
-					"resetTime", cbCtx.ResetTime,
-					"totalSleepTime", cbCtx.TotalSleepTime,
-				)
-			}),
-		)
+		rateLimiter = newSecondaryRateLimitedClient(ctx, httpTransport)
 	}
+	wrapper := &GitHubClientWrapper{}
 	if privateKey != "" {
+		if appID == 0 {
+			return nil, nil, fmt.Errorf("app_id is required when private_key is set")
+		}
 		// support private key in a file or as text
 		var privateKeyBytes []byte
 		privateKeyBytes, err = os.ReadFile(privateKey)
 		if err != nil {
 			privateKeyBytes = []byte(privateKey)
 		}
-		itr, err := ghinstallation.New(httpTransport, appID, installationID, privateKeyBytes)
+		appsTransport, err := ghinstallation.NewAppsTransport(httpTransport, appID, privateKeyBytes)
 		if err != nil {
 			if strings.Contains(err.Error(), "invalid key") {
-				return nil, fmt.Errorf("error creating github app installation token: %s (does the key exist on the filesystem?)", err.Error())
-			} else {
-				return nil, fmt.Errorf("error creating github app installation token: %s", err.Error())
+				return nil, nil, fmt.Errorf("error creating github app transport: %s (does the key exist on the filesystem?)", err.Error())
 			}
+			return nil, nil, fmt.Errorf("error creating github app transport: %s", err.Error())
 		}
-		rateLimiter.Transport = itr
-		client = github.NewClient(rateLimiter)
+		wrapper.appsTransport = appsTransport
+
+		// Enterprise self-hosted runner APIs require a classic PAT; App tokens get 403.
+		if enterprise != "" && token != "" {
+			logging.Info(ctx, "using classic PAT for enterprise GitHub client (runner APIs); App auth kept for org-scoped Actions",
+				"enterprise", enterprise,
+			)
+			client = github.NewClient(rateLimiter).WithAuthToken(token)
+		} else {
+			resolvedInstallationID := installationID
+			if resolvedInstallationID == 0 {
+				resolvedInstallationID, err = resolveInstallationID(ctx, appsTransport, enterprise, owner)
+				if err != nil {
+					return nil, nil, err
+				}
+				logging.Info(ctx, "resolved GitHub App installation_id",
+					"installationID", resolvedInstallationID,
+					"enterprise", enterprise,
+					"owner", owner,
+				)
+			} else {
+				logging.Info(ctx, "using configured GitHub App installation_id",
+					"installationID", resolvedInstallationID,
+					"enterprise", enterprise,
+					"owner", owner,
+				)
+			}
+
+			// Do not mutate the shared context rateLimiter.Transport; wrap the
+			// installation transport in a fresh secondary rate-limit client.
+			itr := ghinstallation.NewFromAppsTransport(appsTransport, resolvedInstallationID)
+			client = github.NewClient(newSecondaryRateLimitedClient(ctx, itr))
+		}
 	} else {
 		client = github.NewClient(rateLimiter).WithAuthToken(token)
 	}
-	return client, nil
+	wrapper.client = client
+	return client, wrapper, nil
+}
 
+func resolveInstallationID(
+	ctx context.Context,
+	appsTransport *ghinstallation.AppsTransport,
+	enterprise string,
+	owner string,
+) (int64, error) {
+	appClient := github.NewClient(&http.Client{Transport: appsTransport})
+	if enterprise != "" {
+		id, err := findEnterpriseInstallationID(ctx, appClient, enterprise)
+		if err != nil {
+			return 0, fmt.Errorf("resolving enterprise GitHub App installation for %s: %w", enterprise, err)
+		}
+		return id, nil
+	}
+	if owner != "" {
+		installation, _, err := appClient.Apps.FindOrganizationInstallation(ctx, owner)
+		if err != nil {
+			return 0, fmt.Errorf("resolving organization GitHub App installation for %s: %w", owner, err)
+		}
+		if installation.GetID() == 0 {
+			return 0, fmt.Errorf("GitHub App is not installed on organization %s", owner)
+		}
+		return installation.GetID(), nil
+	}
+	return 0, fmt.Errorf("installation_id is required when private_key is set unless enterprise or owner is set to resolve it")
+}
+
+// findEnterpriseInstallationID resolves the App's installation on an enterprise.
+// Tries GET /enterprises/{enterprise}/installation first, then falls back to
+// paginating GET /app/installations for TargetType=Enterprise.
+func findEnterpriseInstallationID(ctx context.Context, client *github.Client, enterprise string) (int64, error) {
+	u := fmt.Sprintf("enterprises/%s/installation", enterprise)
+	req, err := client.NewRequest("GET", u, nil)
+	if err != nil {
+		return 0, err
+	}
+	installation := new(github.Installation)
+	_, err = client.Do(ctx, req, installation)
+	if err == nil {
+		if installation.GetID() == 0 {
+			return 0, fmt.Errorf("GitHub App is not installed on enterprise %s", enterprise)
+		}
+		return installation.GetID(), nil
+	}
+	if !is404Error(err) {
+		return 0, err
+	}
+
+	id, foundInstalls, listErr := findEnterpriseInstallationIDFromList(ctx, client, enterprise)
+	if listErr != nil {
+		return 0, fmt.Errorf("%w (also failed listing app installations: %v)", err, listErr)
+	}
+	if id != 0 {
+		logging.Info(ctx, "resolved enterprise GitHub App installation via ListInstallations fallback",
+			"enterprise", enterprise,
+			"installationID", id,
+		)
+		return id, nil
+	}
+	return 0, fmt.Errorf(
+		"GitHub App is not installed on enterprise %q (GET /enterprises/%s/installation returned 404). Install the App on the enterprise account, or set installation_id explicitly. For enterprise handlers, prefer classic PAT + App hybrid auth (PAT for runner APIs; org App installs for Actions). Current App installations: %s",
+		enterprise, enterprise, summarizeInstallations(foundInstalls),
+	)
+}
+
+func findEnterpriseInstallationIDFromList(
+	ctx context.Context,
+	client *github.Client,
+	enterprise string,
+) (int64, []*github.Installation, error) {
+	var found []*github.Installation
+	opts := &github.ListOptions{PerPage: 100}
+	for {
+		installations, resp, err := client.Apps.ListInstallations(ctx, opts)
+		if err != nil {
+			return 0, found, err
+		}
+		found = append(found, installations...)
+		if id := matchEnterpriseInstallation(installations, enterprise); id != 0 {
+			return id, found, nil
+		}
+		if resp == nil || resp.NextPage == 0 {
+			break
+		}
+		opts.Page = resp.NextPage
+	}
+	return 0, found, nil
+}
+
+func matchEnterpriseInstallation(installations []*github.Installation, enterprise string) int64 {
+	for _, inst := range installations {
+		if inst == nil {
+			continue
+		}
+		if !strings.EqualFold(inst.GetTargetType(), "Enterprise") {
+			continue
+		}
+		account := inst.GetAccount()
+		if account == nil {
+			continue
+		}
+		// Enterprise account login is the enterprise slug in installation payloads.
+		if strings.EqualFold(account.GetLogin(), enterprise) {
+			return inst.GetID()
+		}
+	}
+	return 0
+}
+
+func summarizeInstallations(installations []*github.Installation) string {
+	if len(installations) == 0 {
+		return "none"
+	}
+	parts := make([]string, 0, len(installations))
+	for _, inst := range installations {
+		if inst == nil {
+			continue
+		}
+		accountLogin := ""
+		if account := inst.GetAccount(); account != nil {
+			accountLogin = account.GetLogin()
+		}
+		parts = append(parts, fmt.Sprintf("%s:%s(id=%d)", inst.GetTargetType(), accountLogin, inst.GetID()))
+	}
+	if len(parts) == 0 {
+		return "none"
+	}
+	return strings.Join(parts, ", ")
 }
 
 // https://github.com/gofri/go-github-ratelimit has yet to support primary rate limits, so we have to do it ourselves.

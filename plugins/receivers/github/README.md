@@ -1,54 +1,169 @@
 # GITHUB RECEIVER PLUGIN
 
-The Github Receiver Plugin is used to receive webhook events from github and store them in the database for the [Github Handler Plugin](../../handlers/github/README.md) to pick up and process.
+The Github Receiver Plugin receives webhook events from GitHub and stores them in the database for the [Github Handler Plugin](../../handlers/github/README.md) to process.
 
-### What you need:
+### What you need (every scope)
 
-1. An active database the receiver can access. For help setting up the database, see [Database Setup](https://github.com/veertuinc/anklet/tree/main?tab=readme-ov-file#database-setup). It needs to be the same database as the [Github Handler Plugin](../../handlers/github/README.md).
-1. Some sort of Auth method like a PAT or a Github App for the repo you want to receive webhooks for. They need:
-  - Repo Receiver: `Administration`, `Webhooks`, and `Actions` set to `Read and write`.
-  - Org Receiver: Under `Organization permissions` set `Administration`, `Webhooks`, and `Self-hosted runners` to `Read and write`.
-  - IMPORTANT: Make sure to check your email to verify any permission requests.
-1. A way to receive webhooks. This can be a public URL or IP that points to the server running the Anklet Github Receiver. Github will send the webhook to this endpoint over the internet.
-
-In the `config.yml`, you can define the `github_receiver` plugin as follows:
+1. The same Redis database as your handler(s). See [Database Setup](https://github.com/veertuinc/anklet/tree/main?tab=readme-ov-file#database-setup).
+1. A public URL or IP that reaches this host so GitHub can POST webhooks (path `/jobs/v1/receiver`).
+1. A shared webhook secret (`secret` on the plugin or `global_receiver_secret` / `ANKLET_GLOBAL_RECEIVER_SECRET`).
 
 **NOTE: Plugin `name` MUST be unique across all hosts and plugins in your Anklet cluster.**
 
-```
+Pair each receiver with a handler at the **same scope** (same queue namespace). Put the receiver **first** in `plugins:` so it clears `in_progress` and listens before handlers start. Do not mix `enterprise` with `owner`/`repo` on one plugin.
+
+## Choosing a GitHub scope
+
+| Scope | Config | Webhook location | Use when |
+| ----- | ------ | ---------------- | -------- |
+| Repository | `owner` + `repo` | Repo → Settings → Webhooks | One repo only |
+| Organization | `owner` only | Org → Settings → Webhooks | One org, all (or many) of its repos |
+| Enterprise | `enterprise` only | Enterprise → Settings → Hooks | Enterprise Cloud; one hook for every org under the enterprise |
+
+Pick the same scope for the matching [handler](../../handlers/github/README.md#choosing-a-github-scope). Most teams start with organization.
+
 ---
 
-. . .
+## Repository scope
 
-global_receiver_secret: 12345 # this can be set using the ANKLET_GLOBAL_RECEIVER_SECRET env var too
+### When to use
+
+Only one repository should enqueue jobs. Useful for a single product repo or for isolating a sensitive repo from the rest of the org.
+
+### Pros
+
+- Smallest webhook and queue surface
+- Repo-level webhook is easy to find and disable
+- Failed-delivery redelivery via GitHub API on startup (org/repo)
+
+### Cons
+
+- One webhook + receiver per repo as you scale
+- Broader org traffic never reaches this queue (by design)
+
+### Config
+
+```yaml
+global_receiver_secret: 12345
+plugins:
+  - name: GITHUB_WEBHOOK_RECEIVER_REPO
+    plugin: github_receiver
+    hook_id: 4897477123
+    port: 54321
+    owner: veertuinc
+    repo: anklet
+    token: github_pat_XXX
+    # or GitHub App:
+    # private_key: /Users/{YOUR USER HERE}/private-key.pem
+    # app_id: 949431
+    # installation_id: 52970581
+    # skip_redeliver: true
+    # redeliver_hours: 24
+```
+
+### Auth
+
+PAT or GitHub App with Repository **Administration**, **Webhooks**, and **Actions** Read and write (needed for hook-delivery redelivery). Check email for permission-request verification.
+
+### Setup
+
+1. Add a [repository webhook](#organization-or-repository-webhook) (Workflow jobs) pointing at `http(s)://{host}:{port}/jobs/v1/receiver` with the same secret.
+2. Set `hook_id` from the webhook’s URL/settings after creation.
+3. Run Anklet; confirm Redis keys under `anklet/jobs/github/queued/{owner}` (or your `queue_name`).
+
+---
+
+## Organization scope
+
+### When to use
+
+One GitHub organization should feed a shared Anklet queue for its repositories. Default choice for a single-org fleet.
+
+### Pros
+
+- One webhook covers the org
+- API redelivery of failed deliveries on startup (disable with `skip_redeliver: true`)
+- Matches the common org-level handler setup
+
+### Cons
+
+- Broader than repo scope; every matching `workflow_job` in the org can hit the queue (filtered by Anklet labels)
+- Multiple orgs need multiple receivers (or enterprise / shared-queue patterns — [running multiple instances](../../../docs/running-multiple-instances.md))
+
+### Config
+
+```yaml
+global_receiver_secret: 12345
 plugins:
   - name: GITHUB_WEBHOOK_RECEIVER_1
     plugin: github_receiver
     hook_id: 4897477123
     port: 54321
-    # secret: 12345
+    owner: veertuinc
     token: github_pat_XXX
     # private_key: /Users/{YOUR USER HERE}/private-key.pem
-    app_id: 949431
-    installation_id: 52970581
-    # repo: anklet # Optional; if you want to receive webhooks for a specific repo and not at the org level
-    owner: veertuinc
-    # queue_name: shared_queue # Optional; override the queue namespace (defaults to owner). Useful for multiple orgs sharing a queue.
-    # skip_redeliver: true # Optional; if you want to skip redelivering undelivered webhooks on startup
-    # redeliver_hours: 24 # Optional; default is 24 hours
-    #database:
-    #  url: localhost
-    #  port: 6379
-    #  user: ""
-    #  password: ""
-    #  database: 0
+    # app_id: 949431
+    # installation_id: 52970581
+    # queue_name: shared_queue
+    # skip_redeliver: true
+    # redeliver_hours: 24
 ```
 
-Some things to note:
+### Auth
 
-- If you leave off `repo`, the receiver will be an organization level receiver.
-- The receiver must come FIRST in the `plugins:` list. Do not place it after other plugins. This is required because the receiver clears the `in_progress` queue on startup and must be listening for webhooks, processing them if there is a completed item that came in while it was down, before handlers begin processing jobs.
-- **IMPORTANT**: On first start, it will scan for failed webhook deliveries for the past 24 hours and send a re-delivery request for each one. This is to ensure that all webhooks are delivered and processed and nothing in your plugins are orphaned or database. Avoid excessive restarts or else you'll eat up your API limits quickly. You can use `skip_redeliver: true` to disable this behavior.
+PAT or GitHub App. Organization permissions: **Administration**, **Webhooks**, and **Self-hosted runners** Read and write. Verify permission requests in email.
+
+### Setup
+
+1. Add an [organization webhook](#organization-or-repository-webhook) (Workflow jobs).
+2. Set `hook_id`, leave `repo` unset, leave `enterprise` unset.
+3. On startup Anklet lists failed deliveries for the last `redeliver_hours` (default 24) and redelivers as needed. Avoid restart loops; they burn API quota. Use `skip_redeliver: true` to turn that off.
+
+---
+
+## Enterprise scope (GitHub Enterprise Cloud)
+
+### When to use
+
+All orgs under one Enterprise Cloud account should share one webhook and one queue. Pair with an [enterprise handler](../../handlers/github/README.md#enterprise-scope-github-enterprise-cloud). Do not set `owner` or `repo`.
+
+### Pros
+
+- One Hooks webhook for every org under the enterprise
+- Receiver needs only the webhook secret (no PAT/App for live ingest)
+- Fewer Anklet receiver instances than one-per-org
+
+### Cons
+
+- No public REST API for enterprise hook deliveries — Anklet always skips API redelivery; use the GitHub enterprise Hooks UI to redeliver failures
+- Handler still needs classic PAT + GitHub App (receiver does not)
+- Needs Enterprise Cloud admin access to create Hooks
+- Easy to mis-pair with an org-scoped handler (queues will not match)
+
+### Config
+
+```yaml
+global_receiver_secret: 12345
+plugins:
+  - name: GITHUB_WEBHOOK_RECEIVER_ENTERPRISE
+    plugin: github_receiver
+    port: 54321
+    enterprise: veertu-inc
+    # skip_redeliver always enforced (no public hook-delivery API)
+    # App/PAT optional on the receiver; required on the enterprise handler
+```
+
+### Auth
+
+Live ingest: webhook secret only. No PAT/App on the receiver. The matching **handler** still needs classic PAT (`manage_runners:enterprise`) plus a GitHub App with Repository **Actions** + **Administration** Read and write — see the [handler README](../../handlers/github/README.md#enterprise-scope-github-enterprise-cloud).
+
+### Setup
+
+1. Add an [enterprise Hooks webhook](#enterprise-global-webhook) (Workflow jobs).
+2. Set `enterprise` to the enterprise slug; omit `owner`/`repo`.
+3. Trigger a workflow that uses an `anka-template:...` label under any org in the enterprise; confirm Redis has a job under `anklet/jobs/github/queued/{enterprise}`.
+
+---
 
 Once configured, you can run Anklet and, if everything is configured properly, you should see logs like this:
 
@@ -66,6 +181,8 @@ It should now be ready to receive webhooks. You can now set up a webhook to send
 
 ## Webhook Trigger Setup
 
+### Organization or repository webhook
+
 1. Find your repo (or organization) in github.com
 1. Click on `Settings`
 1. Click on `Webhooks`
@@ -77,6 +194,20 @@ It should now be ready to receive webhooks. You can now set up a webhook to send
 1. Choose `Workflow jobs` as the event to trigger/receive
 1. Make sure `Active` is enabled
 1. Click on `Add webhook`
+
+### Enterprise (global) webhook
+
+1. Open your enterprise on github.com (for example `https://github.com/enterprises/my-enterprise-name`)
+1. Click `Settings`, then `Hooks`
+1. Click `Add webhook`
+1. Set the `Payload URL` to `https://{PUBLIC IP OR URL}:{port}/jobs/v1/receiver`
+1. Set `Content Type` to `application/json`
+1. Set the `Secret` to match `global_receiver_secret` or the plugin `secret`
+1. Choose **Workflow jobs** as the event
+1. Make sure `Active` is enabled
+1. Click `Add webhook`
+
+To verify: trigger a workflow under any org in the enterprise that uses an `anka-template:...` runner label, then confirm Redis has a job under `anklet/jobs/github/queued/{enterprise}` (for example `anklet/jobs/github/queued/veertu-inc`).
 
 ## API Limits
 

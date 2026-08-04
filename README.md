@@ -676,13 +676,20 @@ Because Anklet is installed as a service, you need to stop the service, replace 
 brew install go
 go mod tidy
 cd ${REPO_ROOT}
-ln -s ~/.config/anklet/org-config.yml org-config.yml
-ln -s ~/.config/anklet/repo-receiver-config.yml repo-receiver-config.yml
-./run.bash org-receiver-config.yml # run the receiver
-./run.bash org-config.yml # run the handler
+ln -s ~/.config/anklet/org-github-config.yml org-github-config.yml
+ln -s ~/.config/anklet/org-receiver-github-config.yml org-receiver-github-config.yml
+ln -s ~/.config/anklet/repo-github-config.yml repo-handler-github-config.yml
+ln -s ~/.config/anklet/repo-receiver-github-config.yml repo-receiver-github-config.yml
+ln -s ~/.config/anklet/enterprise-github-config.yml enterprise-github-config.yml
+ln -s ~/.config/anklet/enterprise-receiver-github-config.yml enterprise-receiver-github-config.yml
+./run.bash org-receiver-github-config.yml # run the org receiver
+./run.bash org-github-config.yml # run the org handler
+# Or enterprise scope (GitHub Enterprise Cloud):
+# ./run.bash enterprise-receiver-github-config.yml
+# ./run.bash enterprise-github-config.yml
 ```
 
-- **NOTE:** You'll need to change the webhook URL so it points to the public IP of the server running the receiver (for me, that's my ISP's public IP + open port forwarding to my local machine).
+- **NOTE:** Point the webhook URL at the public IP/URL of the receiver host. Choose repository, organization, or enterprise scope (when to use, setup, pros/cons) in the [handler](plugins/handlers/github/README.md#choosing-a-github-scope) and [receiver](plugins/receivers/github/README.md#choosing-a-github-scope) READMEs. Enterprise Cloud uses Enterprise → Settings → Hooks and needs classic PAT + GitHub App on the handler, plus enterprise/org runner-group access — details are in those sections.
 
 #### Log Levels
 
