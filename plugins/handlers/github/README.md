@@ -8,7 +8,7 @@ The Github Handler Plugin will pull jobs from the database/queue in order of cre
 
 Note: Our [Build Cloud Controller](https://docs.veertu.com/anka/anka-build-cloud/#anka-controller) (which is not used by Anklet at the moment) will run VMs under `sudo/root`, but we *do not require* that for anklet. It does not run as root, and will use the current user's space/environment to run VMs.
 
-For help setting up the database, see [Database Setup](https://github.com/veertuinc/anklet/tree/main?tab=readme-ov-file#database-setup).
+For help setting up the database, see [Database Setup](https://github.com/veertuinc/anklet/tree/edge?tab=readme-ov-file#database-setup).
 
 **NOTE: Plugin `name` MUST be unique across all hosts and plugins.**
 
@@ -292,7 +292,7 @@ jobs:
 
 ### Install Supporting Scripts
 
-Finally, the `github` plugin requires three different bash scripts available on the host, which it will copy into the VM and run. You can find them under https://github.com/veertuinc/anklet/tree/main/plugins/handlers/github. They can be customized to fit your needs. Place them under `${plugins_path}/handlers/github/` (default `~/.config/anklet/plugins/handlers/github/`).
+Finally, the `github` plugin requires three different bash scripts available on the host, which it will copy into the VM and run. You can find them under https://github.com/veertuinc/anklet/tree/edge/plugins/handlers/github. They can be customized to fit your needs. Place them under `${plugins_path}/handlers/github/` (default `~/.config/anklet/plugins/handlers/github/`).
 
 ---
 

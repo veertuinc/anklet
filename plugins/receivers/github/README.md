@@ -4,7 +4,7 @@ The Github Receiver Plugin receives webhook events from GitHub and stores them i
 
 ### What you need (every scope)
 
-1. The same Redis database as your handler(s). See [Database Setup](https://github.com/veertuinc/anklet/tree/main?tab=readme-ov-file#database-setup).
+1. The same Redis database as your handler(s). See [Database Setup](https://github.com/veertuinc/anklet/tree/edge?tab=readme-ov-file#database-setup).
 1. A public URL or IP that reaches this host so GitHub can POST webhooks (path `/jobs/v1/receiver`).
 1. A shared webhook secret (`secret` on the plugin or `global_receiver_secret` / `ANKLET_GLOBAL_RECEIVER_SECRET`).
 

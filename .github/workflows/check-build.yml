@@ -6,7 +6,7 @@ on:
     branches-ignore: []
   push:
     branches:
-      - main
+      - edge
   
 jobs:
 

@@ -2,6 +2,12 @@ name: Build Release Artifacts
 
 on:
   workflow_dispatch:
+    inputs:
+      ref:
+        description: "Git ref (branch, tag, or SHA) to checkout and build"
+        required: true
+        default: "edge"
+        type: string
 
 jobs:
   goreleaser:
@@ -9,7 +15,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: main
+          ref: ${{ inputs.ref }}
           fetch-depth: 0
       - run: git tag $(cat VERSION)
       - name: Set up Go

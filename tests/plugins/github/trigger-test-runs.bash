@@ -23,7 +23,7 @@ for ((i=1; i<=TRIGGER_RUN_COUNT; i++)); do
             -H "Authorization: Bearer ${ANKLET_TEST_GITHUB_PAT}" \
             -H "Accept: application/vnd.github.v3+json" \
             https://api.github.com/repos/${OWNER}/${REPO}/actions/workflows/${WORKFLOW_ID}/dispatches \
-            -d '{"ref":"main"}'
+            -d '{"ref":"edge"}'
         sleep 1
     done
 done
