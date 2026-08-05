@@ -1933,7 +1933,7 @@ func Run(
 	// get anka template
 	ankaTemplateUUID := extractLabelValue(queuedJob.WorkflowJob.Labels, "anka-template:")
 	if ankaTemplateUUID == "" {
-		logging.Warn(pluginCtx, "warning: unable to find Anka Template specified in labels, cancelling job")
+		logging.Error(pluginCtx, "anka-template label missing from workflow job; cancelling job")
 		// TODO: turn this block into a function, then use it throughout the plugin
 		queuedJob.Action = "cancel"
 		err, _ = internalGithub.UpdateJobInDB(pluginCtx, pluginQueueName, &queuedJob)
@@ -1992,7 +1992,11 @@ func Run(
 			ankaRegistryVMInfo, err := internalAnka.GetAnkaRegistryVmInfo(workerCtx, pluginCtx, ankaTemplateUUID, ankaTemplateTag)
 			if err != nil {
 				if strings.Contains(err.Error(), "not found") {
-					logging.Warn(pluginCtx, err.Error())
+					logging.Error(pluginCtx, "anka template or tag not found in registry; cancelling job",
+						"ankaTemplateUUID", ankaTemplateUUID,
+						"ankaTemplateTag", ankaTemplateTag,
+						"err", err,
+					)
 					queuedJob.Action = "cancel"
 					queuedJob.WorkflowJob.Conclusion = github.Ptr("failure")
 					queuedJob.WorkflowJob.Status = github.Ptr("completed")
@@ -2224,9 +2228,13 @@ func Run(
 			}
 			return pluginCtx, nil
 		}
-		// if the template doesn't exist in the registry, we can't ever run the VM (use submitted wrong template or tag)
+		// if the template doesn't exist in the registry, we can't ever run the VM (wrong template or tag)
 		if noTemplateTagExistsInRegistryError != nil {
-			logging.Error(pluginCtx, "error ensuring vm template exists on host", "error", noTemplateTagExistsInRegistryError)
+			logging.Error(pluginCtx, "anka template or tag not found in registry; cancelling job",
+				"ankaTemplateUUID", ankaTemplateUUID,
+				"ankaTemplateTag", ankaTemplateTag,
+				"err", noTemplateTagExistsInRegistryError,
+			)
 			queuedJob.Action = "cancel"
 			err, _ = internalGithub.UpdateJobInDB(pluginCtx, pluginQueueName, &queuedJob)
 			if err != nil {
