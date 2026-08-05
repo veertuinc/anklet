@@ -8,6 +8,14 @@ on:
         required: true
         default: "edge"
         type: string
+      full_release:
+        description: "Publish full VERSION release (leave unchecked for rolling edge tag/release)"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
 
 jobs:
   goreleaser:
@@ -17,20 +25,67 @@ jobs:
         with:
           ref: ${{ inputs.ref }}
           fetch-depth: 0
-      - run: git tag $(cat VERSION)
+
+      - name: Tag from VERSION
+        if: ${{ inputs.full_release }}
+        run: git tag "$(cat VERSION)"
+
+      - name: Delete existing edge release and tag
+        if: ${{ !inputs.full_release }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view edge >/dev/null 2>&1; then
+            gh release delete edge --yes --cleanup-tag
+          fi
+          git push origin :refs/tags/edge 2>/dev/null || true
+          git tag -d edge 2>/dev/null || true
+
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
           go-version: 1.25.1
           cache: false
-      - name: Run GoReleaser
+
+      - name: Run GoReleaser (VERSION)
+        if: ${{ inputs.full_release }}
         uses: goreleaser/goreleaser-action@v6
         with:
           version: latest
           args: release --clean
+
+      - name: Run GoReleaser (edge snapshot)
+        if: ${{ !inputs.full_release }}
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          version: latest
+          args: release --snapshot --clean
+
+      - name: Publish edge GitHub release
+        if: ${{ !inputs.full_release }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          target_sha="$(git rev-parse HEAD)"
+          shopt -s nullglob
+          assets=(dist/*.zip)
+          if [[ ${#assets[@]} -eq 0 ]]; then
+            echo "ERROR: no zip artifacts found under dist/" >&2
+            ls -la dist/ >&2 || true
+            exit 1
+          fi
+          gh release create edge \
+            --title "edge" \
+            --notes "Rolling edge build from \`${{ inputs.ref }}\` (\`${target_sha}\`)." \
+            --prerelease \
+            --target "${target_sha}" \
+            "${assets[@]}"
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v7
         with:
-            name: goreleaser-archive
-            path: dist/*
-            retention-days: 1
+          name: goreleaser-archive
+          path: dist/*
+          retention-days: 1
