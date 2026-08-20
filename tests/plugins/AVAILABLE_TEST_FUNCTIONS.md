@@ -19,7 +19,7 @@ These functions allow a "tester" host to orchestrate and check other hosts in mu
 | `stop_anklet_on_host <host_name>` | Stop anklet on a remote host (graceful SIGINT, waits up to 30s, then SIGKILL). Also kills the background SSH session. |
 | `get_anklet_log_from_host <host_name> [dest_file]` | Get anklet.log from a remote host and save locally. |
 | `check_remote_log_contains <host_name> <pattern>` | Check if remote host's anklet.log contains pattern (returns true/false). |
-| `assert_remote_log_contains <host_name> <pattern>` | Assert that remote host's anklet.log contains pattern (prints PASS/FAIL). |
+| `assert_remote_log_contains <host_name> <pattern> [timeout_seconds]` | Assert remote anklet.log contains pattern. Polls up to timeout (default 90s) so late logs like cleanup do not race. |
 | `list_all_hosts` | List all configured hosts from `ALL_HOSTS`. |
 
 ### Examples
