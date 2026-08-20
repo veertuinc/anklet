@@ -211,13 +211,13 @@ To verify: trigger a workflow under any org in the enterprise that uses an `anka
 
 ## API Limits
 
-Incoming webhooks at `/jobs/v1/receiver` do not call the GitHub REST API.
+Incoming webhooks at `/jobs/v1/receiver` do not call the GitHub REST API. Redis only. The HTTP receiver and handlers start before redelivery finishes.
 
-[REST quota](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api?apiVersion=2022-11-28) is used only on process start, when Anklet redelivers failed hook deliveries (once per start). If you hit the limit, Anklet pauses until GitHub resets it, then continues. Avoid restart loops; they run this walk again. Here are the calls that are made:
+[REST quota](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api?apiVersion=2022-11-28) is used only on process start, in a background walk that redelivers failed hook deliveries. A REST error in that walk is logged; ingest stays up. If you hit the primary limit, Anklet pauses until GitHub resets it, then continues. The walk uses at most 50% of remaining quota each hour so handlers can keep the other half.
 
-  - List deliveries for the last `redeliver_hours` (default 24), 100 per page. All deliveries for that hook, not only Anklet jobs.
-  - Get the full payload for each failed delivery that is not `in_progress` and has no later successful redelivery of the same GUID.
-  - For each of those failed `queued` deliveries, Get later `completed` deliveries in the same repo until the workflow job IDs match (or the window ends).
+  - List failed deliveries for the last `redeliver_hours` (default 24), 100 per page (`status=failure`).
+  - Get the full payload for each failed original delivery that is not `in_progress`. Skip if labels do not include `anka-template`.
+  - For a failed `queued` Anklet job, get the workflow job from the Actions API. Skip redelivery if GitHub already marked it completed, cancelled, or in_progress.
   - POST redelivery if the job still looks orphaned.
 
 Enterprise scope never does this walk (no hook-delivery API). Set `skip_redeliver: true` to skip it on org/repo scope. Catch up from the GitHub webhook UI instead.
