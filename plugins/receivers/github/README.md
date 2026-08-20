@@ -255,7 +255,7 @@ host_disk_available_bytes 371628097536
 host_disk_usage_percentage 62.637773
 ```
 
-<!-- ```
+```
 ❯ curl -s http://127.0.0.1:8080/metrics/v1\?format\=json | jq
 {
   "host_cpu_count": 12,
@@ -279,7 +279,7 @@ host_disk_usage_percentage 62.637773
       "status_since": "2024-08-20T14:58:35.730418-05:00"
     }
   ]
-} -->
+}
 ```
 
 ---
