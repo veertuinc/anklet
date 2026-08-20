@@ -242,11 +242,20 @@ print_metrics_snapshot "after verifying handler-8-8 running"
 # Pre-pull 3c6r on both handlers so job prep does not sit in Preparing during a long
 # registry pull. While Preparing is true, sibling plugins on the same host cannot
 # dequeue, so the second job never gets paused within the wait timeout.
+# Delete the UUID first: earlier tags of the same template can leave broken .ank
+# references, and pull then fails with "No such file or directory" / I/O error.
 HANDOFF_TEMPLATE_UUID="84266873-da90-4e0d-903b-ed0233471f9f"
 HANDOFF_TEMPLATE_TAG="3c6r"
 echo "] Pre-pulling template ${HANDOFF_TEMPLATE_UUID} tag ${HANDOFF_TEMPLATE_TAG} on handlers..."
-ssh_to_host "handler-8-8" "anka registry pull ${HANDOFF_TEMPLATE_UUID} --tag ${HANDOFF_TEMPLATE_TAG}"
-ssh_to_host "handler-8-16" "anka registry pull ${HANDOFF_TEMPLATE_UUID} --tag ${HANDOFF_TEMPLATE_TAG}"
+for handoff_host in "handler-8-8" "handler-8-16"; do
+    echo "]] ${handoff_host}: delete local template (if any), then pull ${HANDOFF_TEMPLATE_TAG}"
+    if ! ssh_to_host "${handoff_host}" "anka delete --yes ${HANDOFF_TEMPLATE_UUID} 2>/dev/null || true; anka registry pull ${HANDOFF_TEMPLATE_UUID} --tag ${HANDOFF_TEMPLATE_TAG}"; then
+        echo "] ERROR: pre-pull failed on ${handoff_host}"
+        record_fail "pre-pull of ${HANDOFF_TEMPLATE_TAG} failed on ${handoff_host}"
+        end_test
+        exit 1
+    fi
+done
 echo "] ✓ Pre-pull complete"
 
 # Step 2: Trigger t2-3c6r-1-90s-pause twice (uses 3c6r template, sleeps 2m)
