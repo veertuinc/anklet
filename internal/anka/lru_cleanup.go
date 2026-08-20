@@ -96,7 +96,7 @@ func (cli *Cli) EnsureSpaceForTemplate(
 			return nil, 0, 0, fmt.Errorf("unable to parse pull check output")
 		}
 
-		downloadSize := pullCheckOutput.Size - pullCheckOutput.Cached
+		downloadSize := templateDownloadSize(pullCheckOutput.Size, pullCheckOutput.Cached)
 
 		// Calculate how much space we can actually use (available space minus required buffer)
 		var usableSpace uint64
