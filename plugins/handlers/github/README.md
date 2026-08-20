@@ -312,15 +312,16 @@ In https://github.com/veertuinc/anklet/issues/51 and v0.14.1, we added support f
 
 ## API LIMITS
 
-The following logic consumes [API limits](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api?apiVersion=2022-11-28). Should you run out, all processing will pause until the limits are reset after the specific github duration and then resume where it left off.
 
-  1. Obtaining a registration token. (single call)
-  2. Should the job request a template that doesn't exist, we need to forcefully cancel the job in github or else other anklets will attempt processing indefinitely.
-  3. Should the runner be orphaned and not have been shut down cleanly, we will send a removal request to the API. (one to check if already removed, one to remove)
-  4. If jobs were `in_progress` when anklet was exited, we will make a single API call to see if the job finished successfully or not. If the job is still running, the VM will stay running and the plugin will wait for it to finish. Otherwise, we'll proceed with the cleanup.
-  5. If a job failed for some reason and is being retried, on the next attempts to run the job, we will make a single API call to see if the job finished successfully or not in github. This is necessary since github will sometimes not send updates to the webhook. There is a limit of 5 attempts before we cancel the job forcefully.
+[REST quota](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api?apiVersion=2022-11-28) is used when the handler talks to GitHub. If you hit the limit, Anklet pauses until GitHub resets it, then continues. Here are when the handler makes API calls:
 
-This means worst case scenario it could make a total of 3 api calls total. Otherwise only one should happen on job success.
+  1. Create a runner registration token. One call per job that gets as far as registering the runner. This is the only call on a successful job.
+  2. Cancel a workflow run when the job cannot be run safely (missing template, and similar). One cancel call, then poll the workflow run every 10 seconds until GitHub marks it completed or cancelled.
+  3. Remove an orphaned runner after a failed job. One list-runners call, then one remove if that runner is still registered. If GitHub says the runner is still on a job, cancel (same as 2) and remove again.
+  4. On plugin start, if a job is already `in_progress` in Redis, one get-job call to see if it finished while Anklet was down.
+  5. On retry (`attempts` > 0), one get-job call. GitHub sometimes finishes a job without sending the completed webhook. After `job_retry_attempts` (default 5), Anklet cancels instead.
+
+A PAT or GitHub App shared with the receiver is one quota bucket. Receiver startup redelivery counts against the same limit.
 
 ---
 
