@@ -88,8 +88,8 @@ build-snapshot:
 #prepare-docker:	@ Copy Linux binaries to docker folder and build multi-arch image
 prepare-docker:
 	@echo "Copying Linux binaries to docker folder..."
-	cp dist/anklet_vedge_linux_amd64 docker/anklet_linux_amd64
-	cp dist/anklet_vedge_linux_arm64 docker/anklet_linux_arm64
+	cp dist/anklet_edge_linux_amd64 docker/anklet_linux_amd64
+	cp dist/anklet_edge_linux_arm64 docker/anklet_linux_arm64
 	@echo "Building multi-arch Docker image..."
 	cd docker && docker buildx build --platform linux/amd64,linux/arm64 -t anklet:snapshot .
 

@@ -5,6 +5,7 @@ env:
 - CGO_ENABLED=1
 # Edge publishing uses `goreleaser release --snapshot`. Default snapshot versions look like
 # `<last-tag>-SNAPSHOT-<commit>`; pin to `edge` so zip names and -X main.version match the release tag.
+# Snapshot filenames omit the `v` prefix (anklet_edge_*) so they are not anklet_vedge_*.
 snapshot:
   version_template: edge
 before:
@@ -20,7 +21,7 @@ builds:
   mod_timestamp: '{{ .CommitTimestamp }}'
   hooks:
     post:
-    - cmd: bash -c "chmod +x {{ .ProjectName }}_v{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    - cmd: bash -c "chmod +x {{ .ProjectName }}_{{ if .IsSnapshot }}{{ .Version }}{{ else }}v{{ .Version }}{{ end }}_{{ .Os }}_{{ .Arch }}"
       dir: "{{ dir .Path }}"
   flags:
   - -trimpath #removes all file system paths from the compiled executable
@@ -31,7 +32,7 @@ builds:
   - linux
   goarch:
   - amd64
-  binary: '{{ .ProjectName }}_v{{ .Version }}_{{ .Os }}_{{ .Arch }}'
+  binary: '{{ .ProjectName }}_{{ if .IsSnapshot }}{{ .Version }}{{ else }}v{{ .Version }}{{ end }}_{{ .Os }}_{{ .Arch }}'
   no_unique_dist_dir: true
 - id: linux-arm64
   env:
@@ -40,7 +41,7 @@ builds:
   mod_timestamp: '{{ .CommitTimestamp }}'
   hooks:
     post:
-    - cmd: bash -c "chmod +x {{ .ProjectName }}_v{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    - cmd: bash -c "chmod +x {{ .ProjectName }}_{{ if .IsSnapshot }}{{ .Version }}{{ else }}v{{ .Version }}{{ end }}_{{ .Os }}_{{ .Arch }}"
       dir: "{{ dir .Path }}"
   flags:
   - -trimpath #removes all file system paths from the compiled executable
@@ -51,13 +52,13 @@ builds:
   - linux
   goarch:
   - arm64
-  binary: '{{ .ProjectName }}_v{{ .Version }}_{{ .Os }}_{{ .Arch }}'
+  binary: '{{ .ProjectName }}_{{ if .IsSnapshot }}{{ .Version }}{{ else }}v{{ .Version }}{{ end }}_{{ .Os }}_{{ .Arch }}'
   no_unique_dist_dir: true
 - id: darwin-amd64
   mod_timestamp: '{{ .CommitTimestamp }}'
   hooks:
     post:
-    - cmd: bash -c "chmod +x {{ .ProjectName }}_v{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    - cmd: bash -c "chmod +x {{ .ProjectName }}_{{ if .IsSnapshot }}{{ .Version }}{{ else }}v{{ .Version }}{{ end }}_{{ .Os }}_{{ .Arch }}"
       dir: "{{ dir .Path }}"
   flags:
   - -trimpath #removes all file system paths from the compiled executable
@@ -67,13 +68,13 @@ builds:
   - darwin
   goarch:
   - amd64
-  binary: '{{ .ProjectName }}_v{{ .Version }}_{{ .Os }}_{{ .Arch }}'
+  binary: '{{ .ProjectName }}_{{ if .IsSnapshot }}{{ .Version }}{{ else }}v{{ .Version }}{{ end }}_{{ .Os }}_{{ .Arch }}'
   no_unique_dist_dir: true
 - id: darwin-arm64
   mod_timestamp: '{{ .CommitTimestamp }}'
   hooks:
     post:
-    - cmd: bash -c "chmod +x {{ .ProjectName }}_v{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    - cmd: bash -c "chmod +x {{ .ProjectName }}_{{ if .IsSnapshot }}{{ .Version }}{{ else }}v{{ .Version }}{{ end }}_{{ .Os }}_{{ .Arch }}"
       dir: "{{ dir .Path }}"
   flags:
   - -trimpath #removes all file system paths from the compiled executable
@@ -83,13 +84,13 @@ builds:
   - darwin
   goarch:
   - arm64
-  binary: '{{ .ProjectName }}_v{{ .Version }}_{{ .Os }}_{{ .Arch }}'
+  binary: '{{ .ProjectName }}_{{ if .IsSnapshot }}{{ .Version }}{{ else }}v{{ .Version }}{{ end }}_{{ .Os }}_{{ .Arch }}'
   no_unique_dist_dir: true
 archives:
   - formats: [ 'zip' ]
     files:
       - none*
-    name_template: '{{ .ProjectName }}_v{{ .Version }}_{{ .Os }}_{{ .Arch }}'
+    name_template: '{{ .ProjectName }}_{{ if .IsSnapshot }}{{ .Version }}{{ else }}v{{ .Version }}{{ end }}_{{ .Os }}_{{ .Arch }}'
 # checksum:
 #   name_template: 'checksums.txt'
 release:
