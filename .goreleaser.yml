@@ -3,6 +3,10 @@ version: 2
 # Make sure to check the documentation at http://goreleaser.com
 env:
 - CGO_ENABLED=1
+# Edge publishing uses `goreleaser release --snapshot`. Default snapshot versions look like
+# `<last-tag>-SNAPSHOT-<commit>`; pin to `edge` so zip names and -X main.version match the release tag.
+snapshot:
+  version_template: edge
 before:
   hooks:
   - make go.lint

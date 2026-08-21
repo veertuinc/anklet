@@ -5,7 +5,7 @@
 1. Make sure tests pass: https://github.com/veertuinc/anklet-tests?tab=readme-ov-file#anklet-tests
 2. Run https://github.com/veertuinc/anklet/actions/workflows/build-release-artifacts.yml
 3. Leave **Publish full VERSION release** unchecked
-4. The workflow replaces any existing `edge` GitHub release/tag and publishes a new prerelease tagged `edge` with SNAPSHOT zips
+4. The workflow replaces any existing `edge` GitHub release/tag and publishes a new prerelease tagged `edge` with `anklet_vedge_*` zips
 
 ## Full VERSION release
 
