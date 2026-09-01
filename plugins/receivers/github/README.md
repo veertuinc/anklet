@@ -179,6 +179,8 @@ It should now be ready to receive webhooks. You can now set up a webhook to send
 
 - `/jobs/v1/receiver` - This is the endpoint that Github will send the webhook to. This is where the receiver will receive the webhook and store it in the database.
 
+If GitHub cannot deliver a webhook (or you need to replay one by hand), you can POST the raw **`workflow_job`** payload yourself with a valid `X-Hub-Signature-256` header. See [Manual webhook delivery](../../../docs/manual-webhook-delivery.md).
+
 ## Webhook Trigger Setup
 
 ### Organization or repository webhook
