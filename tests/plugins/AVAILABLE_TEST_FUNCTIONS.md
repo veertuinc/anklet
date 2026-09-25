@@ -276,6 +276,7 @@ fi
 | -------- | ----------- |
 | `list_redis_keys [pattern]` | List all keys matching pattern (default: "*"). |
 | `flush_redis_database` | Flush all keys from Redis database. |
+| `wait_for_redis_keys <pattern> [wait_limit_seconds] [pid]` | Wait until a Redis key matching pattern exists. | 
 | `assert_redis_key_exists <key>` | Assert that a Redis key exists. |
 | `assert_redis_key_not_exists <key>` | Assert that a Redis key does NOT exist. |
 | `get_redis_hash_field <key> <field>` | Get a field from a Redis hash. |
