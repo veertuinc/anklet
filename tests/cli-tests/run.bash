@@ -261,6 +261,30 @@ log_contains_at_least() {
     fi
 }
 
+# Wait for anklet to exit after SIGINT. Kill it if it stays up.
+# timeout is not available on macOS, so this uses a sleep loop.
+wait_for_binary_exit() {
+    local pid=$1
+    local wait_limit=${2:-20}
+    local waited=0
+    while kill -0 "$pid" 2>/dev/null; do
+        if [[ "${waited}" -ge "${wait_limit}" ]]; then
+            echo "    FAIL: anklet PID ${pid} still running ${wait_limit}s after SIGINT; sending SIGKILL"
+            print_log_on_failure
+            kill -KILL "$pid" 2>/dev/null || true
+            wait "$pid" 2>/dev/null || true
+            TEST_ASSERTION_FAILED=1
+            LAST_TEST_FAILURE="anklet PID ${pid} did not exit after SIGINT"
+            TEST_FAILED=1
+            return 1
+        fi
+        sleep 1
+        waited=$((waited + 1))
+    done
+    wait "$pid" 2>/dev/null || true
+    return 0
+}
+
 run_test() {
     TEST_YML=$1
     STARTUP_DELAY=${2:-2}
@@ -281,10 +305,10 @@ run_test() {
     if ps -p $BINARY_PID > /dev/null 2>&1; then
         kill -SIGINT $BINARY_PID 2>/dev/null || true
     fi
-    # Wait for process to exit before checking logs
-    wait $BINARY_PID 2>/dev/null || true
     TEST_ASSERTION_FAILED=0
     LOG_DUMPED=0
+    # Wait for process to exit before checking logs
+    wait_for_binary_exit "$BINARY_PID" || true
     set +e
     eval "${TESTS}"
     set -e
