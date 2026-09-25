@@ -47,16 +47,20 @@ sign_payload_file() {
 }
 
 print_receiver_log_since() {
-    local before_bytes="$1"
+    local before_lines="$1"
     local log_file="${2:-/tmp/anklet.log}"
+    local new_lines
     echo "] receiver log:"
     if [[ ! -f "${log_file}" ]]; then
         echo "] (no ${log_file})"
         return
     fi
-    if ! tail -c +"$((before_bytes + 1))" "${log_file}" 2>/dev/null | grep .; then
+    new_lines=$(tail -n +"$((before_lines + 1))" "${log_file}" 2>/dev/null || true)
+    if [[ -z "${new_lines}" ]]; then
         echo "] (no new lines)"
+        return
     fi
+    printf '%s\n' "${new_lines}"
 }
 
 post_receiver_payload() {
@@ -64,13 +68,13 @@ post_receiver_payload() {
     local event_type="${2:-workflow_job}"
     local signature="${3:-}"
     local delivery_id="${4:-manual-$(date +%s)-$RANDOM}"
-    local before_bytes
+    local before_lines
     local code
     if [[ -z "${signature}" ]]; then
         signature="sha256=$(sign_payload_file "${payload_file}")"
     fi
-    before_bytes=$(wc -c < /tmp/anklet.log 2>/dev/null || echo 0)
-    before_bytes="${before_bytes// /}"
+    before_lines=$(wc -l < /tmp/anklet.log 2>/dev/null || echo 0)
+    before_lines="${before_lines// /}"
     code=$(curl -sS -o "${PAYLOAD_DIR}/last-body" -w "%{http_code}" \
         -X POST "${RECEIVER_URL}" \
         -H "Content-Type: application/json" \
@@ -81,7 +85,7 @@ post_receiver_payload() {
     {
         echo "] POST ${payload_file} -> HTTP ${code}"
         echo "] body: $(cat "${PAYLOAD_DIR}/last-body" 2>/dev/null || true)"
-        print_receiver_log_since "${before_bytes}"
+        print_receiver_log_since "${before_lines}"
     } >&2
     echo "${code}"
 }
