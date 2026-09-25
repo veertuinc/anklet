@@ -241,13 +241,20 @@ log_does_not_contain() {
     fi
 }
 
+log_match_count() {
+    local log_file=$1
+    local pattern=$2
+    local count
+    count=$(grep -c "$pattern" "$log_file" 2>/dev/null || true)
+    echo "${count:-0}"
+}
+
 log_contains_at_least() {
     local min_count=$1
     local pattern=$2
     local LOG_FILE="/tmp/${TEST_NAME}.log"
     local count
-    count=$(grep -c "$pattern" "$LOG_FILE" 2>/dev/null || true)
-    count=${count:-0}
+    count=$(log_match_count "$LOG_FILE" "$pattern")
 
     if [[ "${count}" -ge "${min_count}" ]]; then
         echo "    PASS: log contains '${pattern}' at least ${min_count} time(s) (found ${count})"
@@ -259,6 +266,37 @@ log_contains_at_least() {
         TEST_FAILED=1
         return 1
     fi
+}
+
+# Wait until the log contains pattern at least min_count times.
+# timeout is not available on macOS, so this uses a sleep loop.
+# If pid is set, stop waiting when that process exits.
+wait_for_log_count() {
+    local log_file=$1
+    local pattern=$2
+    local min_count=$3
+    local wait_limit=${4:-120}
+    local pid=${5:-}
+    local waited=0
+    local count=0
+    echo "]]] Waiting up to ${wait_limit}s for log to contain '${pattern}' at least ${min_count} time(s)..."
+    while [[ "${waited}" -lt "${wait_limit}" ]]; do
+        if [[ -n "${pid}" ]] && ! kill -0 "$pid" 2>/dev/null; then
+            echo "]]] Process ${pid} exited after ${waited}s while waiting for '${pattern}'"
+            return 1
+        fi
+        if [[ -f "$log_file" ]]; then
+            count=$(log_match_count "$log_file" "$pattern")
+            if [[ "${count}" -ge "${min_count}" ]]; then
+                echo "]]] Found '${pattern}' ${count} time(s) after ${waited}s"
+                return 0
+            fi
+        fi
+        sleep 1
+        waited=$((waited + 1))
+    done
+    echo "]]] Timed out after ${wait_limit}s waiting for '${pattern}' (found ${count})"
+    return 1
 }
 
 # Wait for anklet to exit after SIGINT. Kill it if it stays up.
@@ -288,6 +326,8 @@ wait_for_binary_exit() {
 run_test() {
     TEST_YML=$1
     STARTUP_DELAY=${2:-2}
+    WAIT_PATTERN=${3:-}
+    WAIT_COUNT=${4:-1}
     TEST_NAME=$(basename $TEST_YML | cut -d. -f1)
     TEST_LOG_FILE="/tmp/${TEST_NAME}.log"
     export LOG_LEVEL=${LOG_LEVEL:-debug}
@@ -299,8 +339,12 @@ run_test() {
     ln -s ${TESTS_DIR}/$TEST_YML ~/.config/anklet/config.yml
     $BINARY > $TEST_LOG_FILE 2>&1 &
     BINARY_PID=$!
-    echo "]]] Waiting ${STARTUP_DELAY}s for initialization..."
-    sleep $STARTUP_DELAY
+    if [[ -n "${WAIT_PATTERN}" ]]; then
+        wait_for_log_count "$TEST_LOG_FILE" "$WAIT_PATTERN" "$WAIT_COUNT" "$STARTUP_DELAY" "$BINARY_PID" || true
+    else
+        echo "]]] Waiting ${STARTUP_DELAY}s for initialization..."
+        sleep $STARTUP_DELAY
+    fi
     # If process is still running after delay, send SIGINT to trigger graceful shutdown
     if ps -p $BINARY_PID > /dev/null 2>&1; then
         kill -SIGINT $BINARY_PID 2>/dev/null || true
@@ -465,9 +509,10 @@ TESTS
             run_cmd anka start "${TEST_VM_NAME}-1"
             run_cmd anka clone "${TEST_VM_NAME}" "${TEST_VM_NAME}-2"
             run_cmd anka start "${TEST_VM_NAME}-2"
-            # First plugin run skips capacity checks (~20s). Need 2 post-init cycles
-            # (sleep_interval 5s) before SIGINT, so 30s was too short by ~1s.
-            run_test cli-test-capacity.yml 40 <<TESTS
+            # Wait until capacity is logged twice. Discovery of the two running
+            # clones can take longer than a fixed sleep (anka show on a running
+            # VM has taken 30s). First plugin run skips the capacity check.
+            run_test cli-test-capacity.yml 180 "host does not have vm capacity" 2 <<TESTS
     log_does_not_contain "ERROR"
     log_contains_at_least 2 "host does not have vm capacity"
     log_contains_at_least 2 "starting github plugin"
@@ -477,8 +522,7 @@ TESTS
             run_cmd anka delete --yes "${TEST_VM_NAME}-2"
             ;;
         "start-stop")
-            # Second param = seconds to wait for initialization before sending SIGINT
-            run_test cli-test-start-stop.yml 25 <<TESTS
+            run_test cli-test-start-stop.yml 180 "starting github plugin" 1 <<TESTS
     log_does_not_contain "ERROR"
     log_contains "starting anklet"
     log_contains "starting github plugin"
