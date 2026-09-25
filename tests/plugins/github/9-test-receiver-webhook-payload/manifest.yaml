@@ -1,0 +1,8 @@
+description: "Github receiver webhook payload ingest tests"
+tests:
+    - name: "Receiver webhook payload test"
+      hosts:
+        - name: "receiver"
+          id: "ubuntu-22.04-linux"
+          config: ubuntu-22.04-linux.yaml
+          tester: true

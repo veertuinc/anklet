@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/google/go-github/v74/github"
-	"github.com/veertuinc/anklet/internal/anka"
 	"github.com/veertuinc/anklet/internal/config"
 	"github.com/veertuinc/anklet/internal/database"
 	internalGithub "github.com/veertuinc/anklet/internal/github"
@@ -128,43 +127,15 @@ func Run(
 		}
 	})
 	http.HandleFunc("/jobs/v1/receiver", func(w http.ResponseWriter, r *http.Request) {
-		payload, err := github.ValidatePayload(r, []byte(pluginConfig.Secret))
-		if err != nil {
-			logging.Error(pluginCtx, "error validating payload", "error", err)
-			return
-		}
-		event, err := github.ParseWebHook(github.WebHookType(r), payload)
-		if err != nil {
-			logging.Error(pluginCtx, "error parsing event", "error", err)
-			return
-		}
 		deliveryID := r.Header.Get("X-GitHub-Delivery")
-		switch workflowJob := event.(type) {
-		case *github.WorkflowJobEvent:
-			simplifiedWorkflowJobEvent := internalGithub.QueueJob{
-				Type: "WorkflowJobPayload",
-				WorkflowJob: internalGithub.SimplifiedWorkflowJob{
-					ID:           workflowJob.WorkflowJob.ID,
-					Name:         workflowJob.WorkflowJob.Name,
-					RunID:        workflowJob.WorkflowJob.RunID,
-					Status:       workflowJob.WorkflowJob.Status,
-					Conclusion:   workflowJob.WorkflowJob.Conclusion,
-					StartedAt:    workflowJob.WorkflowJob.StartedAt,
-					CompletedAt:  workflowJob.WorkflowJob.CompletedAt,
-					Labels:       workflowJob.WorkflowJob.Labels,
-					HTMLURL:      workflowJob.WorkflowJob.HTMLURL,
-					WorkflowName: workflowJob.WorkflowJob.WorkflowName,
-				},
-				Action: *workflowJob.Action,
-				Repository: internalGithub.Repository{
-					Name:       workflowJob.Repo.Name,
-					Owner:      workflowJob.Repo.Owner.Login,
-					Visibility: workflowJob.Repo.Visibility,
-					Private:    workflowJob.Repo.Private,
-				},
-				AnkaVM:   anka.VM{},
-				Attempts: 0,
-			}
+		decoded, err := decodeReceiverWebhook(r, pluginConfig.Secret)
+		if err != nil {
+			logging.Error(pluginCtx, "rejecting malformed webhook", "error", err, "deliveryID", deliveryID)
+			writeMalformedWebhook(w, err)
+			return
+		}
+		if decoded.IsWorkflowJob {
+			simplifiedWorkflowJobEvent := decoded.Job
 			// Create a fresh context for this webhook request to avoid accumulating job contexts
 			webhookCtx := logging.AppendCtx(pluginCtx, slog.Group("job",
 				slog.Group("workflowJob",
@@ -198,16 +169,16 @@ func Run(
 			}
 
 			logging.Info(webhookCtx, "received workflow job to consider")
-			if workflowJob.WorkflowJob.HTMLURL != nil {
-				logging.Info(webhookCtx, "workflow job HTML URL", "workflowJobHTMLURL", *workflowJob.WorkflowJob.HTMLURL)
+			if simplifiedWorkflowJobEvent.WorkflowJob.HTMLURL != nil {
+				logging.Info(webhookCtx, "workflow job HTML URL", "workflowJobHTMLURL", *simplifiedWorkflowJobEvent.WorkflowJob.HTMLURL)
 			}
-			if workflowJob.WorkflowJob.Status != nil {
-				logging.Info(webhookCtx, "workflow job status", "workflowJobStatus", *workflowJob.WorkflowJob.Status)
+			if simplifiedWorkflowJobEvent.WorkflowJob.Status != nil {
+				logging.Info(webhookCtx, "workflow job status", "workflowJobStatus", *simplifiedWorkflowJobEvent.WorkflowJob.Status)
 			}
-			if workflowJob.WorkflowJob.Conclusion != nil {
-				logging.Info(webhookCtx, "workflow job conclusion", "workflowJobConclusion", *workflowJob.WorkflowJob.Conclusion)
+			if simplifiedWorkflowJobEvent.WorkflowJob.Conclusion != nil {
+				logging.Info(webhookCtx, "workflow job conclusion", "workflowJobConclusion", *simplifiedWorkflowJobEvent.WorkflowJob.Conclusion)
 			}
-			if *workflowJob.Action == "queued" {
+			if simplifiedWorkflowJobEvent.Action == "queued" {
 				if exists_in_array_partial(simplifiedWorkflowJobEvent.WorkflowJob.Labels, []string{"anka-template"}) {
 					// make sure it doesn't already exist in the main queued queue
 					queuedQueueName := "anklet/jobs/github/queued/" + queueOwner
@@ -256,8 +227,8 @@ func Run(
 						}
 					}
 				}
-			} else if *workflowJob.Action == "in_progress" {
-				if workflowJob.WorkflowJob.Conclusion != nil && *workflowJob.WorkflowJob.Conclusion == "cancelled" {
+			} else if simplifiedWorkflowJobEvent.Action == "in_progress" {
+				if simplifiedWorkflowJobEvent.WorkflowJob.Conclusion != nil && *simplifiedWorkflowJobEvent.WorkflowJob.Conclusion == "cancelled" {
 					return
 				}
 				// store in_progress so we can know if the registration failed
@@ -286,7 +257,7 @@ func Run(
 						logging.Debug(webhookCtx, "job already present in in_progress queue, skipping enqueue", "queue", inProgressQueueName)
 					}
 				}
-			} else if *workflowJob.Action == "completed" {
+			} else if simplifiedWorkflowJobEvent.Action == "completed" {
 				if exists_in_array_partial(simplifiedWorkflowJobEvent.WorkflowJob.Labels, []string{"anka-template"}) {
 					queues := []string{}
 					// get all keys from database for the main queue and service queues as well as completed

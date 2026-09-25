@@ -114,7 +114,7 @@ Use real `id` and `run_id` values from GitHub if you expect the handler to call 
 
 1. **Anklet logs** (receiver plugin): look for `received workflow job to consider` and, for a new queued job with `anka-template`, `job pushed to queued queue`.
 2. **Redis**: a new entry under `anklet/jobs/github/queued/{queue_owner}` where `queue_owner` is `owner`, `enterprise`, or your `queue_name` depending on receiver scope.
-3. **HTTP status**: success returns `200`. Validation or parse errors are logged; always confirm in logs, not only the status code.
+3. **HTTP status**: a usable `workflow_job` returns `200`. A malformed, unsigned, or unparseable payload returns `400` and is not queued. Missing optional fields (name, status, run_id, repository, owner) still return `200`.
 
 The receiver skips duplicate `queued` events if the job is already in the queued or handler queues.
 
@@ -122,8 +122,7 @@ The receiver skips duplicate `queued` events if the job is already in the queued
 
 | Symptom | Likely cause |
 | ------- | ------------- |
-| Log: `error validating payload` | Wrong secret, wrong signature, or body changed after signing (whitespace, re-formatting JSON). Sign the exact bytes you POST (`--data-binary @file`). |
-| Log: `error parsing event` | Missing or wrong `X-GitHub-Event` (must be `workflow_job`), or invalid JSON. |
+| HTTP `400` / log: `rejecting malformed webhook` | Wrong secret or signature, invalid JSON, wrong `X-GitHub-Event`, or a `workflow_job` missing `action` or `workflow_job.id`. |
 | Event received, no queue push | Labels missing `anka-template`, or `action` is not `queued` / `in_progress` / `completed`, or job already in queue. |
 | Connection refused | Receiver not running, wrong port, or firewall blocking the host. |
 
