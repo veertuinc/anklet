@@ -49,18 +49,22 @@ sign_payload_file() {
 print_receiver_log_since() {
     local before_lines="$1"
     local log_file="${2:-/tmp/anklet.log}"
-    local new_lines
+    local tmp_new
     echo "] receiver log:"
     if [[ ! -f "${log_file}" ]]; then
         echo "] (no ${log_file})"
         return
     fi
-    new_lines=$(tail -n +"$((before_lines + 1))" "${log_file}" 2>/dev/null || true)
-    if [[ -z "${new_lines}" ]]; then
+    tmp_new=$(mktemp)
+    # anklet.log can contain NUL bytes; do not capture it with $()
+    tail -n +"$((before_lines + 1))" "${log_file}" | tr -d '\000' > "${tmp_new}"
+    if [[ ! -s "${tmp_new}" ]]; then
         echo "] (no new lines)"
+        rm -f "${tmp_new}"
         return
     fi
-    printf '%s\n' "${new_lines}"
+    cat "${tmp_new}"
+    rm -f "${tmp_new}"
 }
 
 post_receiver_payload() {
