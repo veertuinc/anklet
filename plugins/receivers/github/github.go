@@ -128,9 +128,13 @@ func Run(
 	})
 	http.HandleFunc("/jobs/v1/receiver", func(w http.ResponseWriter, r *http.Request) {
 		deliveryID := r.Header.Get("X-GitHub-Delivery")
-		decoded, err := decodeReceiverWebhook(r, pluginConfig.Secret)
+		decoded, rawPayload, err := decodeReceiverWebhook(r, pluginConfig.Secret)
 		if err != nil {
-			logging.Error(pluginCtx, "rejecting malformed webhook", "error", err, "deliveryID", deliveryID)
+			logging.Error(pluginCtx, "rejecting malformed webhook",
+				"error", err,
+				"deliveryID", deliveryID,
+				"payload", string(rawPayload),
+			)
 			writeMalformedWebhook(w, err)
 			return
 		}

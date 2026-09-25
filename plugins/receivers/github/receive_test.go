@@ -219,10 +219,14 @@ func TestQueueJobFromWorkflowJobEventAcceptsOptionalFields(t *testing.T) {
 
 func TestDecodeReceiverWebhookRejectsMalformedPayload(t *testing.T) {
 	t.Parallel()
-	req := signedReceiverRequest(t, `{"action":"queued"}`)
-	_, err := decodeReceiverWebhook(req, "secret")
+	body := `{"action":"queued"}`
+	req := signedReceiverRequest(t, body)
+	_, raw, err := decodeReceiverWebhook(req, "secret")
 	if err == nil {
 		t.Fatal("decodeReceiverWebhook() error = nil, want malformed payload error")
+	}
+	if string(raw) != body {
+		t.Errorf("raw payload = %q, want %q", raw, body)
 	}
 	rec := httptest.NewRecorder()
 	writeMalformedWebhook(rec, err)
@@ -236,7 +240,7 @@ func TestDecodeReceiverWebhookIgnoresNonWorkflowJobEvent(t *testing.T) {
 	body := `{"zen":"keep it logically awesome","hook_id":1}`
 	req := signedReceiverRequest(t, body)
 	req.Header.Set("X-GitHub-Event", "ping")
-	got, err := decodeReceiverWebhook(req, "secret")
+	got, _, err := decodeReceiverWebhook(req, "secret")
 	if err != nil {
 		t.Fatalf("decodeReceiverWebhook() error = %v", err)
 	}
@@ -248,7 +252,7 @@ func TestDecodeReceiverWebhookIgnoresNonWorkflowJobEvent(t *testing.T) {
 func TestDecodeReceiverWebhookAcceptsOptionalFieldsOmitted(t *testing.T) {
 	t.Parallel()
 	req := signedReceiverRequest(t, `{"action":"queued","workflow_job":{"id":123}}`)
-	got, err := decodeReceiverWebhook(req, "secret")
+	got, _, err := decodeReceiverWebhook(req, "secret")
 	if err != nil {
 		t.Fatalf("decodeReceiverWebhook() error = %v", err)
 	}
@@ -268,7 +272,7 @@ func TestDecodeReceiverWebhookAcceptsCompletePayload(t *testing.T) {
 		"repository":{"name":"repo","owner":{"login":"org"},"private":true}
 	}`
 	req := signedReceiverRequest(t, body)
-	got, err := decodeReceiverWebhook(req, "secret")
+	got, _, err := decodeReceiverWebhook(req, "secret")
 	if err != nil {
 		t.Fatalf("decodeReceiverWebhook() error = %v", err)
 	}
@@ -319,9 +323,12 @@ func TestReadWebhookPayloadRejectsInvalidSignature(t *testing.T) {
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Hub-Signature-256", "sha256=deadbeef")
-	_, err = readWebhookPayload(req, "secret")
+	raw, err := readWebhookPayload(req, "secret")
 	if err == nil {
 		t.Fatal("readWebhookPayload() error = nil, want error")
+	}
+	if string(raw) != `{"action":"queued"}` {
+		t.Errorf("raw payload = %q, want %q", raw, `{"action":"queued"}`)
 	}
 }
 

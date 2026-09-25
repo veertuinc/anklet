@@ -1,7 +1,9 @@
 package github
 
 import (
+	"bytes"
 	"fmt"
+	"io"
 	"net/http"
 
 	"github.com/google/go-github/v74/github"
@@ -21,31 +23,39 @@ func readWebhookPayload(r *http.Request, secret string) ([]byte, error) {
 	if r.Body == nil {
 		return nil, fmt.Errorf("request body is empty")
 	}
-	return github.ValidatePayload(r, []byte(secret))
+	raw, err := io.ReadAll(r.Body)
+	if err != nil {
+		return raw, fmt.Errorf("reading request body: %w", err)
+	}
+	r.Body = io.NopCloser(bytes.NewReader(raw))
+	if _, err := github.ValidatePayload(r, []byte(secret)); err != nil {
+		return raw, err
+	}
+	return raw, nil
 }
 
 func writeMalformedWebhook(w http.ResponseWriter, err error) {
 	http.Error(w, err.Error(), http.StatusBadRequest)
 }
 
-func decodeReceiverWebhook(r *http.Request, secret string) (receiverDecodeResult, error) {
+func decodeReceiverWebhook(r *http.Request, secret string) (receiverDecodeResult, []byte, error) {
 	payload, err := readWebhookPayload(r, secret)
 	if err != nil {
-		return receiverDecodeResult{}, fmt.Errorf("validating payload: %w", err)
+		return receiverDecodeResult{}, payload, fmt.Errorf("validating payload: %w", err)
 	}
 	event, err := github.ParseWebHook(github.WebHookType(r), payload)
 	if err != nil {
-		return receiverDecodeResult{}, fmt.Errorf("parsing event: %w", err)
+		return receiverDecodeResult{}, payload, fmt.Errorf("parsing event: %w", err)
 	}
 	workflowJob, ok := event.(*github.WorkflowJobEvent)
 	if !ok {
-		return receiverDecodeResult{}, nil
+		return receiverDecodeResult{}, payload, nil
 	}
 	job, err := queueJobFromWorkflowJobEvent(workflowJob)
 	if err != nil {
-		return receiverDecodeResult{}, err
+		return receiverDecodeResult{}, payload, err
 	}
-	return receiverDecodeResult{Job: job, IsWorkflowJob: true}, nil
+	return receiverDecodeResult{Job: job, IsWorkflowJob: true}, payload, nil
 }
 
 func queueJobFromWorkflowJobEvent(event *github.WorkflowJobEvent) (internalGithub.QueueJob, error) {
