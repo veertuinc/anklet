@@ -75,8 +75,21 @@ if [[ -n "$SINGLE_TEST" ]]; then
     echo "] Running only test: $SINGLE_TEST"
 fi
 
-if [[ -e ~/.config/anklet/config.yml ]]; then
-    mv ~/.config/anklet/config.yml ~/.config/anklet/config.yml.bak
+CLI_CONFIG="${HOME}/.config/anklet/config.yml"
+CLI_CONFIG_ORIG="${HOME}/.config/anklet/config.yml.anklet-cli-orig"
+CLI_CONFIG_HOST="${HOME}/.config/anklet/config.yml.host"
+# A symlink here is a leftover CLI case. It is not the host config.
+if [[ -L "${CLI_CONFIG}" ]]; then
+    rm -f "${CLI_CONFIG}"
+fi
+# Move the live file aside in one step. The empty case links a missing
+# yml onto this path, so the path must be clear and the host file must
+# still exist in the backup. mv does both. cp plus a later rm does not:
+# an old backup would stay, and the rm would delete the newer host file.
+if [[ -f "${CLI_CONFIG}" ]]; then
+    mv -f "${CLI_CONFIG}" "${CLI_CONFIG_ORIG}"
+elif [[ -f "${CLI_CONFIG_HOST}" ]]; then
+    cp "${CLI_CONFIG_HOST}" "${CLI_CONFIG_ORIG}"
 fi
 
 if ! anka version &> /dev/null; then
@@ -189,8 +202,10 @@ cleanup() {
     pwd
     echo "] Cleaning up..."
     rm -rf dist || true
-    rm -f ~/.config/anklet/config.yml || true
-    mv ~/.config/anklet/config.yml.bak ~/.config/anklet/config.yml &> /dev/null || true
+    rm -f "${CLI_CONFIG}" || true
+    if [[ -f "${CLI_CONFIG_ORIG}" ]]; then
+        mv "${CLI_CONFIG_ORIG}" "${CLI_CONFIG}" || true
+    fi
     anka delete --yes "${TEST_VM_NAME}-1" &> /dev/null || true
     anka delete --yes "${TEST_VM_NAME}-2" &> /dev/null || true
     echo "] DONE"
@@ -336,6 +351,9 @@ run_test() {
         TESTS+="$line"$'\n'
     done
     echo "]] Running ${TEST_NAME} (log: ${TEST_LOG_FILE})"
+    # The host file is already in CLI_CONFIG_ORIG. This only removes the
+    # previous case symlink so ln can create the next one.
+    rm -f ~/.config/anklet/config.yml
     ln -s ${TESTS_DIR}/$TEST_YML ~/.config/anklet/config.yml
     $BINARY > $TEST_LOG_FILE 2>&1 &
     BINARY_PID=$!
