@@ -46,21 +46,44 @@ sign_payload_file() {
     openssl dgst -sha256 -hmac "${RECEIVER_SECRET}" "${payload_file}" | awk '{print $2}'
 }
 
+print_receiver_log_since() {
+    local before_bytes="$1"
+    local log_file="${2:-/tmp/anklet.log}"
+    echo "] receiver log:"
+    if [[ ! -f "${log_file}" ]]; then
+        echo "] (no ${log_file})"
+        return
+    fi
+    if ! tail -c +"$((before_bytes + 1))" "${log_file}" 2>/dev/null | grep .; then
+        echo "] (no new lines)"
+    fi
+}
+
 post_receiver_payload() {
     local payload_file="$1"
     local event_type="${2:-workflow_job}"
     local signature="${3:-}"
     local delivery_id="${4:-manual-$(date +%s)-$RANDOM}"
+    local before_bytes
+    local code
     if [[ -z "${signature}" ]]; then
         signature="sha256=$(sign_payload_file "${payload_file}")"
     fi
-    curl -sS -o "${PAYLOAD_DIR}/last-body" -w "%{http_code}" \
+    before_bytes=$(wc -c < /tmp/anklet.log 2>/dev/null || echo 0)
+    before_bytes="${before_bytes// /}"
+    code=$(curl -sS -o "${PAYLOAD_DIR}/last-body" -w "%{http_code}" \
         -X POST "${RECEIVER_URL}" \
         -H "Content-Type: application/json" \
         -H "X-GitHub-Event: ${event_type}" \
         -H "X-GitHub-Delivery: ${delivery_id}" \
         -H "X-Hub-Signature-256: ${signature}" \
-        --data-binary "@${payload_file}"
+        --data-binary "@${payload_file}")
+    {
+        echo "] POST ${payload_file} -> HTTP ${code}"
+        echo "] body: $(cat "${PAYLOAD_DIR}/last-body" 2>/dev/null || true)"
+        print_receiver_log_since "${before_bytes}"
+    } >&2
+    echo "${code}"
 }
 
 write_payload() {
@@ -94,7 +117,6 @@ write_payload "${PAYLOAD_DIR}/unsigned.json" <<'EOF'
 EOF
 unsigned_code=$(post_receiver_payload "${PAYLOAD_DIR}/unsigned.json" "workflow_job" "sha256=deadbeef")
 if [[ "${unsigned_code}" != "400" ]]; then
-    echo "] body: $(cat "${PAYLOAD_DIR}/last-body" 2>/dev/null || true)"
     record_fail "unsigned payload returned HTTP ${unsigned_code}, want 400"
 elif ! assert_redis_key_not_exists "${QUEUED_KEY}"; then
     record_fail "unsigned payload wrote ${QUEUED_KEY}"
@@ -111,7 +133,6 @@ write_payload "${PAYLOAD_DIR}/missing-id.json" <<'EOF'
 EOF
 missing_id_code=$(post_receiver_payload "${PAYLOAD_DIR}/missing-id.json")
 if [[ "${missing_id_code}" != "400" ]]; then
-    echo "] body: $(cat "${PAYLOAD_DIR}/last-body" 2>/dev/null || true)"
     record_fail "missing id returned HTTP ${missing_id_code}, want 400"
 elif ! assert_redis_key_not_exists "${QUEUED_KEY}"; then
     record_fail "missing id wrote ${QUEUED_KEY}"
@@ -128,7 +149,6 @@ write_payload "${PAYLOAD_DIR}/optional-queued.json" <<'EOF'
 EOF
 optional_code=$(post_receiver_payload "${PAYLOAD_DIR}/optional-queued.json")
 if [[ "${optional_code}" != "200" ]]; then
-    echo "] body: $(cat "${PAYLOAD_DIR}/last-body" 2>/dev/null || true)"
     record_fail "optional queued payload returned HTTP ${optional_code}, want 200"
 elif ! assert_redis_list_json_contains "${QUEUED_KEY}" 0 "type" "WorkflowJobPayload"; then
     record_fail "queued job type mismatch"
