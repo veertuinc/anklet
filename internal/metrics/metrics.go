@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/shirou/gopsutil/v4/cpu"
@@ -912,6 +913,9 @@ func redisMetricsKey(owner, name string) string {
 
 func ExportMetricsToDB(workerCtx context.Context, pluginCtx context.Context, keyEnding string) {
 	logging.Info(pluginCtx, "starting ExportMetricsToDB", "keyEnding", keyEnding)
+	if workerCtx.Err() != nil || pluginCtx.Err() != nil {
+		return
+	}
 	databaseContainer, err := database.GetDatabaseFromContext(pluginCtx)
 	if err != nil {
 		logging.Error(pluginCtx, "error getting database client from context", "error", err)
@@ -919,13 +923,25 @@ func ExportMetricsToDB(workerCtx context.Context, pluginCtx context.Context, key
 	}
 	ticker := time.NewTicker(10 * time.Second)
 	amountOfErrorsAllowed := 60
-	atLeastOneRun := false
+	var atLeastOneRun atomic.Bool
 	metricsKey := "anklet/metrics/" + strings.TrimPrefix(keyEnding, "/")
 	go func() {
+		defer ticker.Stop()
 		for {
+			if workerCtx.Err() != nil || pluginCtx.Err() != nil {
+				return
+			}
 			metricsData, err := GetMetricsDataFromContext(workerCtx)
 			if err != nil {
 				logging.Error(pluginCtx, "error getting metrics data from context", "error", err.Error())
+				select {
+				case <-pluginCtx.Done():
+					return
+				case <-workerCtx.Done():
+					return
+				case <-ticker.C:
+				}
+				continue
 			}
 			// Update system metrics before exporting
 			UpdateSystemMetrics(pluginCtx, metricsData)
@@ -939,59 +955,67 @@ func ExportMetricsToDB(workerCtx context.Context, pluginCtx context.Context, key
 			case <-workerCtx.Done():
 				return
 			default:
-				if pluginCtx.Err() == nil && workerCtx.Err() == nil {
-					// add last_update
-					var metricsDataMap map[string]any
-					if err := json.Unmarshal(metricsDataJson, &metricsDataMap); err != nil {
-						logging.Error(pluginCtx, "error unmarshalling metrics data", "error", err)
-						amountOfErrorsAllowed--
-						if amountOfErrorsAllowed == 0 {
-							os.Exit(1)
-						}
-						continue
-					}
-					metricsDataMap["last_update"] = time.Now()
-					metricsDataJson, err = json.Marshal(metricsDataMap)
-					if err != nil {
-						logging.Error(pluginCtx, "error marshalling metrics data", "error", err)
-						amountOfErrorsAllowed--
-						if amountOfErrorsAllowed == 0 {
-							os.Exit(1)
-						}
-						continue
-					}
-					// This will create a single key using the first plugin's name. It will contain all plugin metrics though.
-					err = databaseContainer.RetrySet(pluginCtx, metricsKey, metricsDataJson, time.Hour*24*7) // keep metrics for one week max
-					if err != nil {
-						logging.Error(pluginCtx, "error storing metrics data in Redis", "error", err)
-						amountOfErrorsAllowed--
-						if amountOfErrorsAllowed == 0 {
-							os.Exit(1)
-						}
-						continue
-					}
-					_, err = databaseContainer.RetryExists(pluginCtx, metricsKey)
-					if err != nil {
-						logging.Error(pluginCtx, "error checking if key exists in Redis", "key", metricsKey, "error", err)
-						amountOfErrorsAllowed--
-						if amountOfErrorsAllowed == 0 {
-							os.Exit(1)
-						}
-						continue
-					}
-					if amountOfErrorsAllowed < 60 {
-						logging.Info(pluginCtx, "errors resolved with metrics export")
-						amountOfErrorsAllowed = 60
-					}
-					if !atLeastOneRun {
-						atLeastOneRun = true
-					}
-					<-ticker.C
+			}
+			if pluginCtx.Err() != nil || workerCtx.Err() != nil {
+				return
+			}
+			// add last_update
+			var metricsDataMap map[string]any
+			if err := json.Unmarshal(metricsDataJson, &metricsDataMap); err != nil {
+				logging.Error(pluginCtx, "error unmarshalling metrics data", "error", err)
+				amountOfErrorsAllowed--
+				if amountOfErrorsAllowed == 0 {
+					os.Exit(1)
 				}
+				continue
+			}
+			metricsDataMap["last_update"] = time.Now()
+			metricsDataJson, err = json.Marshal(metricsDataMap)
+			if err != nil {
+				logging.Error(pluginCtx, "error marshalling metrics data", "error", err)
+				amountOfErrorsAllowed--
+				if amountOfErrorsAllowed == 0 {
+					os.Exit(1)
+				}
+				continue
+			}
+			// This will create a single key using the first plugin's name. It will contain all plugin metrics though.
+			err = databaseContainer.RetrySet(pluginCtx, metricsKey, metricsDataJson, time.Hour*24*7) // keep metrics for one week max
+			if err != nil {
+				logging.Error(pluginCtx, "error storing metrics data in Redis", "error", err)
+				amountOfErrorsAllowed--
+				if amountOfErrorsAllowed == 0 {
+					os.Exit(1)
+				}
+				continue
+			}
+			_, err = databaseContainer.RetryExists(pluginCtx, metricsKey)
+			if err != nil {
+				logging.Error(pluginCtx, "error checking if key exists in Redis", "key", metricsKey, "error", err)
+				amountOfErrorsAllowed--
+				if amountOfErrorsAllowed == 0 {
+					os.Exit(1)
+				}
+				continue
+			}
+			if amountOfErrorsAllowed < 60 {
+				logging.Info(pluginCtx, "errors resolved with metrics export")
+				amountOfErrorsAllowed = 60
+			}
+			atLeastOneRun.Store(true)
+			select {
+			case <-pluginCtx.Done():
+				return
+			case <-workerCtx.Done():
+				return
+			case <-ticker.C:
 			}
 		}
 	}()
-	for !atLeastOneRun {
+	for !atLeastOneRun.Load() {
+		if workerCtx.Err() != nil || pluginCtx.Err() != nil {
+			return
+		}
 		time.Sleep(time.Second * 1)
 	}
 }
