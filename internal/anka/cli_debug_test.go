@@ -272,3 +272,68 @@ func TestExecuteWithTimeoutPassesDebugAndKeepsJSONOnStdout(t *testing.T) {
 		t.Fatalf("anka args = %v, want %v", gotArgs, wantArgs)
 	}
 }
+
+func TestLastAnkaProgressLine(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{name: "empty", in: "", want: ""},
+		{name: "single line", in: "pulling 10%\n", want: "pulling 10%"},
+		{name: "multi line", in: "start\npulling 10%\npulling 50%\n", want: "pulling 50%"},
+		{name: "carriage return progress", in: "pulling 10%\rpulling 90%\n", want: "pulling 90%"},
+		{name: "trailing whitespace", in: "done  \n\n", want: "done"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := lastAnkaProgressLine([]byte(tt.in))
+			if got != tt.want {
+				t.Errorf("lastAnkaProgressLine(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestExecuteLogsProgressWhileCommandRuns(t *testing.T) {
+	t.Setenv("LOG_LEVEL", "INFO")
+	dir := t.TempDir()
+	argsFile := filepath.Join(dir, "args")
+	if err := os.WriteFile(filepath.Join(dir, "stdout"), []byte(fakeAnkaJSON), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("ANKA_FAKE_ARGS_FILE", argsFile)
+	script := `#!/bin/sh
+DIR=$(dirname "$0")
+{
+	for a in "$@"; do
+		printf '%s\n' "$a"
+	done
+} > "${ANKA_FAKE_ARGS_FILE:?}"
+printf '%s\n' 'pulling layer 1/3 (10%)' >&2
+sleep 11
+printf '%s\n' 'pulling layer 3/3 (99%)' >&2
+cat "$DIR/stdout"
+exit 0
+`
+	if err := os.WriteFile(filepath.Join(dir, "anka"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	var logs bytes.Buffer
+	ctx := testPluginCtxWithLogger(t, &logs)
+	cli := &Cli{}
+	if _, _, err := cli.Execute(ctx, "anka", "-j", "registry", "pull", "tmpl"); err != nil {
+		t.Fatalf("Execute err = %v", err)
+	}
+	logText := logs.String()
+	if !strings.Contains(logText, "still in progress") {
+		t.Fatalf("missing still-in-progress log: %s", logText)
+	}
+	if !strings.Contains(logText, "pulling layer 1/3 (10%)") {
+		t.Fatalf("missing mid-pull progress in log: %s", logText)
+	}
+}
