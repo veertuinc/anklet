@@ -534,6 +534,8 @@ TESTS
     log_does_not_contain "ERROR"
     log_contains_at_least 2 "host does not have vm capacity"
     log_contains_at_least 2 "starting github plugin"
+    log_contains "anka -j --debug version"
+    log_contains "anka -j --debug license"
     log_contains "anklet (and all plugins) shut down"
 TESTS
             run_cmd anka delete --yes "${TEST_VM_NAME}-1"
@@ -544,6 +546,8 @@ TESTS
     log_does_not_contain "ERROR"
     log_contains "starting anklet"
     log_contains "starting github plugin"
+    log_contains "anka -j --debug version"
+    log_contains "anka -j --debug license"
     log_contains "anklet (and all plugins) shut down"
 TESTS
             ;;

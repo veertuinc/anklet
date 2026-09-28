@@ -95,19 +95,71 @@ func NewCLI(pluginCtx context.Context) (*Cli, error) {
 	return cli, nil
 }
 
+// injectAnkaDebugFlag adds Anka --debug after -j/--machine-readable so JSON stays on stdout
+// and Anka writes verbose output to stderr.
+func injectAnkaDebugFlag(args []string) []string {
+	if len(args) == 0 || args[0] != "anka" {
+		return args
+	}
+	for _, arg := range args {
+		if arg == "--debug" {
+			return args
+		}
+	}
+	out := make([]string, 0, len(args)+1)
+	out = append(out, args[0])
+	i := 1
+	if i < len(args) && (args[i] == "-j" || args[i] == "--machine-readable") {
+		out = append(out, args[i])
+		i++
+	}
+	out = append(out, "--debug")
+	out = append(out, args[i:]...)
+	return out
+}
+
+func shouldLogAnkaStderr(debugEnabled bool, failed bool, stderr []byte) bool {
+	if len(bytes.TrimSpace(stderr)) == 0 {
+		return false
+	}
+	return debugEnabled || failed
+}
+
+func logAnkaCommandStderr(pluginCtx context.Context, stderr []byte, failed bool) {
+	if !shouldLogAnkaStderr(logging.IsDebugEnabled(), failed, stderr) {
+		return
+	}
+	if failed {
+		logging.Error(pluginCtx, "anka command stderr", "stderr", string(stderr))
+		return
+	}
+	logging.Debug(pluginCtx, "anka command stderr", "stderr", string(stderr))
+}
+
+func finishAnkaExec(pluginCtx context.Context, stdout *bytes.Buffer, stderr *bytes.Buffer, err error) ([]byte, int, error) {
+	exitCode := 0
+	if exitErr, ok := err.(*exec.ExitError); ok {
+		exitCode = exitErr.ExitCode()
+	}
+	logAnkaCommandStderr(pluginCtx, stderr.Bytes(), err != nil)
+	return stdout.Bytes(), exitCode, err
+}
+
 // DO NOT RUN exec.Command with context or else the cancellation will interrupt things like VM deletion, which we don't want!
 // Note: Critical cleanup operations should use a cleanup context with timeout (not immediately canceled) to ensure completion.
 func (cli *Cli) Execute(pluginCtx context.Context, args ...string) ([]byte, int, error) {
 	if args[2] != "list" { // hide spammy list command
-		logging.Debug(pluginCtx, "executing", "command", strings.Join(args, " "))
+		logging.Debug(pluginCtx, "executing", "command", strings.Join(injectAnkaDebugFlag(args), " "))
 	}
+	args = injectAnkaDebugFlag(args)
 	done := make(chan error, 1)
-	var combinedOutput bytes.Buffer
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
 
 	// Create command outside goroutine so we can kill it if needed
 	cmd := exec.Command(args[0], args[1:]...)
-	cmd.Stdout = &combinedOutput
-	cmd.Stderr = &combinedOutput
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
 
 	go func() {
 		err := cmd.Run()
@@ -125,15 +177,12 @@ func (cli *Cli) Execute(pluginCtx context.Context, args ...string) ([]byte, int,
 			if cmd.Process != nil {
 				_ = cmd.Process.Kill()
 			}
+			logAnkaCommandStderr(pluginCtx, stderr.Bytes(), true)
 			return nil, 0, fmt.Errorf("context canceled during command execution: %w", pluginCtx.Err())
 		case <-ticker.C:
 			logging.Info(pluginCtx, fmt.Sprintf("execution of command %v is still in progress...", args))
 		case err := <-done:
-			exitCode := 0
-			if exitErr, ok := err.(*exec.ExitError); ok {
-				exitCode = exitErr.ExitCode()
-			}
-			return combinedOutput.Bytes(), exitCode, err
+			return finishAnkaExec(pluginCtx, &stdout, &stderr, err)
 		}
 	}
 }
@@ -144,15 +193,17 @@ func (cli *Cli) ExecuteWithTimeout(
 	args ...string,
 ) ([]byte, int, error, error) {
 	if args[2] != "list" { // hide spammy list command
-		logging.Debug(pluginCtx, "executing", "command", strings.Join(args, " "))
+		logging.Debug(pluginCtx, "executing", "command", strings.Join(injectAnkaDebugFlag(args), " "))
 	}
+	args = injectAnkaDebugFlag(args)
 	done := make(chan error, 1)
-	var combinedOutput bytes.Buffer
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
 
 	// Create command outside goroutine so we can kill it if needed
 	cmd := exec.Command(args[0], args[1:]...)
-	cmd.Stdout = &combinedOutput
-	cmd.Stderr = &combinedOutput
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
 
 	go func() {
 		err := cmd.Run()
@@ -172,21 +223,20 @@ func (cli *Cli) ExecuteWithTimeout(
 			if cmd.Process != nil {
 				_ = cmd.Process.Kill()
 			}
+			logAnkaCommandStderr(pluginCtx, stderr.Bytes(), true)
 			return nil, 0, nil, fmt.Errorf("context canceled during command execution: %w", pluginCtx.Err())
 		case <-timeout:
 			// Kill the process on timeout
 			if cmd.Process != nil {
 				_ = cmd.Process.Kill()
 			}
+			logAnkaCommandStderr(pluginCtx, stderr.Bytes(), true)
 			return nil, 0, nil, fmt.Errorf("execution of command %v timed out", args)
 		case <-ticker.C:
 			logging.Info(pluginCtx, fmt.Sprintf("execution of command %v is still in progress...", args))
 		case err := <-done:
-			exitCode := 0
-			if exitErr, ok := err.(*exec.ExitError); ok {
-				exitCode = exitErr.ExitCode()
-			}
-			return combinedOutput.Bytes(), exitCode, err, nil
+			out, exitCode, execErr := finishAnkaExec(pluginCtx, &stdout, &stderr, err)
+			return out, exitCode, execErr, nil
 		}
 	}
 }
