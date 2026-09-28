@@ -125,6 +125,56 @@ func shouldLogAnkaStderr(debugEnabled bool, failed bool, stderr []byte) bool {
 	return debugEnabled || failed
 }
 
+// lastAnkaProgressLine returns the latest non-empty stderr line. Anka --debug
+// often rewrites progress with carriage returns on one physical line.
+func lastAnkaProgressLine(stderr []byte) string {
+	if len(stderr) == 0 {
+		return ""
+	}
+	lines := bytes.Split(stderr, []byte("\n"))
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := bytes.TrimSpace(lines[i])
+		if idx := bytes.LastIndexByte(line, '\r'); idx >= 0 {
+			line = bytes.TrimSpace(line[idx+1:])
+		}
+		if len(line) > 0 {
+			return string(line)
+		}
+	}
+	return ""
+}
+
+// syncBuffer is a bytes.Buffer safe for concurrent Write (cmd) and Bytes (ticker).
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (s *syncBuffer) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.buf.Write(p)
+}
+
+func (s *syncBuffer) Bytes() []byte {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]byte, s.buf.Len())
+	copy(out, s.buf.Bytes())
+	return out
+}
+
+func logAnkaCommandProgress(pluginCtx context.Context, args []string, stderr *syncBuffer) {
+	progress := lastAnkaProgressLine(stderr.Bytes())
+	if progress != "" {
+		logging.Info(pluginCtx, "execution of command still in progress",
+			"command", args,
+			"progress", progress)
+		return
+	}
+	logging.Info(pluginCtx, fmt.Sprintf("execution of command %v is still in progress...", args))
+}
+
 func logAnkaCommandStderr(pluginCtx context.Context, stderr []byte, failed bool) {
 	if !shouldLogAnkaStderr(logging.IsDebugEnabled(), failed, stderr) {
 		return
@@ -136,7 +186,7 @@ func logAnkaCommandStderr(pluginCtx context.Context, stderr []byte, failed bool)
 	logging.Debug(pluginCtx, "anka command stderr", "stderr", string(stderr))
 }
 
-func finishAnkaExec(pluginCtx context.Context, stdout *bytes.Buffer, stderr *bytes.Buffer, err error) ([]byte, int, error) {
+func finishAnkaExec(pluginCtx context.Context, stdout *bytes.Buffer, stderr *syncBuffer, err error) ([]byte, int, error) {
 	exitCode := 0
 	if exitErr, ok := err.(*exec.ExitError); ok {
 		exitCode = exitErr.ExitCode()
@@ -154,7 +204,7 @@ func (cli *Cli) Execute(pluginCtx context.Context, args ...string) ([]byte, int,
 	args = injectAnkaDebugFlag(args)
 	done := make(chan error, 1)
 	var stdout bytes.Buffer
-	var stderr bytes.Buffer
+	var stderr syncBuffer
 
 	// Create command outside goroutine so we can kill it if needed
 	cmd := exec.Command(args[0], args[1:]...)
@@ -180,7 +230,7 @@ func (cli *Cli) Execute(pluginCtx context.Context, args ...string) ([]byte, int,
 			logAnkaCommandStderr(pluginCtx, stderr.Bytes(), true)
 			return nil, 0, fmt.Errorf("context canceled during command execution: %w", pluginCtx.Err())
 		case <-ticker.C:
-			logging.Info(pluginCtx, fmt.Sprintf("execution of command %v is still in progress...", args))
+			logAnkaCommandProgress(pluginCtx, args, &stderr)
 		case err := <-done:
 			return finishAnkaExec(pluginCtx, &stdout, &stderr, err)
 		}
@@ -198,7 +248,7 @@ func (cli *Cli) ExecuteWithTimeout(
 	args = injectAnkaDebugFlag(args)
 	done := make(chan error, 1)
 	var stdout bytes.Buffer
-	var stderr bytes.Buffer
+	var stderr syncBuffer
 
 	// Create command outside goroutine so we can kill it if needed
 	cmd := exec.Command(args[0], args[1:]...)
@@ -233,7 +283,7 @@ func (cli *Cli) ExecuteWithTimeout(
 			logAnkaCommandStderr(pluginCtx, stderr.Bytes(), true)
 			return nil, 0, nil, fmt.Errorf("execution of command %v timed out", args)
 		case <-ticker.C:
-			logging.Info(pluginCtx, fmt.Sprintf("execution of command %v is still in progress...", args))
+			logAnkaCommandProgress(pluginCtx, args, &stderr)
 		case err := <-done:
 			out, exitCode, execErr := finishAnkaExec(pluginCtx, &stdout, &stderr, err)
 			return out, exitCode, execErr, nil
