@@ -46,7 +46,7 @@ start_anklet_backgrounded_but_attached "receiver"
 # Start anklet on handler (remote)
 ###############################################################################
 echo "] Starting anklet on handler-8-16..."
-start_anklet_on_host_background "handler-8-16"
+start_anklet_on_host_background "handler-8-16" "LOG_LEVEL=DEBUG"
 
 # Wait for anklet to fully initialize and register with Redis
 echo "] Waiting for anklet to register with Redis..."
@@ -67,6 +67,7 @@ if run_workflow_and_get_logs "veertuinc" "anklet" "t1-with-tag-1" "success"; the
     # Check handler's anklet.log for expected entries
     assert_remote_log_contains "handler-8-16" "queued job found"
     assert_remote_log_contains "handler-8-16" "handling anka workflow run job"
+    assert_remote_log_contains "handler-8-16" "anka -j --debug"
     assert_remote_log_contains "handler-8-16" "vm has enough resources now to run; starting runner"
     assert_remote_log_contains "handler-8-16" "job found registered runner and is now in progress"
     # Cleanup logs anka.VM first, then deletes the VM, then WorkflowJobPayload.
@@ -121,7 +122,7 @@ end_test
 # t1-with-tag-2
 begin_test "t1-with-tag-2"
 if run_workflow_and_get_logs "veertuinc" "anklet" "t1-with-tag-2" "success"; then
-    assert_remote_log_contains "handler-8-16" "anka -j registry pull"
+    assert_remote_log_contains "handler-8-16" "anka -j --debug registry pull"
     record_pass
 else
     record_fail "workflow did not complete as expected"
@@ -200,7 +201,7 @@ METRICS_TEST_PASSED=true
 echo "] Verifying handler is still running..."
 if ! ssh_to_host "handler-8-16" "pgrep -f '^/tmp/anklet\$' > /dev/null" 2>/dev/null; then
     echo "] handler-8-16 not running, restarting..."
-    start_anklet_on_host_background "handler-8-16"
+    start_anklet_on_host_background "handler-8-16" "LOG_LEVEL=DEBUG"
     sleep 10
 fi
 
