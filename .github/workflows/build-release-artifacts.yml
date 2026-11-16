@@ -21,10 +21,34 @@ jobs:
   goreleaser:
     runs-on: macos-latest
     steps:
+      - name: Check for GitHub App credentials
+        id: app-check
+        env:
+          GOVULNCHECK_APP_ID: ${{ secrets.GOVULNCHECK_APP_ID }}
+          GOVULNCHECK_APP_PRIVATE_KEY: ${{ secrets.GOVULNCHECK_APP_PRIVATE_KEY }}
+        run: |
+          if [ -n "$GOVULNCHECK_APP_ID" ] && [ -n "$GOVULNCHECK_APP_PRIVATE_KEY" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create GitHub App token
+        id: app-token
+        if: steps.app-check.outputs.present == 'true'
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ secrets.GOVULNCHECK_APP_ID }}
+          private-key: ${{ secrets.GOVULNCHECK_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+
       - uses: actions/checkout@v6
         with:
           ref: ${{ inputs.ref }}
           fetch-depth: 0
+          persist-credentials: true
+          token: ${{ steps.app-token.outputs.token || github.token }}
 
       - name: Tag from VERSION
         if: ${{ inputs.full_release }}
@@ -33,7 +57,7 @@ jobs:
       - name: Delete existing edge release and tag
         if: ${{ !inputs.full_release }}
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
         run: |
           set -euo pipefail
           if gh release view edge >/dev/null 2>&1; then
@@ -65,7 +89,7 @@ jobs:
       - name: Publish edge GitHub release
         if: ${{ !inputs.full_release }}
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
         run: |
           set -euo pipefail
           target_sha="$(git rev-parse HEAD)"
