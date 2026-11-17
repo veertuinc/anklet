@@ -16,5 +16,5 @@ Veertu Inc provides a small amount of ARM64/Silicon hardware for testing purpose
 
 | ID                 | CPU      | RAM  | Disk   |
 |--------------------|----------|------|--------|
-| ubuntu-22.04-linux | 2        | 4    | 100GB  |
+| ubuntu-linux       | 2        | 4    | 100GB  |
 

@@ -3,8 +3,8 @@ tests:
     - name: "Single host success test"
       hosts:
         - name: "receiver"
-          id: "ubuntu-22.04-linux"
-          config: ubuntu-22.04-linux.yaml
+          id: "ubuntu-linux"
+          config: ubuntu-linux.yaml
           tester: true
 
         - name: "handler-8-16"
