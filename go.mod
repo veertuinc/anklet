@@ -1,8 +1,6 @@
 module github.com/veertuinc/anklet
 
-go 1.25.1
-
-toolchain go1.26.11
+go 1.27.4
 
 require (
 	github.com/bradleyfalzon/ghinstallation/v2 v2.17.0

@@ -22,7 +22,7 @@ Anklet is a tool that runs custom plugins to communicate with CI platforms/tools
 - **Metrics Aggregator**: Collects and serves metrics from all Anklet instances
 
 ### Tech Stack
-- **Language:** Go 1.24.1
+- **Language:** Go 1.27.4
 - **Database:** Redis 7.x (for job queue and state management)
 - **Dependencies:** 
   - `github.com/google/go-github/v74` - GitHub API client
