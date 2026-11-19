@@ -2,6 +2,8 @@ module github.com/veertuinc/anklet
 
 go 1.25.1
 
+toolchain go1.25.2
+
 require (
 	github.com/bradleyfalzon/ghinstallation/v2 v2.17.0
 	github.com/gofri/go-github-ratelimit/v2 v2.0.2
