@@ -893,9 +893,21 @@ jobs:
               log("")
           
           
+          def branch_ref(name: str) -> str:
+              # A tag can use the same short name. Git commands need the branch ref.
+              return "refs/heads/{0}".format(name)
+          
+          
+          def head_names_branch(head_name: str, branch: str) -> bool:
+              name = head_name.strip()
+              return name == branch or name == "heads/{0}".format(branch)
+          
+          
           def checkout_base(root: str, base: str) -> None:
-              run(["git", "checkout", "--force", base], cwd=root)
-              run(["git", "reset", "--hard", base], cwd=root)
+              ref = branch_ref(base)
+              # checkout -B stays on the branch. checkout of the full ref detaches HEAD.
+              run(["git", "checkout", "-B", base, ref], cwd=root)
+              run(["git", "reset", "--hard", ref], cwd=root)
           
           
           def commit_and_push(root: str, vuln: Vuln, gomod: str, gosum: str) -> None:
@@ -1017,7 +1029,7 @@ jobs:
               pushed = False
               opened_url = ""
               try:
-                  run(["git", "checkout", "-B", vuln.branch(), base], cwd=root)
+                  run(["git", "checkout", "-B", vuln.branch(), branch_ref(base)], cwd=root)
                   apply_bumps(vuln, mod_dir, go_mod_path)
                   commit_and_push(root, vuln, go_mod, go_sum)
                   pushed = True
@@ -1076,8 +1088,10 @@ jobs:
                   raise SystemExit("worktree is not clean")
               _, head_name = run(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=root, quiet=True)
               _, head_sha = run(["git", "rev-parse", "HEAD"], cwd=root, quiet=True)
-              code, base_sha = run(["git", "rev-parse", base], cwd=root, quiet=True, check=False)
-              on_base = head_name.strip() == base or (
+              code, base_sha = run(
+                  ["git", "rev-parse", branch_ref(base)], cwd=root, quiet=True, check=False
+              )
+              on_base = head_names_branch(head_name, base) or (
                   code == 0 and head_sha.strip() == base_sha.strip()
               )
               if not on_base:
@@ -1252,6 +1266,10 @@ jobs:
               )
               assert gomod_covers_vuln(std, "module m\n\ngo 1.27.3\n\ntoolchain go1.27.4\n")[0]
               assert not gomod_covers_vuln(std, "module m\n\ngo 1.27.3\n")[0]
+              assert branch_ref("edge") == "refs/heads/edge"
+              assert head_names_branch("edge", "edge")
+              assert head_names_branch("heads/edge", "edge")
+              assert not head_names_branch("HEAD", "edge")
               assert "GOVULNCHECK_APP_ID" in APP_TOKEN_REQUIRED
               assert "GOVULNCHECK_APP_PRIVATE_KEY" in APP_TOKEN_REQUIRED
               assert "workflow_dispatch" in APP_TOKEN_REQUIRED
