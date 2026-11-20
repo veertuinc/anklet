@@ -107,6 +107,40 @@ jobs:
             --target "${target_sha}" \
             "${assets[@]}"
 
+      - name: Publish VERSION GitHub release
+        if: ${{ inputs.full_release }}
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
+        run: |
+          set -euo pipefail
+          version="$(tr -d '[:space:]' < VERSION)"
+          if [[ -z "${version}" ]]; then
+            echo "ERROR: VERSION file is empty" >&2
+            exit 1
+          fi
+          if gh release view "${version}" >/dev/null 2>&1; then
+            echo "ERROR: GitHub release ${version} already exists" >&2
+            exit 1
+          fi
+          if [[ -n "$(git ls-remote --tags origin "refs/tags/${version}")" ]]; then
+            echo "ERROR: git tag ${version} already exists on origin" >&2
+            exit 1
+          fi
+          target_sha="$(git rev-parse HEAD)"
+          shopt -s nullglob
+          assets=(dist/*.zip)
+          if [[ ${#assets[@]} -eq 0 ]]; then
+            echo "ERROR: no zip artifacts found under dist/" >&2
+            ls -la dist/ >&2 || true
+            exit 1
+          fi
+          gh release create "${version}" \
+            --title "v${version}" \
+            --generate-notes \
+            --latest \
+            --target "${target_sha}" \
+            "${assets[@]}"
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v7
         with:

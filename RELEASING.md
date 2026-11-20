@@ -12,4 +12,5 @@
 1. Make sure tests pass: https://github.com/veertuinc/anklet-tests?tab=readme-ov-file#anklet-tests
 2. Commit to `edge` (update the VERSION file!)
 3. Run https://github.com/veertuinc/anklet/actions/workflows/build-release-artifacts.yml with **Publish full VERSION release** checked
-4. Create the GitHub release and attach the workflow zips (and checksum file if present)
+4. The workflow builds zips, creates tag/release from `VERSION` (title `v$VERSION`, auto-generated notes, marked latest), and attaches the zips
+5. The workflow fails if that tag or release already exists
