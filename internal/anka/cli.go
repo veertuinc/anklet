@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os/exec"
 	"path/filepath"
@@ -15,6 +16,15 @@ import (
 	"github.com/veertuinc/anklet/internal/config"
 	"github.com/veertuinc/anklet/internal/logging"
 	"github.com/veertuinc/anklet/internal/metrics"
+)
+
+var (
+	// ErrTemplateNotFoundInRegistry indicates the requested template or tag does not exist in the Anka registry.
+	ErrTemplateNotFoundInRegistry = errors.New("no template tag exists in registry")
+	// ErrInsufficientSpace indicates the host does not have enough disk space for the template even after LRU cleanup.
+	ErrInsufficientSpace = errors.New("insufficient space on host")
+	// ErrCommandTimeout indicates an Anka CLI command exceeded its configured timeout.
+	ErrCommandTimeout = errors.New("anka command timed out")
 )
 
 type AnkaJson struct {
@@ -30,8 +40,7 @@ type Cli struct {
 		LicenseType string
 		Status      string
 	}
-	Version           string
-	RegistryPullMutex sync.Mutex
+	Version string
 }
 
 type AnkaShowOutput struct {
@@ -51,7 +60,7 @@ type AnkaPullCheckOutput struct {
 
 func GetAnkaCLIFromContext(pluginCtx context.Context) (*Cli, error) {
 	ankaCLI, ok := pluginCtx.Value(config.ContextKey("ankacli")).(*Cli)
-	if !ok {
+	if !ok || ankaCLI == nil {
 		return nil, fmt.Errorf("GetAnkaCLIFromContext failed")
 	}
 	return ankaCLI, nil
@@ -62,26 +71,40 @@ func NewCLI(pluginCtx context.Context) (*Cli, error) {
 
 	cmd := exec.Command("anka")
 	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("anka command not found or not working properly: %v", err)
+		return nil, fmt.Errorf("anka command not found or not working properly: %w", err)
 	}
 
 	version, err := cli.ExecuteParseJson(pluginCtx, "anka", "-j", "version")
-	if err != nil || version.Status != "OK" {
+	if err != nil {
 		return nil, err
 	}
+	if version.Status != "OK" {
+		return nil, fmt.Errorf("anka version returned status %q: %s", version.Status, version.Message)
+	}
 	if body, ok := version.Body.(map[string]any); ok {
-		cli.Version = body["version"].(string)
+		if v, ok := body["version"].(string); ok {
+			cli.Version = v
+		}
 	}
 
 	license, err := cli.ExecuteParseJson(pluginCtx, "anka", "-j", "license", "show")
-	if err != nil || license.Status != "OK" {
+	if err != nil {
 		return nil, err
+	}
+	if license.Status != "OK" {
+		return nil, fmt.Errorf("anka license show returned status %q: %s", license.Status, license.Message)
 	}
 
 	if body, ok := license.Body.(map[string]any); ok {
-		cli.License.Status = body["status"].(string)
-		cli.License.LicenseType = body["license_type"].(string)
-		cli.License.Product = body["product"].(string)
+		if status, ok := body["status"].(string); ok {
+			cli.License.Status = status
+		}
+		if licenseType, ok := body["license_type"].(string); ok {
+			cli.License.LicenseType = licenseType
+		}
+		if product, ok := body["product"].(string); ok {
+			cli.License.Product = product
+		}
 	}
 
 	if cli.License.Status != "valid" {
@@ -115,6 +138,33 @@ func injectAnkaDebugFlag(args []string) []string {
 	}
 	out = append(out, "--debug")
 	out = append(out, args[i:]...)
+	return out
+}
+
+func redactSensitiveArgs(args []string, secrets []string) []string {
+	if len(secrets) == 0 {
+		return args
+	}
+	out := make([]string, len(args))
+	for i, arg := range args {
+		redacted := arg
+		for _, secret := range secrets {
+			if secret != "" && strings.Contains(redacted, secret) {
+				redacted = strings.ReplaceAll(redacted, secret, "[REDACTED]")
+			}
+		}
+		out[i] = redacted
+	}
+	return out
+}
+
+func redactSensitiveString(input string, secrets []string) string {
+	out := input
+	for _, secret := range secrets {
+		if secret != "" && strings.Contains(out, secret) {
+			out = strings.ReplaceAll(out, secret, "[REDACTED]")
+		}
+	}
 	return out
 }
 
@@ -164,148 +214,146 @@ func (s *syncBuffer) Bytes() []byte {
 	return out
 }
 
-func logAnkaCommandProgress(pluginCtx context.Context, args []string, stderr *syncBuffer) {
-	progress := lastAnkaProgressLine(stderr.Bytes())
+func logAnkaCommandProgress(pluginCtx context.Context, safeArgs []string, stderr *syncBuffer, secrets []string) {
+	progress := redactSensitiveString(lastAnkaProgressLine(stderr.Bytes()), secrets)
 	if progress != "" {
 		logging.Info(pluginCtx, "execution of command still in progress",
-			"command", args,
+			"command", safeArgs,
 			"progress", progress)
 		return
 	}
-	logging.Info(pluginCtx, fmt.Sprintf("execution of command %v is still in progress...", args))
+	logging.Info(pluginCtx, fmt.Sprintf("execution of command %v is still in progress...", safeArgs))
 }
 
-func logAnkaCommandStderr(pluginCtx context.Context, stderr []byte, failed bool) {
+func logAnkaCommandStderr(pluginCtx context.Context, stderr []byte, failed bool, secrets []string) {
 	if !shouldLogAnkaStderr(logging.IsDebugEnabled(), failed, stderr) {
 		return
 	}
+	stderrText := redactSensitiveString(string(stderr), secrets)
 	if failed {
-		logging.Error(pluginCtx, "anka command stderr", "stderr", string(stderr))
+		logging.Error(pluginCtx, "anka command stderr", "stderr", stderrText)
 		return
 	}
-	logging.Debug(pluginCtx, "anka command stderr", "stderr", string(stderr))
+	logging.Debug(pluginCtx, "anka command stderr", "stderr", stderrText)
 }
 
-func finishAnkaExec(pluginCtx context.Context, stdout *bytes.Buffer, stderr *syncBuffer, err error) ([]byte, int, error) {
+func finishAnkaExec(pluginCtx context.Context, stdout *bytes.Buffer, stderr *syncBuffer, err error, secrets []string) ([]byte, int, error) {
 	exitCode := 0
-	if exitErr, ok := err.(*exec.ExitError); ok {
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
 		exitCode = exitErr.ExitCode()
 	}
-	logAnkaCommandStderr(pluginCtx, stderr.Bytes(), err != nil)
+	logAnkaCommandStderr(pluginCtx, stderr.Bytes(), err != nil, secrets)
 	return stdout.Bytes(), exitCode, err
 }
 
-// DO NOT RUN exec.Command with context or else the cancellation will interrupt things like VM deletion, which we don't want!
-// Note: Critical cleanup operations should use a cleanup context with timeout (not immediately canceled) to ensure completion.
-func (cli *Cli) Execute(pluginCtx context.Context, args ...string) ([]byte, int, error) {
-	if args[2] != "list" { // hide spammy list command
-		logging.Debug(pluginCtx, "executing", "command", strings.Join(injectAnkaDebugFlag(args), " "))
-	}
-	args = injectAnkaDebugFlag(args)
-	done := make(chan error, 1)
-	var stdout bytes.Buffer
-	var stderr syncBuffer
-
-	// Create command outside goroutine so we can kill it if needed
-	cmd := exec.Command(args[0], args[1:]...)
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	go func() {
-		err := cmd.Run()
-		done <- err
-	}()
-
-	ticker := time.NewTicker(10 * time.Second)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-pluginCtx.Done():
-			// Context was canceled (e.g., SIGINT received)
-			// Kill the running process to stop immediately
-			if cmd.Process != nil {
-				_ = cmd.Process.Kill()
-			}
-			logAnkaCommandStderr(pluginCtx, stderr.Bytes(), true)
-			return nil, 0, fmt.Errorf("context canceled during command execution: %w", pluginCtx.Err())
-		case <-ticker.C:
-			logAnkaCommandProgress(pluginCtx, args, &stderr)
-		case err := <-done:
-			return finishAnkaExec(pluginCtx, &stdout, &stderr, err)
-		}
-	}
-}
-
-func (cli *Cli) ExecuteWithTimeout(
+// executeCommand runs an Anka CLI command with optional timeout and log redaction.
+// cmd.Start is called synchronously before waiting in a goroutine so cmd.Process is
+// never accessed concurrently.
+func (cli *Cli) executeCommand(
 	pluginCtx context.Context,
-	timeoutInSeconds int,
+	timeout time.Duration,
+	secrets []string,
 	args ...string,
 ) ([]byte, int, error, error) {
-	if args[2] != "list" { // hide spammy list command
-		logging.Debug(pluginCtx, "executing", "command", strings.Join(injectAnkaDebugFlag(args), " "))
+	if len(args) == 0 {
+		return nil, 0, fmt.Errorf("empty command"), nil
 	}
-	args = injectAnkaDebugFlag(args)
-	done := make(chan error, 1)
+	isListCmd := len(args) > 2 && args[2] == "list"
+	execArgs := injectAnkaDebugFlag(args)
+	safeArgs := redactSensitiveArgs(execArgs, secrets)
+
+	if !isListCmd {
+		logging.Debug(pluginCtx, "executing", "command", strings.Join(safeArgs, " "))
+	}
+
 	var stdout bytes.Buffer
 	var stderr syncBuffer
 
-	// Create command outside goroutine so we can kill it if needed
-	cmd := exec.Command(args[0], args[1:]...)
+	cmd := exec.Command(execArgs[0], execArgs[1:]...)
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
+	if err := cmd.Start(); err != nil {
+		return nil, 0, fmt.Errorf("starting command %v: %w", safeArgs, err), nil
+	}
+
+	done := make(chan error, 1)
 	go func() {
-		err := cmd.Run()
-		done <- err
+		done <- cmd.Wait()
 	}()
 
 	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
 
-	timeout := time.After(time.Duration(timeoutInSeconds) * time.Second)
+	var timeoutCh <-chan time.Time
+	if timeout > 0 {
+		timer := time.NewTimer(timeout)
+		defer timer.Stop()
+		timeoutCh = timer.C
+	}
 
 	for {
 		select {
 		case <-pluginCtx.Done():
-			// Context was canceled (e.g., SIGINT received)
-			// Kill the running process to stop immediately
 			if cmd.Process != nil {
 				_ = cmd.Process.Kill()
 			}
-			logAnkaCommandStderr(pluginCtx, stderr.Bytes(), true)
-			return nil, 0, nil, fmt.Errorf("context canceled during command execution: %w", pluginCtx.Err())
-		case <-timeout:
-			// Kill the process on timeout
+			<-done
+			logAnkaCommandStderr(pluginCtx, stderr.Bytes(), true, secrets)
+			cancelErr := fmt.Errorf("context canceled during command execution: %w", pluginCtx.Err())
+			if timeout > 0 {
+				return nil, 0, nil, cancelErr
+			}
+			return nil, 0, cancelErr, nil
+		case <-timeoutCh:
 			if cmd.Process != nil {
 				_ = cmd.Process.Kill()
 			}
-			logAnkaCommandStderr(pluginCtx, stderr.Bytes(), true)
-			return nil, 0, nil, fmt.Errorf("execution of command %v timed out", args)
+			<-done
+			logAnkaCommandStderr(pluginCtx, stderr.Bytes(), true, secrets)
+			return nil, 0, nil, fmt.Errorf("%w: execution of command %v timed out", ErrCommandTimeout, safeArgs)
 		case <-ticker.C:
-			logAnkaCommandProgress(pluginCtx, args, &stderr)
+			logAnkaCommandProgress(pluginCtx, safeArgs, &stderr, secrets)
 		case err := <-done:
-			out, exitCode, execErr := finishAnkaExec(pluginCtx, &stdout, &stderr, err)
+			out, exitCode, execErr := finishAnkaExec(pluginCtx, &stdout, &stderr, err, secrets)
 			return out, exitCode, execErr, nil
 		}
 	}
 }
 
-func (cli *Cli) ParseAnkaJson(pluginCtx context.Context, jsonData []byte) (*AnkaJson, error) {
+// Execute runs an Anka command until completion or pluginCtx cancellation.
+// Critical cleanup operations should pass a non-canceled cleanup context.
+func (cli *Cli) Execute(pluginCtx context.Context, args ...string) ([]byte, int, error) {
+	out, exitCode, err, _ := cli.executeCommand(pluginCtx, 0, nil, args...)
+	return out, exitCode, err
+}
+
+// ExecuteWithTimeout runs an Anka command with a timeout in seconds.
+func (cli *Cli) ExecuteWithTimeout(
+	pluginCtx context.Context,
+	timeoutInSeconds int,
+	args ...string,
+) ([]byte, int, error, error) {
+	return cli.executeCommand(pluginCtx, time.Duration(timeoutInSeconds)*time.Second, nil, args...)
+}
+
+func (cli *Cli) ParseAnkaJson(_ context.Context, jsonData []byte) (*AnkaJson, error) {
 	ankaJson := &AnkaJson{}
-	err := json.Unmarshal(jsonData, &ankaJson)
-	if err != nil {
+	if err := json.Unmarshal(jsonData, &ankaJson); err != nil {
 		return nil, err
 	}
 	return ankaJson, nil
 }
 
 func (cli *Cli) ExecuteParseJson(pluginCtx context.Context, args ...string) (*AnkaJson, error) {
-	out, exitCode, _ := cli.Execute(pluginCtx, args...)
-	// registry pull can output muliple json objects, per line, so we need to only get the last line
-	lines := bytes.Split(out, []byte("\n"))
+	out, exitCode, execErr := cli.Execute(pluginCtx, args...)
+	if pluginCtx.Err() != nil && execErr != nil {
+		return nil, execErr
+	}
 
-	// Find the last non-empty line to avoid parsing empty lines as JSON
+	// registry pull can output multiple JSON objects per line; parse the last non-empty line.
+	lines := bytes.Split(out, []byte("\n"))
 	var lastLine []byte
 	for i := len(lines) - 1; i >= 0; i-- {
 		if len(bytes.TrimSpace(lines[i])) > 0 {
@@ -314,12 +362,13 @@ func (cli *Cli) ExecuteParseJson(pluginCtx context.Context, args ...string) (*An
 		}
 	}
 
-	// If no non-empty line found, return an error
 	if len(lastLine) == 0 {
+		if execErr != nil {
+			return nil, execErr
+		}
 		return nil, fmt.Errorf("no valid JSON output found in command response")
 	}
 
-	// Debug logging to help troubleshoot JSON parsing issues
 	logging.Debug(pluginCtx, "parsing JSON from command output",
 		"lastLine", string(lastLine),
 		"allOutput", string(out))
@@ -333,49 +382,61 @@ func (cli *Cli) ExecuteParseJson(pluginCtx context.Context, args ...string) (*An
 		return nil, err
 	}
 	if exitCode != 0 {
-		return ankaJson, fmt.Errorf("%s", ankaJson.Message)
+		if ankaJson.Message != "" {
+			return ankaJson, fmt.Errorf("%s", ankaJson.Message)
+		}
+		if execErr != nil {
+			return ankaJson, execErr
+		}
+		return ankaJson, fmt.Errorf("anka command failed with exit code %d", exitCode)
 	}
 	return ankaJson, nil
 }
 
-func (cli *Cli) ExecuteAndParseJsonOnError(
-	workerCtx context.Context,
-	pluginCtx context.Context,
-	args ...string,
-) ([]byte, error) {
-	if workerCtx.Err() != nil || pluginCtx.Err() != nil {
-		return nil, fmt.Errorf("context canceled before ExecuteAndParseJsonOnError")
-	}
-	ankaJson := &AnkaJson{}
-	out, exitCode, _ := cli.Execute(pluginCtx, args...)
-	if exitCode != 0 {
-		return out, fmt.Errorf("%s", string(out))
-	}
-	err := json.Unmarshal(out, &ankaJson)
-	if err != nil {
-		return out, fmt.Errorf("command execution failed: %v", err)
-	}
-	return out, nil
-}
-
+// AnkaRun executes a command inside the guest VM directly without bash -c shell evaluation.
 func (cli *Cli) AnkaRun(pluginCtx context.Context, vmName string, args ...string) error {
-	runOutput, exitCode, err := cli.Execute(pluginCtx, "anka", "-j", "run", vmName, "bash", "-c", strings.Join(args, " "))
+	cmdArgs := make([]string, 0, 4+len(args))
+	cmdArgs = append(cmdArgs, "anka", "-j", "run", vmName)
+	cmdArgs = append(cmdArgs, args...)
+	runOutput, exitCode, err := cli.Execute(pluginCtx, cmdArgs...)
 	if exitCode != 0 || err != nil {
-		return fmt.Errorf("command execution failed with code %d: %s %s", exitCode, string(runOutput), err)
+		return fmt.Errorf("command execution failed with code %d: %s %w", exitCode, string(runOutput), err)
 	}
 	logging.Debug(pluginCtx, "command executed successfully", "stdout", string(runOutput))
 	return nil
 }
 
+// AnkaRunWithTimeout executes a command inside the guest VM directly without bash -c shell evaluation.
 func (cli *Cli) AnkaRunWithTimeout(pluginCtx context.Context, timeoutInSeconds int, vmName string, args ...string) (error, error) {
-	runOutput, exitCode, err, errTimeout := cli.ExecuteWithTimeout(pluginCtx, timeoutInSeconds, "anka", "-j", "run", vmName, "bash", "-c", strings.Join(args, " "))
+	return cli.AnkaRunWithTimeoutRedacted(pluginCtx, timeoutInSeconds, vmName, nil, args...)
+}
+
+// AnkaRunWithTimeoutRedacted executes a command inside the guest VM directly without bash -c
+// and redacts any matching secrets from debug logs, progress logs, stderr, and error messages.
+func (cli *Cli) AnkaRunWithTimeoutRedacted(
+	pluginCtx context.Context,
+	timeoutInSeconds int,
+	vmName string,
+	secrets []string,
+	args ...string,
+) (error, error) {
+	cmdArgs := make([]string, 0, 4+len(args))
+	cmdArgs = append(cmdArgs, "anka", "-j", "run", vmName)
+	cmdArgs = append(cmdArgs, args...)
+	runOutput, exitCode, err, errTimeout := cli.executeCommand(
+		pluginCtx,
+		time.Duration(timeoutInSeconds)*time.Second,
+		secrets,
+		cmdArgs...,
+	)
+	safeOutput := redactSensitiveString(string(runOutput), secrets)
 	if errTimeout != nil {
-		return nil, fmt.Errorf("command execution timed out: %s %s", string(runOutput), errTimeout)
+		return nil, fmt.Errorf("command execution timed out: %s %w", safeOutput, errTimeout)
 	}
 	if exitCode != 0 || err != nil {
-		return fmt.Errorf("command execution failed with code %d: %s %s", exitCode, string(runOutput), err), nil
+		return fmt.Errorf("command execution failed with code %d: %s %w", exitCode, safeOutput, err), nil
 	}
-	logging.Debug(pluginCtx, "command executed successfully", "stdout", string(runOutput))
+	logging.Debug(pluginCtx, "command executed successfully", "stdout", safeOutput)
 	return nil, nil
 }
 
@@ -390,40 +451,31 @@ func (cli *Cli) AnkaShow(pluginCtx context.Context, vmName string) (*AnkaShowOut
 	}
 
 	output := &AnkaShowOutput{}
-	// Get CPU information from anka show output
-	if cpu, ok := ankaJson.Body.(map[string]any)["cpu_cores"]; ok {
-		output.CPU = int(cpu.(float64))
-	}
-	// Get memory information from anka show output
-	if mem, ok := ankaJson.Body.(map[string]any)["ram_size"]; ok {
-		output.MEMBytes = uint64(mem.(float64))
-	}
-	// Get image size information from anka show output - image_size is actual usage, not logical disk_size
-	if imageSize, ok := ankaJson.Body.(map[string]any)["image_size"].(float64); ok {
-		output.ImageSize = uint64(imageSize)
-	}
-	// Get access date information from anka show output
-	if accessDate, ok := ankaJson.Body.(map[string]any)["access_date"].(string); ok {
-		if parsedDate, err := time.Parse(time.RFC3339, accessDate); err == nil {
-			output.AccessDate = parsedDate
+	if bodyMap, ok := ankaJson.Body.(map[string]any); ok {
+		if name, ok := bodyMap["name"].(string); ok {
+			output.Name = name
+		}
+		if cpu, ok := bodyMap["cpu_cores"].(float64); ok {
+			output.CPU = int(cpu)
+		}
+		if mem, ok := bodyMap["ram_size"].(float64); ok {
+			output.MEMBytes = uint64(mem)
+		}
+		if imageSize, ok := bodyMap["image_size"].(float64); ok {
+			output.ImageSize = uint64(imageSize)
+		}
+		if accessDate, ok := bodyMap["access_date"].(string); ok {
+			if parsedDate, parseErr := time.Parse(time.RFC3339, accessDate); parseErr == nil {
+				output.AccessDate = parsedDate
+			}
 		}
 	}
 
-	tagBody := ankaTagJson.Body
-	if tagArr, isArray := tagBody.([]any); isArray {
-		// Handle case where body is an array
-		if len(tagArr) > 0 {
-			if tagMap, ok := tagArr[0].(map[string]any); ok && tagMap["tag"] != nil {
-				output.Tag = fmt.Sprintf("%v", tagMap["tag"])
-			} else {
-				output.Tag = "(using latest)"
-			}
-		} else {
-			output.Tag = "(using latest)"
+	output.Tag = "(using latest)"
+	if tagArr, isArray := ankaTagJson.Body.([]any); isArray && len(tagArr) > 0 {
+		if tagMap, ok := tagArr[0].(map[string]any); ok && tagMap["tag"] != nil {
+			output.Tag = fmt.Sprintf("%v", tagMap["tag"])
 		}
-	} else {
-		// Default fallback
-		output.Tag = "(using latest)"
 	}
 	return output, nil
 }
@@ -433,23 +485,19 @@ func (cli *Cli) AnkaExecutePullCommand(pluginCtx context.Context, args ...string
 	if err != nil {
 		return nil, err
 	}
-	var registryExtra []string
-	if ctxPlugin.RegistryURL != "" {
-		registryExtra = []string{ctxPlugin.RegistryURL}
-	}
 	cmdArgs := append([]string{"anka", "-j", "pull"}, args...)
-	cmdArgs = append(cmdArgs, registryExtra...)
+	if ctxPlugin.RegistryURL != "" {
+		cmdArgs = append(cmdArgs, ctxPlugin.RegistryURL)
+	}
 	return cli.ExecuteParseJson(pluginCtx, cmdArgs...)
 }
 
-// AnkaGetTemplateSize gets the image size of a template from the host
-func (cli *Cli) AnkaGetTemplateSize(pluginCtx context.Context, template, tag string) (uint64, error) {
-	// First try to get it from anka list which includes size information
+// AnkaGetTemplateSize gets the image size of a template from the host.
+func (cli *Cli) AnkaGetTemplateSize(pluginCtx context.Context, template, _ string) (uint64, error) {
 	show, err := cli.AnkaShow(pluginCtx, template)
 	if err != nil {
 		return 0, err
 	}
-
 	if show.ImageSize > 0 {
 		return show.ImageSize, nil
 	}
@@ -461,11 +509,10 @@ func (cli *Cli) AnkaExecuteRegistryCommand(pluginCtx context.Context, args ...st
 	if err != nil {
 		return nil, err
 	}
-	var registryExtra []string
+	cmdArgs := []string{"anka", "-j", "registry"}
 	if ctxPlugin.RegistryURL != "" {
-		registryExtra = []string{"--remote", ctxPlugin.RegistryURL}
+		cmdArgs = append(cmdArgs, "--remote", ctxPlugin.RegistryURL)
 	}
-	cmdArgs := append([]string{"anka", "-j", "registry"}, registryExtra...)
 	cmdArgs = append(cmdArgs, args...)
 	return cli.ExecuteParseJson(pluginCtx, cmdArgs...)
 }
@@ -479,11 +526,9 @@ func (cli *Cli) AnkaRegistryShowTemplate(
 	if workerCtx.Err() != nil || pluginCtx.Err() != nil {
 		return nil, fmt.Errorf("context canceled before AnkaRegistryShowTemplate")
 	}
-	var args []string
+	args := []string{"show", template}
 	if tag != "(using latest)" {
-		args = append(args, "show", template, "--tag", tag)
-	} else {
-		args = append(args, "show", template)
+		args = append(args, "--tag", tag)
 	}
 	showJson, err := cli.AnkaExecuteRegistryCommand(pluginCtx, args...)
 	if err != nil {
@@ -494,23 +539,20 @@ func (cli *Cli) AnkaRegistryShowTemplate(
 	}
 
 	output := &AnkaShowOutput{}
-
-	if name, ok := showJson.Body.(map[string]any)["name"].(string); ok {
-		output.Name = name
+	if bodyMap, ok := showJson.Body.(map[string]any); ok {
+		if name, ok := bodyMap["name"].(string); ok {
+			output.Name = name
+		}
+		if cpu, ok := bodyMap["cpu_cores"].(float64); ok {
+			output.CPU = int(cpu)
+		}
+		if mem, ok := bodyMap["ram_size"].(float64); ok {
+			output.MEMBytes = uint64(mem)
+		}
+		if imageSize, ok := bodyMap["image_size"].(float64); ok {
+			output.ImageSize = uint64(imageSize)
+		}
 	}
-
-	if cpu, ok := showJson.Body.(map[string]any)["cpu_cores"].(float64); ok {
-		output.CPU = int(cpu)
-	}
-	if mem, ok := showJson.Body.(map[string]any)["ram_size"].(float64); ok {
-		output.MEMBytes = uint64(mem)
-	}
-
-	// Try to get size information if available - prioritize image_size (actual usage)
-	if imageSize, ok := showJson.Body.(map[string]any)["image_size"].(float64); ok {
-		output.ImageSize = uint64(imageSize)
-	}
-
 	return output, nil
 }
 
@@ -537,39 +579,36 @@ func (cli *Cli) AnkaRegistryPull(
 		return nil, err
 	}
 
+	pullSucceeded := false
 	defer func() {
-		// Clear pulling status
 		workerGlobals.TemplateTracker.SetTemplatePulling(templateUUID, templateName, templateTag, false, time.Now())
-		err := metricsData.SetStatus(pluginCtx, "running")
-		if err != nil {
-			logging.Error(pluginCtx, "error setting metrics status", "error", err)
+		if pullSucceeded && workerCtx.Err() == nil && pluginCtx.Err() == nil {
+			if statusErr := metricsData.SetStatus(pluginCtx, "running"); statusErr != nil {
+				logging.Error(pluginCtx, "error setting metrics status", "error", statusErr)
+			}
 		}
 	}()
 
-	err = metricsData.SetStatus(pluginCtx, "pulling")
-	if err != nil {
+	if err = metricsData.SetStatus(pluginCtx, "pulling"); err != nil {
 		logging.Error(pluginCtx, "error setting metrics status", "error", err)
 		return nil, err
 	}
 
-	// Mark template as being pulled
 	workerGlobals.TemplateTracker.SetTemplatePulling(templateUUID, templateName, templateTag, true, time.Now())
 
-	var args []string
+	args := []string{"pull", "--shrink", templateUUID}
 	if templateTag != "(using latest)" {
-		args = append(args, "pull", "--shrink", templateUUID, "--tag", templateTag)
-	} else {
-		args = append(args, "pull", "--shrink", templateUUID)
+		args = append(args, "--tag", templateTag)
 	}
 	pullJson, err := cli.AnkaExecuteRegistryCommand(pluginCtx, args...)
 	if workerCtx.Err() != nil || pluginCtx.Err() != nil {
 		return nil, fmt.Errorf("context canceled while pulling template")
 	}
 	if err != nil {
-		return nil, err
+		return pullJson, err
 	}
 	if pullJson.Status != "OK" {
-		return nil, fmt.Errorf("error pulling template from registry: %s", pullJson.Message)
+		return pullJson, fmt.Errorf("error pulling template from registry: %s", pullJson.Message)
 	}
 
 	templateSizeBytes, err := cli.AnkaGetTemplateSize(pluginCtx, templateUUID, templateTag)
@@ -578,56 +617,42 @@ func (cli *Cli) AnkaRegistryPull(
 		return nil, err
 	}
 
-	// Update template usage tracking - use current time since we just pulled it
 	workerGlobals.TemplateTracker.UpdateTemplateUsage(templateUUID, templateName, templateTag, templateSizeBytes, time.Now())
+	pullSucceeded = true
 
 	logging.Debug(pluginCtx, "TemplateTracker state", "tracker", workerGlobals.TemplateTracker)
-
 	logging.Info(pluginCtx, "successfully pulled template", "templateUUID", templateUUID, "templateName", templateName, "templateTag", templateTag, "sizeBytes", templateSizeBytes)
 
 	return pullJson, nil
 }
 
-// AnkaDeleteTemplate deletes a template from the host
+// AnkaDeleteTemplate deletes a template from the host.
 func (cli *Cli) AnkaDeleteTemplate(pluginCtx context.Context, templateUUID string) error {
-	// we don't use tag here because the deletion of a tag keeps the template still around
 	workerGlobals, err := config.GetWorkerGlobalsFromContext(pluginCtx)
 	if err != nil {
 		logging.Warn(pluginCtx, "unable to get worker globals to update template tracker", "error", err)
 		return err
 	}
 	logging.Info(pluginCtx, "deleting template from host", "templateUUID", templateUUID)
-	args := []string{"anka", "-j", "delete", "--yes", templateUUID}
 
-	deleteOutput, err := cli.ExecuteParseJson(pluginCtx, args...)
+	deleteOutput, err := cli.ExecuteParseJson(pluginCtx, "anka", "-j", "delete", "--yes", templateUUID)
 	if err != nil {
 		logging.Error(pluginCtx, "error executing anka delete template", "err", err)
 		return err
 	}
-
 	if deleteOutput.Status != "OK" {
 		return fmt.Errorf("error deleting template: %s", deleteOutput.Message)
 	}
 
-	// Remove from template tracker
 	workerGlobals.TemplateTracker.RemoveTemplate(templateUUID)
-
 	logging.Info(pluginCtx, "successfully deleted template", "templateUUID", templateUUID)
 	return nil
 }
 
 func (cli *Cli) AnkaDelete(workerCtx context.Context, pluginCtx context.Context, vmName string) error {
-	deleteOutput, err := cli.ExecuteParseJson(pluginCtx, "anka", "-j", "delete", "--yes", vmName)
-	if err != nil {
-		logging.Error(pluginCtx, "error executing anka delete", "err", err)
-		_, _, err = cli.Execute(pluginCtx, "anka", "delete", "--yes", vmName)
-		if err != nil {
-			logging.Error(pluginCtx, "error executing anka delete", "err", err)
-		}
+	if err := cli.AnkaDeleteVMOnly(pluginCtx, vmName); err != nil {
 		return err
 	}
-	logging.Debug(pluginCtx, "successfully deleted vm", "std", deleteOutput.Message)
-	// decrement total running VMs
 	metricsData, err := metrics.GetMetricsDataFromContext(workerCtx)
 	if err != nil {
 		return err
@@ -642,16 +667,16 @@ func (cli *Cli) AnkaDeleteVMOnly(pluginCtx context.Context, vmName string) error
 	deleteOutput, err := cli.ExecuteParseJson(pluginCtx, "anka", "-j", "delete", "--yes", vmName)
 	if err != nil {
 		logging.Error(pluginCtx, "error executing anka delete", "err", err)
-		_, _, err = cli.Execute(pluginCtx, "anka", "delete", "--yes", vmName)
-		if err != nil {
-			logging.Error(pluginCtx, "error executing anka delete", "err", err)
+		_, _, fallbackErr := cli.Execute(pluginCtx, "anka", "delete", "--yes", vmName)
+		if fallbackErr != nil {
+			logging.Error(pluginCtx, "error executing anka delete", "err", fallbackErr)
 		}
-		return err
+		return fallbackErr
 	}
 	if deleteOutput.Status != "OK" {
 		return fmt.Errorf("error deleting vm: %s", deleteOutput.Message)
 	}
-	logging.Debug(pluginCtx, "successfully deleted vm without metrics change", "std", deleteOutput.Message)
+	logging.Debug(pluginCtx, "successfully deleted vm", "std", deleteOutput.Message)
 	return nil
 }
 
@@ -670,13 +695,10 @@ func (cli *Cli) AnkaMount(pluginCtx context.Context, vmName string, mountSpec st
 	return nil
 }
 
-// ping the registry to see if it's up
+// AnkaRegistryRunning pings the registry to see if it is reachable.
 func (cli *Cli) AnkaRegistryRunning(pluginCtx context.Context) (bool, error) {
 	listOutput, err := cli.AnkaExecuteRegistryCommand(pluginCtx, "list")
-	if err != nil {
-		return false, nil
-	}
-	if listOutput.Status != "OK" {
+	if err != nil || listOutput == nil || listOutput.Status != "OK" {
 		return false, nil
 	}
 	return true, nil
@@ -688,7 +710,7 @@ func (cli *Cli) ObtainAnkaVM(
 	ankaTemplate string,
 ) (*VM, error) {
 	if workerCtx.Err() != nil || pluginCtx.Err() != nil {
-		return nil, fmt.Errorf("context canceled before ObtainAnkaVMAndName")
+		return nil, fmt.Errorf("context canceled before ObtainAnkaVM")
 	}
 	vmID, err := uuid.NewRandom()
 	if err != nil {
@@ -697,17 +719,26 @@ func (cli *Cli) ObtainAnkaVM(
 	}
 	vmName := fmt.Sprintf("anklet-vm-%s", vmID.String())
 	vm := &VM{Name: vmName}
-	err = cli.AnkaClone(workerCtx, pluginCtx, vmName, ankaTemplate)
-	if err != nil {
-		logging.Error(pluginCtx, "error executing anka clone", "err", err)
-		return vm, err
+
+	// Mark the source template in-use while cloning so concurrent LRU cleanup cannot evict it.
+	if workerGlobals, gErr := config.GetWorkerGlobalsFromContext(pluginCtx); gErr == nil && workerGlobals.TemplateTracker != nil {
+		workerGlobals.TemplateTracker.SetTemplateInUse(ankaTemplate, "", "", true)
+		defer workerGlobals.TemplateTracker.SetTemplateInUse(ankaTemplate, "", "", false)
 	}
-	// Start
-	err = cli.AnkaStart(workerCtx, pluginCtx, vmName)
-	if err != nil {
+
+	if err = cli.AnkaClone(workerCtx, pluginCtx, vmName, ankaTemplate); err != nil {
+		logging.Error(pluginCtx, "error executing anka clone", "err", err)
+		return nil, err
+	}
+
+	if err = cli.AnkaStart(workerCtx, pluginCtx, vmName); err != nil {
 		logging.Debug(pluginCtx, "vm", "vm", vm)
-		logging.Error(pluginCtx, "error executing anka start", "err", err)
-		return vm, err
+		logging.Error(pluginCtx, "error executing anka start; deleting vm", "vm", vmName, "err", err)
+		if delErr := cli.AnkaDeleteVMOnly(pluginCtx, vmName); delErr != nil {
+			logging.Error(pluginCtx, "error deleting vm after start failure", "vm", vmName, "err", delErr)
+			return vm, err
+		}
+		return nil, err
 	}
 
 	loadedConfig, cfgErr := config.GetLoadedConfigFromContext(pluginCtx)
@@ -724,26 +755,24 @@ func (cli *Cli) ObtainAnkaVM(
 	mergedMounts, mergeErr := MergeHostToGuestFolderMountLists(globalHostToGuestFolderMounts, pluginHostToGuestFolderMounts)
 	if mergeErr != nil {
 		logging.Error(pluginCtx, "host-to-guest folder mount configuration invalid; deleting vm", "vm", vmName, "err", mergeErr)
-		delErr := cli.AnkaDeleteVMOnly(pluginCtx, vmName)
-		if delErr != nil {
+		if delErr := cli.AnkaDeleteVMOnly(pluginCtx, vmName); delErr != nil {
 			logging.Error(pluginCtx, "error deleting vm after mount merge failure", "vm", vmName, "err", delErr)
+			return vm, fmt.Errorf("host-to-guest folder mounts: %w", mergeErr)
 		}
-		return vm, fmt.Errorf("host-to-guest folder mounts: %w", mergeErr)
+		return nil, fmt.Errorf("host-to-guest folder mounts: %w", mergeErr)
 	}
 	if len(mergedMounts) > 0 {
 		logging.Info(pluginCtx, "applying host-to-guest folder mounts to vm", "vm", vmName, "mounts", mergedMounts)
-		err = cli.mountHostToGuestFolders(pluginCtx, vmName, mergedMounts)
-		if err != nil {
+		if err = cli.mountHostToGuestFolders(pluginCtx, vmName, mergedMounts); err != nil {
 			logging.Error(pluginCtx, "host-to-guest folder mounts failed; deleting vm", "vm", vmName, "err", err)
-			delErr := cli.AnkaDeleteVMOnly(pluginCtx, vmName)
-			if delErr != nil {
+			if delErr := cli.AnkaDeleteVMOnly(pluginCtx, vmName); delErr != nil {
 				logging.Error(pluginCtx, "error deleting vm after mount failure", "vm", vmName, "err", delErr)
+				return vm, fmt.Errorf("host-to-guest folder mounts: %w", err)
 			}
-			return vm, fmt.Errorf("host-to-guest folder mounts: %w", err)
+			return nil, fmt.Errorf("host-to-guest folder mounts: %w", err)
 		}
 	}
 
-	// increment total running VMs
 	metricsData, err := metrics.GetMetricsDataFromContext(workerCtx)
 	if err != nil {
 		return vm, err
@@ -793,8 +822,8 @@ func (cli *Cli) AnkaStart(
 }
 
 func (cli *Cli) AnkaList(pluginCtx context.Context, args ...string) (*AnkaJson, error) {
-	args = append([]string{"anka", "-j", "list"}, args...)
-	output, err := cli.ExecuteParseJson(pluginCtx, args...)
+	cmdArgs := append([]string{"anka", "-j", "list"}, args...)
+	output, err := cli.ExecuteParseJson(pluginCtx, cmdArgs...)
 	if err != nil {
 		return nil, err
 	}
@@ -802,89 +831,60 @@ func (cli *Cli) AnkaList(pluginCtx context.Context, args ...string) (*AnkaJson, 
 }
 
 // DiscoverAndPopulateExistingTemplates discovers all existing templates on the system
-// and populates the TemplateTracker with their information
+// and populates the TemplateTracker with their information.
 func (cli *Cli) DiscoverAndPopulateExistingTemplates(
 	ctx context.Context,
 	templateTracker *config.TemplateTracker,
 ) error {
 	logging.Info(ctx, "discovering existing templates on system")
 
-	// Get list of all templates
 	listOutput, err := cli.AnkaList(ctx)
 	if err != nil {
 		logging.Warn(ctx, "unable to list existing templates", "error", err)
 		return err
 	}
-
 	if listOutput.Status != "OK" {
 		logging.Warn(ctx, "anka list returned error status", "status", listOutput.Status, "message", listOutput.Message)
 		return fmt.Errorf("anka list failed: %s", listOutput.Message)
 	}
 
-	// Parse the template list
 	templateCount := 0
 	if bodySlice, ok := listOutput.Body.([]any); ok {
 		for _, templateData := range bodySlice {
-			if templateMap, ok := templateData.(map[string]any); ok {
-				templateUUID := ""
-				if uuid, ok := templateMap["uuid"].(string); ok {
-					templateUUID = uuid
-				}
+			templateMap, ok := templateData.(map[string]any)
+			if !ok {
+				continue
+			}
+			templateUUID, _ := templateMap["uuid"].(string)
+			templateName, _ := templateMap["name"].(string)
+			templateTag, ok := templateMap["version"].(string)
+			if !ok || templateTag == "" {
+				templateTag = "latest"
+			}
+			if templateName == "" && templateUUID == "" {
+				continue
+			}
 
-				templateName := ""
-				if name, ok := templateMap["name"].(string); ok {
-					templateName = name
-				}
-
-				templateTag := ""
-				if version, ok := templateMap["version"].(string); ok {
-					templateTag = version
-				} else {
-					templateTag = "latest" // Default tag if none specified
-				}
-
-				var accessDate time.Time
-				ankaShowOutput, err := cli.AnkaShow(ctx, templateUUID)
-				if err != nil {
-					logging.Warn(ctx, "unable to get template access date during discovery", "error", err)
-					accessDate = time.Now() // fallback to current time
-				} else {
+			accessDate := time.Now()
+			var templateSize uint64
+			ankaShowOutput, showErr := cli.AnkaShow(ctx, templateUUID)
+			if showErr != nil {
+				logging.Warn(ctx, "unable to inspect template during discovery", "templateUUID", templateUUID, "error", showErr)
+			} else {
+				if !ankaShowOutput.AccessDate.IsZero() {
 					accessDate = ankaShowOutput.AccessDate
 				}
-
-				if templateName != "" || templateUUID != "" {
-					// Get template size
-					templateSize, err := cli.AnkaGetTemplateSize(ctx, templateUUID, templateTag)
-					if err != nil {
-						logging.Warn(ctx, "unable to get template size during discovery",
-							"templateUUID", templateUUID, "tag", templateTag, "error", err)
-						templateSize = 0 // Continue with 0 size rather than failing
-					}
-
-					// Add to template tracker with initial usage data
-					templateTracker.Mutex.Lock()
-					key := templateTracker.GetTemplateKey(templateUUID)
-					templateTracker.Templates[key] = &config.TemplateUsage{
-						UUID:         templateUUID,
-						Name:         templateName,
-						Tag:          templateTag,
-						ImageSize:    templateSize,
-						LastAccessed: accessDate, // Mark as recently discovered
-						UsageCount:   0,          // No usage yet, just discovered
-						InUse:        false,
-						Pulling:      false,
-					}
-					templateTracker.Mutex.Unlock()
-
-					templateCount++
-					logging.Debug(ctx, "discovered existing template",
-						"templateUUID", templateUUID, "tag", templateTag, "size", templateSize)
-				}
+				templateSize = ankaShowOutput.ImageSize
 			}
+
+			templateTracker.RegisterDiscoveredTemplate(templateUUID, templateName, templateTag, templateSize, accessDate)
+			templateCount++
+			logging.Debug(ctx, "discovered existing template",
+				"templateUUID", templateUUID, "tag", templateTag, "size", templateSize)
 		}
 	}
 
-	logging.Info(ctx, "template discovery complete", "templatesFound", templateCount, "templates", templateTracker.Templates)
+	logging.Info(ctx, "template discovery complete", "templatesFound", templateCount, "templates", templateTracker)
 	return nil
 }
 
@@ -898,7 +898,6 @@ func (cli *Cli) AnkaCopyOutOfVM(pluginCtx context.Context, vmName string, object
 	}
 	logging.Debug(pluginCtx, "copy output", "std", copyOutput)
 	logging.Info(pluginCtx, fmt.Sprintf("successfully copied %s out of vm to %s", objectToCopyOut, hostLevelDestination), "stdout", copyOutput.Message)
-
 	return nil
 }
 
@@ -912,16 +911,14 @@ func (cli *Cli) AnkaCopyIntoVM(
 		return fmt.Errorf("context canceled before AnkaCopyIntoVM")
 	}
 	for _, hostLevelFile := range filesToCopyIn {
-		// handle symlinks
 		realPath, err := filepath.EvalSymlinks(hostLevelFile)
 		if err != nil {
 			return fmt.Errorf("error evaluating symlink for %s: %w", hostLevelFile, err)
 		}
-		hostLevelFile = realPath
 		if workerCtx.Err() != nil || pluginCtx.Err() != nil {
 			return fmt.Errorf("context canceled before AnkaCopyIntoVM executing anka cp")
 		}
-		copyOutput, err := cli.ExecuteParseJson(pluginCtx, "anka", "-j", "cp", "-a", hostLevelFile, fmt.Sprintf("%s:", vmName))
+		copyOutput, err := cli.ExecuteParseJson(pluginCtx, "anka", "-j", "cp", "-a", realPath, fmt.Sprintf("%s:", vmName))
 		if err != nil {
 			return err
 		}
@@ -929,9 +926,8 @@ func (cli *Cli) AnkaCopyIntoVM(
 			return fmt.Errorf("error copying into vm: %s", copyOutput.Message)
 		}
 		logging.Debug(pluginCtx, "copy output", "std", copyOutput)
-		logging.Info(pluginCtx, "successfully copied file into vm", "file", hostLevelFile, "stdout", copyOutput.Message)
+		logging.Info(pluginCtx, "successfully copied file into vm", "file", realPath, "stdout", copyOutput.Message)
 	}
-
 	return nil
 }
 
@@ -941,12 +937,8 @@ func HostHasVmCapacity(pluginCtx context.Context) bool {
 		logging.Error(pluginCtx, "error getting anka cli", "err", err)
 		return false
 	}
-	// check if there are already two VMS running or not
 	runningVMsList, err := ankaCLI.ExecuteParseJson(pluginCtx, "anka", "-j", "list", "-r")
 	if err != nil {
-		// If we can't get the running VM list (e.g., during shutdown or empty output),
-		// assume we have capacity. The actual VM operation will fail with a proper error
-		// if there's no capacity.
 		logging.Debug(pluginCtx, "unable to get running VMs list, assuming capacity available", "err", err)
 		return true
 	}
@@ -958,9 +950,7 @@ func HostHasVmCapacity(pluginCtx context.Context) bool {
 	if bodySlice, ok := runningVMsList.Body.([]any); ok {
 		runningVMsCount = len(bodySlice)
 	} else {
-		// Empty or nil body means no running VMs
 		logging.Debug(pluginCtx, "running VMs list body is empty or not a slice, assuming 0 running VMs")
-		runningVMsCount = 0
 	}
 	if runningVMsCount >= 2 {
 		logging.Warn(pluginCtx, "more than 2 VMs are running; unable to run more than 2 at a time due to Apple SLA")
@@ -969,54 +959,60 @@ func HostHasVmCapacity(pluginCtx context.Context) bool {
 	return true
 }
 
+// EnsureVMTemplateExists ensures the target template and tag exist locally, pulling from the registry if required.
+// Sentinel errors returned: ErrTemplateNotFoundInRegistry, ErrInsufficientSpace.
 func (cli *Cli) EnsureVMTemplateExists(
 	workerCtx context.Context,
 	pluginCtx context.Context,
 	targetTemplateUUID string,
 	targetTemplateTag string,
-) (error, error, error) { // noTemplateTagExistsInRegistryError, ensureSpaceError, genericError
+) error {
 	workerGlobals, err := config.GetWorkerGlobalsFromContext(pluginCtx)
 	if err != nil {
-		return nil, nil, err
+		return err
 	}
 
 	pullTemplate := false
 	targetTemplateName := ""
 
-	// we need to do Anka List here because Anklet is allowed to work with non-Registry setups
-	list, err := cli.AnkaList(pluginCtx, targetTemplateUUID)
-	if err != nil {
-		list, innerErr := cli.AnkaList(pluginCtx)
+	// Check locally first because Anklet supports non-registry setups.
+	list, listErr := cli.AnkaList(pluginCtx, targetTemplateUUID)
+	if listErr != nil {
+		allList, innerErr := cli.AnkaList(pluginCtx)
 		if innerErr != nil {
 			logging.Error(pluginCtx, "error executing anka list", "err", innerErr)
-			return nil, nil, innerErr
+			return innerErr
 		}
-		logging.Debug(pluginCtx, "list", "stdout", list.Body)
+		logging.Debug(pluginCtx, "list", "stdout", allList.Body)
 	}
 	logging.Info(pluginCtx, "ensuring vm template exists on host", "targetTemplateUUID", targetTemplateUUID, "targetTemplateName", targetTemplateName, "targetTemplateTag", targetTemplateTag)
 	logging.Debug(pluginCtx, "list output", "json", list)
+
 	if list != nil {
 		if list.Status == "ERROR" {
 			if list.Message == fmt.Sprintf("%s: not found", targetTemplateUUID) {
 				pullTemplate = true
 			} else {
 				logging.Error(pluginCtx, "error executing anka list", "err", list.Message)
-				return nil, nil, fmt.Errorf("error executing anka list: %s", list.Message)
+				return fmt.Errorf("error executing anka list: %s", list.Message)
 			}
 		}
 		if list.Status == "OK" {
-			// ensure tag is proper; skip if tag is hard coded and we already have it locally
-			if bodySlice, ok := list.Body.([]any); ok {
+			bodySlice, ok := list.Body.([]any)
+			if !ok {
+				return fmt.Errorf("unable to parse list.Body to []any")
+			}
+			if len(bodySlice) == 0 {
+				pullTemplate = true
+			} else {
 				body, ok := bodySlice[0].(map[string]any)
 				if !ok {
 					logging.Info(pluginCtx, "list", "body", list.Body)
 					logging.Error(pluginCtx, "unable to parse bodySlice[0] to map[string]any")
-					return nil, nil, fmt.Errorf("unable to parse bodySlice[0] to map[string]any")
+					return fmt.Errorf("unable to parse bodySlice[0] to map[string]any")
 				}
-				if status, ok := body["status"].(string); ok {
-					if status == "failed" {
-						return nil, nil, fmt.Errorf("vm template is not running and instead %s", status)
-					}
+				if status, ok := body["status"].(string); ok && status == "failed" {
+					return fmt.Errorf("vm template is not running and instead %s", status)
 				}
 				if version, ok := body["version"].(string); ok {
 					if targetTemplateTag != "(using latest)" {
@@ -1024,81 +1020,69 @@ func (cli *Cli) EnsureVMTemplateExists(
 							pullTemplate = true
 						}
 					} else {
-						// always pull to ensure latest, if (using latest)
 						pullTemplate = true
 					}
 				}
 				if templateName, ok := body["name"].(string); ok {
 					targetTemplateName = templateName
 				}
-			} else {
-				return nil, nil, fmt.Errorf("unable to parse list.Body to []any")
 			}
 		}
 	} else {
 		pullTemplate = true
-		ankaRegistryShowTemplate, err := cli.AnkaRegistryShowTemplate(workerCtx, pluginCtx, targetTemplateUUID, targetTemplateTag)
-		if err != nil {
-			logging.Error(pluginCtx, "error executing anka registry show template", "err", err)
-			return nil, nil, err
+		ankaRegistryShowTemplate, showErr := cli.AnkaRegistryShowTemplate(workerCtx, pluginCtx, targetTemplateUUID, targetTemplateTag)
+		if showErr != nil {
+			logging.Error(pluginCtx, "error executing anka registry show template", "err", showErr)
+			return showErr
 		}
 		if ankaRegistryShowTemplate != nil {
 			targetTemplateName = ankaRegistryShowTemplate.Name
 		}
 	}
+
 	if pullTemplate {
-
-		// Check if any templates are currently being pulled
 		if workerGlobals.TemplateTracker.HasPullingTemplates() {
-			return nil, nil, fmt.Errorf("a pull is already running on this host")
+			return fmt.Errorf("a pull is already running on this host")
 		}
 
-		// ensure space for template
-		ensureSpaceError, genericError := cli.EnsureSpaceForTemplate(workerCtx, pluginCtx, targetTemplateUUID, targetTemplateTag)
-		if ensureSpaceError != nil {
-			return nil, ensureSpaceError, nil
-		}
-		if genericError != nil {
-			return nil, nil, genericError
+		if spaceErr := cli.EnsureSpaceForTemplate(workerCtx, pluginCtx, targetTemplateUUID, targetTemplateTag); spaceErr != nil {
+			return spaceErr
 		}
 
-		pullJson, err := cli.AnkaRegistryPull(workerCtx, pluginCtx, targetTemplateUUID, targetTemplateName, targetTemplateTag)
+		pullJson, pullErr := cli.AnkaRegistryPull(workerCtx, pluginCtx, targetTemplateUUID, targetTemplateName, targetTemplateTag)
 		if workerCtx.Err() != nil || pluginCtx.Err() != nil {
 			logging.Error(pluginCtx, "context canceled while pulling template")
-			return nil, nil, nil
+			return nil
 		}
-		if pullJson == nil || pullJson.Code == 3 { // registry doesn't have template (or tag)
-			return fmt.Errorf("no template tag exists in registry"), nil, nil
+		if pullJson == nil || pullJson.Code == 3 {
+			return ErrTemplateNotFoundInRegistry
 		}
-		if err != nil {
-			logging.Error(pluginCtx, "error executing anka registry pull", "err", err)
-			return nil, nil, err
+		if pullErr != nil {
+			logging.Error(pluginCtx, "error executing anka registry pull", "err", pullErr)
+			return pullErr
 		}
+		return nil
+	}
+
+	// Template already exists locally; inspect once for both size and access date.
+	var templateSizeBytes uint64
+	accessDate := time.Now()
+	ankaShowOutput, showErr := cli.AnkaShow(pluginCtx, targetTemplateUUID)
+	if showErr != nil {
+		logging.Warn(pluginCtx, "unable to inspect existing template", "error", showErr)
 	} else {
-		// Template already exists locally, update usage tracking
-		templateSizeBytes, err := cli.AnkaGetTemplateSize(pluginCtx, targetTemplateUUID, targetTemplateTag)
-		if err != nil {
-			logging.Warn(pluginCtx, "unable to get template size for existing template", "error", err)
-			templateSizeBytes = 0
-		}
-		// Get the actual access date from anka show
-		ankaShowOutput, err := cli.AnkaShow(pluginCtx, targetTemplateUUID)
-		var accessDate time.Time
-		if err != nil {
-			logging.Warn(pluginCtx, "unable to get access date for existing template", "error", err)
-			accessDate = time.Now() // fallback to current time
-		} else {
+		templateSizeBytes = ankaShowOutput.ImageSize
+		if !ankaShowOutput.AccessDate.IsZero() {
 			accessDate = ankaShowOutput.AccessDate
 		}
-		// Update template usage since we're using an existing template
-		workerGlobals.TemplateTracker.UpdateTemplateUsage(
-			targetTemplateUUID,
-			targetTemplateName,
-			targetTemplateTag,
-			templateSizeBytes,
-			accessDate,
-		)
-		logging.Debug(pluginCtx, "using existing template", "templateUUID", targetTemplateUUID, "tag", targetTemplateTag, "sizeBytes", templateSizeBytes, "accessDate", accessDate)
 	}
-	return nil, nil, nil
+	workerGlobals.TemplateTracker.UpdateTemplateUsage(
+		targetTemplateUUID,
+		targetTemplateName,
+		targetTemplateTag,
+		templateSizeBytes,
+		accessDate,
+	)
+	logging.Debug(pluginCtx, "using existing template", "templateUUID", targetTemplateUUID, "tag", targetTemplateTag, "sizeBytes", templateSizeBytes, "accessDate", accessDate)
+	return nil
 }

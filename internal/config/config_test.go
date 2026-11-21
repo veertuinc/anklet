@@ -1,7 +1,14 @@
 package config
 
 import (
+	"bytes"
+	"log/slog"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
+	"time"
 )
 
 func TestPlugin_MetricsKeyEnding(t *testing.T) {
@@ -632,5 +639,283 @@ func TestApplyPluginEnvOverrides_EmptyEnvDoesNotClearYAMLMounts(t *testing.T) {
 	}
 	if len(plugin.HostToGuestFolderMounts) != 1 || plugin.HostToGuestFolderMounts[0] != "/tmp/anklet_ci_mount_host:anklet_mount_test" {
 		t.Errorf("empty env must not clear YAML HostToGuestFolderMounts, got %v", plugin.HostToGuestFolderMounts)
+	}
+}
+
+func TestConfigLogValueRedactsSecrets(t *testing.T) {
+	t.Parallel()
+
+	cfg := Config{
+		GlobalPrivateKey:       "-----BEGIN RSA PRIVATE KEY-----\nSECRET",
+		GlobalToken:            "ghp_super_secret_token",
+		GlobalDatabasePassword: "redis_secret_password",
+		GlobalReceiverSecret:   "webhook_secret",
+		Metrics: Metrics{
+			Database: Database{Password: "metrics_db_pass"},
+		},
+		Plugins: []Plugin{
+			{
+				Name:          "RUNNER1",
+				Plugin:        "github",
+				Owner:         "veertuinc",
+				SleepInterval: 10,
+				Token:         "ghp_plugin_token",
+				PrivateKey:    "/path/to/key.pem",
+				Secret:        "plugin_hook_secret",
+				Database:      Database{URL: "localhost", Password: "plugin_db_password"},
+			},
+		},
+	}
+
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&buf, nil))
+	logger.Info("loaded config", slog.Any("config", cfg))
+	logged := buf.String()
+
+	for _, secret := range []string{
+		"BEGIN RSA PRIVATE KEY",
+		"ghp_super_secret_token",
+		"redis_secret_password",
+		"webhook_secret",
+		"metrics_db_pass",
+		"ghp_plugin_token",
+		"/path/to/key.pem",
+		"plugin_hook_secret",
+		"plugin_db_password",
+	} {
+		if strings.Contains(logged, secret) {
+			t.Errorf("secret %q leaked into config log: %s", secret, logged)
+		}
+	}
+	if !strings.Contains(logged, `"Name":"RUNNER1"`) || !strings.Contains(logged, `"SleepInterval":10`) {
+		t.Errorf("non-secret fields missing from config log: %s", logged)
+	}
+}
+
+func TestValidatePlugins(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		plugins []Plugin
+		wantErr string
+	}{
+		{name: "valid", plugins: []Plugin{{Name: "A"}, {Name: "B"}}},
+		{name: "missing name", plugins: []Plugin{{Name: ""}}, wantErr: "name is required for plugins"},
+		{name: "space in name", plugins: []Plugin{{Name: "A B"}}, wantErr: "cannot contain spaces"},
+		{name: "duplicate name", plugins: []Plugin{{Name: "A"}, {Name: "A"}}, wantErr: "duplicate plugin name"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidatePlugins(tt.plugins)
+			if tt.wantErr == "" && err != nil {
+				t.Fatalf("ValidatePlugins() unexpected error = %v", err)
+			}
+			if tt.wantErr != "" && (err == nil || !strings.Contains(err.Error(), tt.wantErr)) {
+				t.Fatalf("ValidatePlugins() error = %v, want substring %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestLoadInEnvsAdditionalGlobalVarsAndResolveDatabase(t *testing.T) {
+	t.Setenv("ANKLET_PLUGINS_PATH", "/custom/plugins")
+	t.Setenv("ANKLET_LOG_FILE_DIR", "/custom/logs")
+	t.Setenv("ANKLET_METRICS_BIND_ADDRESS", "127.0.0.1")
+	t.Setenv("ANKLET_GLOBAL_DATABASE_MAX_RETRIES", "7")
+	t.Setenv("ANKLET_GLOBAL_DATABASE_RETRY_DELAY", "250")
+	t.Setenv("ANKLET_GLOBAL_DATABASE_RETRY_BACKOFF_FACTOR", "1.5")
+
+	cfg, err := LoadInEnvs(Config{})
+	if err != nil {
+		t.Fatalf("LoadInEnvs() error = %v", err)
+	}
+	if cfg.PluginsPath != "/custom/plugins" || cfg.Log.FileDir != "/custom/logs" || cfg.Metrics.BindAddress != "127.0.0.1" {
+		t.Fatalf("unexpected general env overrides: %+v", cfg)
+	}
+
+	resolved := ResolveDatabaseConfig(cfg, Database{
+		URL:         "plugin-redis",
+		Port:        6380,
+		ClusterMode: true,
+		TLSEnabled:  true,
+	})
+	if resolved.URL != "plugin-redis" || resolved.Port != 6380 || !resolved.ClusterMode || !resolved.TLSEnabled {
+		t.Fatalf("per-plugin DB settings not preserved: %+v", resolved)
+	}
+	if resolved.MaxRetries != 7 || resolved.RetryDelay != 250 || resolved.RetryBackoffFactor != 1.5 {
+		t.Fatalf("global DB retry settings not resolved: %+v", resolved)
+	}
+}
+
+func TestTemplateTrackerInUseRefCountingAndConcurrentAccess(t *testing.T) {
+	t.Parallel()
+
+	tt := NewTemplateTracker()
+	tt.RegisterDiscoveredTemplate("u1", "mac14", "v1", 100, time.Now().Add(-time.Hour))
+	tt.RegisterDiscoveredTemplate("u2", "mac15", "v1", 200, time.Now())
+
+	tt.SetTemplateInUse("u1", "mac14", "v1", true)
+	tt.SetTemplateInUse("u1", "mac14", "v1", true)
+
+	lru := tt.GetLeastRecentlyUsedTemplates()
+	if len(lru) != 1 || lru[0].UUID != "u2" {
+		t.Fatalf("expected only u2 evictable while u1 is in use, got %+v", lru)
+	}
+
+	// Releasing once should keep u1 in use (refcount = 1).
+	tt.SetTemplateInUse("u1", "mac14", "v1", false)
+	lru = tt.GetLeastRecentlyUsedTemplates()
+	if len(lru) != 1 || lru[0].UUID != "u2" {
+		t.Fatalf("u1 should remain in use with refcount 1, got %+v", lru)
+	}
+
+	// Second release makes u1 evictable again.
+	tt.SetTemplateInUse("u1", "mac14", "v1", false)
+	lru = tt.GetLeastRecentlyUsedTemplates()
+	if len(lru) != 2 || lru[0].UUID != "u1" {
+		t.Fatalf("u1 should be oldest evictable after final release, got %+v", lru)
+	}
+
+	var wg sync.WaitGroup
+	g := &Globals{}
+	for range 10 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for range 20 {
+				g.IncrementQueueTargetIndex()
+				_ = g.GetQueueTargetIndex()
+				g.DecrementQueueTargetIndex()
+				tt.SetTemplateInUse("u2", "mac15", "v1", true)
+				_ = tt.Len()
+				_ = tt.Snapshot()
+				tt.SetTemplateInUse("u2", "mac15", "v1", false)
+			}
+		}()
+	}
+	wg.Wait()
+	if g.GetQueueTargetIndex() < 0 {
+		t.Fatalf("QueueTargetIndex went negative: %d", g.GetQueueTargetIndex())
+	}
+}
+
+func TestLoadConfigValidDuplicateKeysEmptyAndErrors(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+
+	// Valid YAML with duplicate mapping key (mirrors anklet-tests credential injection).
+	dupPath := filepath.Join(dir, "dup.yml")
+	dupYAML := `
+work_dir: /tmp/
+plugins:
+  - name: H1
+    plugin: github
+    owner: placeholder_owner
+    sleep_interval: 5
+    owner: veertuinc
+`
+	if err := os.WriteFile(dupPath, []byte(dupYAML), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadConfig(dupPath)
+	if err != nil {
+		t.Fatalf("LoadConfig(dup.yml) error = %v", err)
+	}
+	if len(cfg.Plugins) != 1 || cfg.Plugins[0].Owner != "veertuinc" || cfg.Plugins[0].SleepInterval != 5 {
+		t.Fatalf("unexpected parsed config: %+v", cfg)
+	}
+
+	// Empty file returns error (io.EOF).
+	emptyPath := filepath.Join(dir, "empty.yml")
+	if err := os.WriteFile(emptyPath, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadConfig(emptyPath); err == nil {
+		t.Fatal("expected error for empty YAML file")
+	}
+
+	// Missing file returns error.
+	if _, err := LoadConfig(filepath.Join(dir, "does-not-exist.yml")); err == nil {
+		t.Fatal("expected error for missing YAML file")
+	}
+
+	// Invalid YAML syntax returns error.
+	badPath := filepath.Join(dir, "bad.yml")
+	if err := os.WriteFile(badPath, []byte("plugins:\n  - [unclosed"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadConfig(badPath); err == nil {
+		t.Fatal("expected error for invalid YAML syntax")
+	}
+}
+
+func TestPluginDatabaseAndTemplateTrackerLogValueAndGlobalsHelpers(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&buf, nil))
+
+	p := Plugin{Name: "R1", Plugin: "github_receiver", Token: "secret_tok", PrivateKey: "pem", Secret: "whsec", Database: Database{Password: "dbpass"}}
+	if !p.IsReceiver() {
+		t.Fatal("expected IsReceiver() = true")
+	}
+	tt := NewTemplateTracker()
+	tt.RegisterDiscoveredTemplate("u1", "mac", "v1", 500, time.Now())
+	logger.Info("check", slog.Any("plugin", p), slog.Any("db", p.Database), slog.Any("tracker", tt))
+	out := buf.String()
+	for _, secret := range []string{"secret_tok", "pem", "whsec", "dbpass"} {
+		if strings.Contains(out, secret) {
+			t.Errorf("secret %q leaked in LogValue output: %s", secret, out)
+		}
+	}
+
+	g := &Globals{
+		Plugins: map[string]map[string]*PluginGlobal{
+			"github": {"H1": {}},
+		},
+	}
+	g.IncrementPluginRunCount("H1")
+	if runs, err := g.GetPluginRunCount("H1"); err != nil || runs != 1 {
+		t.Fatalf("GetPluginRunCount = (%d, %v), want 1", runs, err)
+	}
+	if _, err := g.GetPluginRunCount("MISSING"); err == nil {
+		t.Fatal("expected error for missing plugin run count")
+	}
+	g.Plugins["github"]["H1"].Paused.Store(true)
+	if paused := g.GetPausedPlugin(); paused != "github" {
+		t.Fatalf("GetPausedPlugin = %q, want github", paused)
+	}
+	g.IncrementQueueTargetIndex()
+	g.ResetQueueTargetIndex()
+	if g.GetQueueTargetIndex() != 0 {
+		t.Fatalf("ResetQueueTargetIndex did not reset to 0")
+	}
+}
+
+func TestLoadInEnvsInvalidNumericValuesReturnError(t *testing.T) {
+	cases := []struct {
+		key string
+		val string
+	}{
+		{"ANKLET_METRICS_SLEEP_INTERVAL", "bad"},
+		{"ANKLET_METRICS_DATABASE_PORT", "bad"},
+		{"ANKLET_METRICS_DATABASE_DATABASE", "bad"},
+		{"ANKLET_GLOBAL_DATABASE_PORT", "bad"},
+		{"ANKLET_GLOBAL_DATABASE_DATABASE", "bad"},
+		{"ANKLET_GLOBAL_DATABASE_MAX_RETRIES", "bad"},
+		{"ANKLET_GLOBAL_DATABASE_RETRY_DELAY", "bad"},
+		{"ANKLET_GLOBAL_DATABASE_RETRY_BACKOFF_FACTOR", "bad"},
+		{"ANKLET_GLOBAL_TEMPLATE_DISK_BUFFER", "bad"},
+		{"ANKLET_JOB_RETRY_ATTEMPTS", "bad"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.key, func(t *testing.T) {
+			t.Setenv(tc.key, tc.val)
+			if _, err := LoadInEnvs(Config{}); err == nil {
+				t.Fatalf("LoadInEnvs(%s=%s) expected error", tc.key, tc.val)
+			}
+		})
 	}
 }

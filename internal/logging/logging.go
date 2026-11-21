@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"runtime"
+	"slices"
 	"strings"
 
 	"github.com/veertuinc/anklet/internal/config"
@@ -28,7 +29,7 @@ func IsDebugEnabled() bool {
 }
 
 // getCallerSource returns the source information for the actual caller,
-// skipping the logging wrapper functions
+// skipping the logging wrapper functions.
 func getCallerSource(skip int) *slog.Source {
 	pc, file, line, ok := runtime.Caller(skip)
 	if !ok {
@@ -53,18 +54,16 @@ func New() *slog.Logger {
 	var options *slog.HandlerOptions
 	switch logLevel {
 	case "DEBUG-PRETTY", "DEV":
-		// DEBUG-PRETTY (or DEV alias) uses pretty handler for development readability
 		handler := &ContextHandler{Handler: NewPrettyHandler(&slog.HandlerOptions{
 			Level:       slog.LevelDebug,
-			AddSource:   false, // We handle source manually
+			AddSource:   false,
 			ReplaceAttr: nil,
 		})}
 		return slog.New(handler)
 	case "DEBUG":
-		// DEBUG uses JSON handler with debug level
 		options = &slog.HandlerOptions{
 			Level:     slog.LevelDebug,
-			AddSource: false, // We handle source manually
+			AddSource: false,
 		}
 	case "ERROR":
 		options = &slog.HandlerOptions{Level: slog.LevelError}
@@ -75,27 +74,27 @@ func New() *slog.Logger {
 	return slog.New(handler)
 }
 
-func UpdateLoggerToFile(logger *slog.Logger, filePath string, suffix string) (*slog.Logger, string, error) {
+// UpdateLoggerToFile opens a plugin log file with restricted permissions (0640)
+// and returns the new logger, its file path, and the open file handle so the caller
+// can close it during shutdown.
+func UpdateLoggerToFile(logger *slog.Logger, filePath string, suffix string) (*slog.Logger, string, *os.File, error) {
 	fileLocation := filePath + "anklet" + suffix + ".log"
-	file, err := os.OpenFile(fileLocation, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	file, err := os.OpenFile(fileLocation, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o640)
 	if err != nil {
-		return nil, "", err
+		return nil, "", nil, err
 	}
 
 	options := &slog.HandlerOptions{Level: slog.LevelDebug}
 	handler := &ContextHandler{Handler: slog.NewJSONHandler(file, options)}
 
-	// Copy existing logger attributes to the new logger
 	if contextHandler, ok := logger.Handler().(*ContextHandler); ok {
-		handler.attrs = append(handler.attrs, contextHandler.attrs...)
+		handler.attrs = slices.Clone(contextHandler.attrs)
 	}
 
-	newLogger := slog.New(handler)
-	return newLogger, fileLocation, nil
+	return slog.New(handler), fileLocation, file, nil
 }
 
-// Handle adds contextual attributes to the Record before calling the underlying
-// handler
+// Handle adds contextual attributes to the Record before calling the underlying handler.
 func (h *ContextHandler) Handle(ctx context.Context, r slog.Record) error {
 	if ctxAttrs, ok := ctx.Value(slogFields).([]slog.Attr); ok {
 		for _, v := range ctxAttrs {
@@ -108,10 +107,14 @@ func (h *ContextHandler) Handle(ctx context.Context, r slog.Record) error {
 	return h.Handler.Handle(ctx, r)
 }
 
-// With adds attributes to the handler
+// With returns a derived handler containing the additional attributes.
 func (h *ContextHandler) With(attrs ...slog.Attr) *ContextHandler {
-	h.attrs = append(h.attrs, attrs...)
-	return h
+	cloned := slices.Clone(h.attrs)
+	cloned = append(cloned, attrs...)
+	return &ContextHandler{
+		Handler: h.Handler,
+		attrs:   cloned,
+	}
 }
 
 func AppendCurrentPluginAttributes(pluginCtx context.Context) context.Context {
@@ -125,13 +128,13 @@ func GetPluginAttributes(ctx context.Context) map[string]any {
 		return map[string]any{}
 	}
 	pluginConfig, _ := config.GetPluginFromContext(ctx)
-	var attributes map[string]any
-	if pluginGlobal, exists := workerGlobals.Plugins[pluginConfig.Plugin][pluginConfig.Name]; exists {
-		attributes = map[string]any{
-			"runs":               pluginGlobal.PluginRunCount.Load(),
-			"paused":             pluginGlobal.Paused.Load(),
-			"finishedInitialRun": pluginGlobal.FinishedInitialRun.Load(),
-			"preparing":          pluginGlobal.Preparing.Load(),
+	attributes := map[string]any{}
+	if pluginGroup, ok := workerGlobals.Plugins[pluginConfig.Plugin]; ok {
+		if pluginGlobal, exists := pluginGroup[pluginConfig.Name]; exists {
+			attributes["runs"] = pluginGlobal.PluginRunCount.Load()
+			attributes["paused"] = pluginGlobal.Paused.Load()
+			attributes["finishedInitialRun"] = pluginGlobal.FinishedInitialRun.Load()
+			attributes["preparing"] = pluginGlobal.Preparing.Load()
 		}
 	}
 	if pluginConfig.Name != "" {
@@ -144,131 +147,79 @@ func GetPluginAttributes(ctx context.Context) map[string]any {
 	return attributes
 }
 
-// AppendCtx adds one or more slog attributes to the provided context so that they will be
-// included in any Record created with such context
+// AppendCtx returns a derived context with the provided slog attributes without
+// mutating any parent context's attribute slice.
 func AppendCtx(ctx context.Context, attrs ...slog.Attr) context.Context {
 	if ctx == nil {
 		panic("parent context required")
 	}
-
 	if len(attrs) == 0 {
 		return ctx
 	}
 
-	if v, ok := ctx.Value(slogFields).([]slog.Attr); ok {
-		// Check for duplicate keys and overwrite if found
-		for _, attr := range attrs {
-			found := false
-			for i, existingAttr := range v {
-				if existingAttr.Key == attr.Key {
-					v[i] = attr
-					found = true
-					break
-				}
-			}
-			if !found {
-				v = append(v, attr)
-			}
+	var next []slog.Attr
+	if existing, ok := ctx.Value(slogFields).([]slog.Attr); ok {
+		next = make([]slog.Attr, len(existing), len(existing)+len(attrs))
+		copy(next, existing)
+	} else {
+		next = make([]slog.Attr, 0, len(attrs))
+	}
+
+	for _, attr := range attrs {
+		idx := slices.IndexFunc(next, func(existingAttr slog.Attr) bool {
+			return existingAttr.Key == attr.Key
+		})
+		if idx >= 0 {
+			next[idx] = attr
+		} else {
+			next = append(next, attr)
 		}
-		return context.WithValue(ctx, slogFields, v)
 	}
-
-	v := make([]slog.Attr, 0, len(attrs))
-	v = append(v, attrs...)
-	return context.WithValue(ctx, slogFields, v)
-}
-
-func Panic(workerCtx context.Context, pluginCtx context.Context, errorMessage string) {
-	logger, err := GetLoggerFromContext(pluginCtx)
-	if err != nil {
-		panic(err)
-	}
-	logger.ErrorContext(pluginCtx, errorMessage)
-	panic(errorMessage)
+	return context.WithValue(ctx, slogFields, next)
 }
 
 func GetLoggerFromContext(ctx context.Context) (*slog.Logger, error) {
 	logger, ok := ctx.Value(config.ContextKey("logger")).(*slog.Logger)
-	if !ok {
+	if !ok || logger == nil {
 		return nil, fmt.Errorf("GetLoggerFromContext failed")
 	}
 	return logger, nil
 }
 
-func Info(ctx context.Context, message string, args ...any) {
+func logWithCaller(ctx context.Context, level slog.Level, message string, args ...any) {
 	logger, err := GetLoggerFromContext(ctx)
 	if err != nil {
 		panic(err)
 	}
 	pluginCtx := AppendCurrentPluginAttributes(ctx)
 
-	// Add source information for the actual caller (skip 2: runtime.Caller, this function)
-	if source := getCallerSource(2); source != nil {
+	// skip 3: runtime.Caller, getCallerSource, logWithCaller, public wrapper
+	if source := getCallerSource(3); source != nil {
 		args = append(args, slog.Any("source", source))
 	}
 
-	logger.InfoContext(pluginCtx, message, args...)
+	logger.Log(pluginCtx, level, message, args...)
+}
+
+func Info(ctx context.Context, message string, args ...any) {
+	logWithCaller(ctx, slog.LevelInfo, message, args...)
 }
 
 func Dev(ctx context.Context, message string, args ...any) {
 	logLevel := strings.ToUpper(os.Getenv("LOG_LEVEL"))
 	if logLevel == "DEV" || logLevel == "DEBUG-PRETTY" {
-		logger, err := GetLoggerFromContext(ctx)
-		if err != nil {
-			panic(err)
-		}
-		pluginCtx := AppendCurrentPluginAttributes(ctx)
-
-		// Add source information for the actual caller (skip 2: runtime.Caller, this function)
-		if source := getCallerSource(2); source != nil {
-			args = append(args, slog.Any("source", source))
-		}
-
-		logger.DebugContext(pluginCtx, message, args...)
+		logWithCaller(ctx, slog.LevelDebug, message, args...)
 	}
 }
 
 func Debug(ctx context.Context, message string, args ...any) {
-	logger, err := GetLoggerFromContext(ctx)
-	if err != nil {
-		panic(err)
-	}
-	pluginCtx := AppendCurrentPluginAttributes(ctx)
-
-	// Add source information for the actual caller (skip 2: runtime.Caller, this function)
-	if source := getCallerSource(2); source != nil {
-		args = append(args, slog.Any("source", source))
-	}
-
-	logger.DebugContext(pluginCtx, message, args...)
+	logWithCaller(ctx, slog.LevelDebug, message, args...)
 }
 
 func Warn(ctx context.Context, message string, args ...any) {
-	logger, err := GetLoggerFromContext(ctx)
-	if err != nil {
-		panic(err)
-	}
-	pluginCtx := AppendCurrentPluginAttributes(ctx)
-
-	// Add source information for the actual caller (skip 2: runtime.Caller, this function)
-	if source := getCallerSource(2); source != nil {
-		args = append(args, slog.Any("source", source))
-	}
-
-	logger.WarnContext(pluginCtx, message, args...)
+	logWithCaller(ctx, slog.LevelWarn, message, args...)
 }
 
 func Error(ctx context.Context, message string, args ...any) {
-	logger, err := GetLoggerFromContext(ctx)
-	if err != nil {
-		panic(err)
-	}
-	pluginCtx := AppendCurrentPluginAttributes(ctx)
-
-	// Add source information for the actual caller (skip 2: runtime.Caller, this function)
-	if source := getCallerSource(2); source != nil {
-		args = append(args, slog.Any("source", source))
-	}
-
-	logger.ErrorContext(pluginCtx, message, args...)
+	logWithCaller(ctx, slog.LevelError, message, args...)
 }

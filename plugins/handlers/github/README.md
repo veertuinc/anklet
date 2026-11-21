@@ -223,10 +223,12 @@ plugins:
     owner: veertuinc
     # Merged with global_host_to_guest_folder_mounts (plugin entries after globals)
     host_to_guest_folder_mounts:
-      - /Users/runner/.ssh:ssh_keys  # guest: /Volumes/My Shared Files/ssh_keys
+      - /var/cache/ci-tools:ci_tools  # guest: /Volumes/My Shared Files/ci_tools
 ```
 
-In a workflow job, read shared data under `/Volumes/My Shared Files/build_cache` or `/Volumes/My Shared Files/ssh_keys`.
+> **Security note:** Host folders mounted into guests are accessible to workflow steps running inside the VM. Do not mount sensitive host directories such as `~/.ssh`, credentials, or private keys into VMs that run untrusted code. Guest folder names must be single folder names without `/`, `\`, `:`, or `..`.
+
+In a workflow job, read shared data under `/Volumes/My Shared Files/build_cache` or `/Volumes/My Shared Files/ci_tools`.
 
 **Environment (optional)** — comma-separated list; if set, replaces the matching YAML list for that scope:
 

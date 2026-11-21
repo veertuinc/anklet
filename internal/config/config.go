@@ -1,10 +1,13 @@
 package config
 
 import (
+	"cmp"
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -12,35 +15,42 @@ import (
 	"time"
 	"unicode"
 
-	"gopkg.in/yaml.v2"
+	"gopkg.in/yaml.v3"
 )
 
 type ContextKey string
 
+const redactedPlaceholder = "[REDACTED]"
+
+func redactSecret(value string) string {
+	if value == "" {
+		return ""
+	}
+	return redactedPlaceholder
+}
+
 type Config struct {
-	Plugins                          []Plugin `yaml:"plugins"`
-	Log                              Log      `yaml:"log"`
-	PidFileDir                       string   `yaml:"pid_file_dir"`
-	LogFileDir                       string   `yaml:"log_file_dir"`
-	WorkDir                          string   `yaml:"work_dir"`
-	Metrics                          Metrics  `yaml:"metrics"`
-	GlobalPrivateKey                 string   `yaml:"global_private_key"`
-	GlobalToken                      string   `yaml:"global_token"`
-	PluginsPath                      string   `yaml:"plugins_path"`
-	GlobalDatabaseURL                string   `yaml:"global_database_url"`
-	GlobalDatabasePort               int      `yaml:"global_database_port"`
-	GlobalDatabaseUser               string   `yaml:"global_database_user"`
-	GlobalDatabasePassword           string   `yaml:"global_database_password"`
-	GlobalDatabaseDatabase           int      `yaml:"global_database_database"`
-	GlobalDatabaseMaxRetries         int      `yaml:"global_database_max_retries"`
-	GlobalDatabaseRetryDelay         int      `yaml:"global_database_retry_delay"`
-	GlobalDatabaseRetryBackoffFactor float64  `yaml:"global_database_retry_backoff_factor"`
-	GlobalDatabaseClusterMode        bool     `yaml:"global_database_cluster_mode"`
-	GlobalDatabaseTLSEnabled         bool     `yaml:"global_database_tls_enabled"`
-	GlobalDatabaseTLSInsecure        bool     `yaml:"global_database_tls_insecure"`
-	GlobalReceiverSecret             string   `yaml:"global_receiver_secret"`
-	GlobalTemplateDiskBuffer         float64  `yaml:"global_template_disk_buffer"` // Global disk buffer percentage (e.g., 10.0 for 10%)
-	GlobalSkipCPUAndMemoryResourceChecks bool `yaml:"global_skip_cpu_and_memory_resource_checks"` // Global override to skip CPU/RAM resource admission checks
+	Plugins                              []Plugin `yaml:"plugins"`
+	Log                                  Log      `yaml:"log"`
+	WorkDir                              string   `yaml:"work_dir"`
+	Metrics                              Metrics  `yaml:"metrics"`
+	GlobalPrivateKey                     string   `yaml:"global_private_key"`
+	GlobalToken                          string   `yaml:"global_token"`
+	PluginsPath                          string   `yaml:"plugins_path"`
+	GlobalDatabaseURL                    string   `yaml:"global_database_url"`
+	GlobalDatabasePort                   int      `yaml:"global_database_port"`
+	GlobalDatabaseUser                   string   `yaml:"global_database_user"`
+	GlobalDatabasePassword               string   `yaml:"global_database_password"`
+	GlobalDatabaseDatabase               int      `yaml:"global_database_database"`
+	GlobalDatabaseMaxRetries             int      `yaml:"global_database_max_retries"`
+	GlobalDatabaseRetryDelay             int      `yaml:"global_database_retry_delay"`
+	GlobalDatabaseRetryBackoffFactor     float64  `yaml:"global_database_retry_backoff_factor"`
+	GlobalDatabaseClusterMode            bool     `yaml:"global_database_cluster_mode"`
+	GlobalDatabaseTLSEnabled             bool     `yaml:"global_database_tls_enabled"`
+	GlobalDatabaseTLSInsecure            bool     `yaml:"global_database_tls_insecure"`
+	GlobalReceiverSecret                 string   `yaml:"global_receiver_secret"`
+	GlobalTemplateDiskBuffer             float64  `yaml:"global_template_disk_buffer"`
+	GlobalSkipCPUAndMemoryResourceChecks bool     `yaml:"global_skip_cpu_and_memory_resource_checks"`
 	// GlobalHostToGuestFolderMounts lists host folders mounted into each guest VM (host_path[:guest_folder_name]); requires Anka >= 3.9.0 on Apple Silicon.
 	GlobalHostToGuestFolderMounts []string `yaml:"global_host_to_guest_folder_mounts"`
 }
@@ -52,8 +62,8 @@ type Log struct {
 
 type Metrics struct {
 	Aggregator    bool     `yaml:"aggregator"`
+	BindAddress   string   `yaml:"bind_address"`
 	Port          string   `yaml:"port"`
-	MetricsURLs   []string `yaml:"metrics_urls"`
 	SleepInterval int      `yaml:"sleep_interval"`
 	Database      Database `yaml:"database"`
 }
@@ -64,7 +74,7 @@ type Database struct {
 	User               string  `yaml:"user"`
 	Password           string  `yaml:"password"`
 	Database           int     `yaml:"database"`
-	MaxRetries         int     `yaml:"max_retries"`          // Maximum number of retry attempts (default: 3)
+	MaxRetries         int     `yaml:"max_retries"`          // Maximum number of retry attempts (default: 5)
 	RetryDelay         int     `yaml:"retry_delay"`          // Initial retry delay in milliseconds (default: 1000)
 	RetryBackoffFactor float64 `yaml:"retry_backoff_factor"` // Backoff multiplier for retry delay (default: 2.0)
 	ClusterMode        bool    `yaml:"cluster_mode"`         // Enable Redis cluster mode
@@ -72,49 +82,148 @@ type Database struct {
 	TLSInsecure        bool    `yaml:"tls_insecure"`         // Skip TLS certificate verification
 }
 
-type Workflow struct {
-	Include []string `yaml:"include"`
-	Exclude []string `yaml:"exclude"`
-}
-
 type Plugin struct {
-	SleepInterval              int      `yaml:"sleep_interval"`
-	Name                       string   `yaml:"name"`
-	Plugin                     string   `yaml:"plugin"`
-	Token                      string   `yaml:"token"`
-	Repo                       string   `yaml:"repo"`
-	Owner                      string   `yaml:"owner"`
-	Enterprise                 string   `yaml:"enterprise"` // Optional: GitHub Enterprise Cloud slug (enterprise > org > repo)
-	QueueName                  string   `yaml:"queue_name"` // Optional: override queue namespace (defaults to Enterprise or Owner)
-	Database                   Database `yaml:"database"`
-	RegistryURL                string   `yaml:"registry_url"`
-	SkipPull                   bool     `yaml:"skip_pull"`
-	PrivateKey                 string   `yaml:"private_key"`
-	AppID                      int64    `yaml:"app_id"`
-	InstallationID             int64    `yaml:"installation_id"`
-	Workflows                  Workflow `yaml:"workflows"`
-	Port                       string   `yaml:"port"`
-	Secret                     string   `yaml:"secret"`
-	HookID                     int64    `yaml:"hook_id"`
-	SkipRedeliver              bool     `yaml:"skip_redeliver"`
-	RunnerGroup                string   `yaml:"runner_group"`
-	RedeliverHours             int      `yaml:"redeliver_hours"`
-	RegistrationTimeoutSeconds int      `yaml:"registration_timeout_seconds"`
-	TemplateDiskBuffer         float64  `yaml:"template_disk_buffer"` // Plugin-specific disk buffer percentage (e.g., 10.0 for 10%)
-	JobRetryAttempts           int      `yaml:"job_retry_attempts"`   // Maximum number of retry attempts for failed jobs
-	SkipCPUAndMemoryResourceChecks bool `yaml:"skip_cpu_and_memory_resource_checks"` // Skip CPU/RAM resource admission checks for this plugin
+	SleepInterval                  int      `yaml:"sleep_interval"`
+	Name                           string   `yaml:"name"`
+	Plugin                         string   `yaml:"plugin"`
+	Token                          string   `yaml:"token"`
+	Repo                           string   `yaml:"repo"`
+	Owner                          string   `yaml:"owner"`
+	Enterprise                     string   `yaml:"enterprise"` // Optional: GitHub Enterprise Cloud slug (enterprise > org > repo)
+	QueueName                      string   `yaml:"queue_name"` // Optional: override queue namespace (defaults to Enterprise or Owner)
+	Database                       Database `yaml:"database"`
+	RegistryURL                    string   `yaml:"registry_url"`
+	SkipPull                       bool     `yaml:"skip_pull"`
+	PrivateKey                     string   `yaml:"private_key"`
+	AppID                          int64    `yaml:"app_id"`
+	InstallationID                 int64    `yaml:"installation_id"`
+	Port                           string   `yaml:"port"`
+	Secret                         string   `yaml:"secret"`
+	HookID                         int64    `yaml:"hook_id"`
+	SkipRedeliver                  bool     `yaml:"skip_redeliver"`
+	RunnerGroup                    string   `yaml:"runner_group"`
+	RedeliverHours                 int      `yaml:"redeliver_hours"`
+	RegistrationTimeoutSeconds     int      `yaml:"registration_timeout_seconds"`
+	TemplateDiskBuffer             float64  `yaml:"template_disk_buffer"`               // Plugin-specific disk buffer percentage (e.g., 10.0 for 10%)
+	JobRetryAttempts               int      `yaml:"job_retry_attempts"`                 // Maximum number of retry attempts for failed jobs
+	SkipCPUAndMemoryResourceChecks bool     `yaml:"skip_cpu_and_memory_resource_checks"` // Skip CPU/RAM resource admission checks for this plugin
 	// HostToGuestFolderMounts adds host folders mounted into guests for this plugin’s VMs, merged with global_host_to_guest_folder_mounts; requires Anka >= 3.9.0 on Apple Silicon.
 	HostToGuestFolderMounts []string `yaml:"host_to_guest_folder_mounts"`
+}
+
+// LogValue redacts sensitive credentials when Config is logged via slog.
+func (c Config) LogValue() slog.Value {
+	type redactedConfig Config
+	sanitized := redactedConfig(c)
+	sanitized.GlobalPrivateKey = redactSecret(sanitized.GlobalPrivateKey)
+	sanitized.GlobalToken = redactSecret(sanitized.GlobalToken)
+	sanitized.GlobalDatabasePassword = redactSecret(sanitized.GlobalDatabasePassword)
+	sanitized.GlobalReceiverSecret = redactSecret(sanitized.GlobalReceiverSecret)
+	sanitized.Metrics.Database.Password = redactSecret(sanitized.Metrics.Database.Password)
+	if sanitized.Plugins != nil {
+		pluginsCopy := make([]Plugin, len(sanitized.Plugins))
+		for i, p := range sanitized.Plugins {
+			p.Token = redactSecret(p.Token)
+			p.PrivateKey = redactSecret(p.PrivateKey)
+			p.Secret = redactSecret(p.Secret)
+			p.Database.Password = redactSecret(p.Database.Password)
+			pluginsCopy[i] = p
+		}
+		sanitized.Plugins = pluginsCopy
+	}
+	return slog.AnyValue(sanitized)
+}
+
+// LogValue redacts sensitive credentials when Plugin is logged via slog.
+func (p Plugin) LogValue() slog.Value {
+	type redactedPlugin Plugin
+	sanitized := redactedPlugin(p)
+	sanitized.Token = redactSecret(sanitized.Token)
+	sanitized.PrivateKey = redactSecret(sanitized.PrivateKey)
+	sanitized.Secret = redactSecret(sanitized.Secret)
+	sanitized.Database.Password = redactSecret(sanitized.Database.Password)
+	return slog.AnyValue(sanitized)
+}
+
+// LogValue redacts the password when Database is logged via slog.
+func (d Database) LogValue() slog.Value {
+	type redactedDatabase Database
+	sanitized := redactedDatabase(d)
+	sanitized.Password = redactSecret(sanitized.Password)
+	return slog.AnyValue(sanitized)
+}
+
+// IsReceiver reports whether this plugin entry represents a receiver plugin.
+func (p Plugin) IsReceiver() bool {
+	return strings.HasSuffix(p.Plugin, "_receiver")
+}
+
+// ValidatePlugins validates plugin names across the loaded configuration.
+func ValidatePlugins(plugins []Plugin) error {
+	seen := make(map[string]struct{}, len(plugins))
+	for _, p := range plugins {
+		if p.Name == "" {
+			return fmt.Errorf("name is required for plugins")
+		}
+		if strings.Contains(p.Name, " ") {
+			return fmt.Errorf("plugin name cannot contain spaces")
+		}
+		if _, dup := seen[p.Name]; dup {
+			return fmt.Errorf("duplicate plugin name %q: plugin names must be unique", p.Name)
+		}
+		seen[p.Name] = struct{}{}
+	}
+	return nil
+}
+
+// ResolveDatabaseConfig merges global database settings with a per-plugin or metrics
+// database block. Global values override plugin values when set, matching existing config precedence.
+func ResolveDatabaseConfig(global Config, specific Database) Database {
+	resolved := specific
+	if global.GlobalDatabaseURL != "" {
+		resolved.URL = global.GlobalDatabaseURL
+	}
+	if global.GlobalDatabasePort != 0 {
+		resolved.Port = global.GlobalDatabasePort
+	}
+	if global.GlobalDatabaseUser != "" {
+		resolved.User = global.GlobalDatabaseUser
+	}
+	if global.GlobalDatabasePassword != "" {
+		resolved.Password = global.GlobalDatabasePassword
+	}
+	if global.GlobalDatabaseDatabase != 0 {
+		resolved.Database = global.GlobalDatabaseDatabase
+	}
+	if global.GlobalDatabaseMaxRetries != 0 {
+		resolved.MaxRetries = global.GlobalDatabaseMaxRetries
+	}
+	if global.GlobalDatabaseRetryDelay != 0 {
+		resolved.RetryDelay = global.GlobalDatabaseRetryDelay
+	}
+	if global.GlobalDatabaseRetryBackoffFactor != 0 {
+		resolved.RetryBackoffFactor = global.GlobalDatabaseRetryBackoffFactor
+	}
+	if global.GlobalDatabaseClusterMode {
+		resolved.ClusterMode = true
+	}
+	if global.GlobalDatabaseTLSEnabled {
+		resolved.TLSEnabled = true
+	}
+	if global.GlobalDatabaseTLSInsecure {
+		resolved.TLSInsecure = true
+	}
+	return resolved
 }
 
 // GitHubScope is the registration/webhook level for a GitHub plugin.
 type GitHubScope string
 
 const (
-	GitHubScopeEnterprise    GitHubScope = "enterprise"
-	GitHubScopeOrganization  GitHubScope = "organization"
-	GitHubScopeRepository    GitHubScope = "repository"
-	GitHubScopeUnspecified   GitHubScope = ""
+	GitHubScopeEnterprise   GitHubScope = "enterprise"
+	GitHubScopeOrganization GitHubScope = "organization"
+	GitHubScopeRepository   GitHubScope = "repository"
+	GitHubScopeUnspecified  GitHubScope = ""
 )
 
 // ValidateGitHubScope checks enterprise/owner/repo combinations.
@@ -224,204 +333,226 @@ func AnyHostToGuestFolderMountsConfigured(cfg Config) bool {
 	return false
 }
 
-func LoadConfig(configPath string) (Config, error) {
-	config := Config{}
+// dedupeMappingKeys keeps the last value when a YAML mapping contains duplicate keys,
+// preserving compatibility with legacy yaml.v2 configs and credential-injection scripts.
+func dedupeMappingKeys(node *yaml.Node) {
+	if node == nil {
+		return
+	}
+	if node.Kind == yaml.MappingNode && len(node.Content) >= 2 {
+		lastIdx := make(map[string]int, len(node.Content)/2)
+		for i := 0; i+1 < len(node.Content); i += 2 {
+			lastIdx[node.Content[i].Value] = i
+		}
+		deduped := make([]*yaml.Node, 0, len(node.Content))
+		for i := 0; i+1 < len(node.Content); i += 2 {
+			if lastIdx[node.Content[i].Value] == i {
+				dedupeMappingKeys(node.Content[i+1])
+				deduped = append(deduped, node.Content[i], node.Content[i+1])
+			}
+		}
+		node.Content = deduped
+		return
+	}
+	for _, child := range node.Content {
+		dedupeMappingKeys(child)
+	}
+}
+
+func LoadConfig(configPath string) (cfg Config, err error) {
 	file, err := os.Open(configPath)
 	if err != nil {
-		return config, err
+		return cfg, err
 	}
 	defer func() {
-		err := file.Close()
-		if err != nil {
-			panic(err)
+		closeErr := file.Close()
+		if err == nil && closeErr != nil {
+			err = closeErr
 		}
 	}()
 
+	var doc yaml.Node
 	decoder := yaml.NewDecoder(file)
-	err = decoder.Decode(&config)
-	if err != nil {
-		return config, err
+	if err := decoder.Decode(&doc); err != nil {
+		return Config{}, err
 	}
-	return config, nil
+	dedupeMappingKeys(&doc)
+	if err := doc.Decode(&cfg); err != nil {
+		return Config{}, err
+	}
+	return cfg, nil
 }
 
-func LoadInEnvs(config Config) (Config, error) {
+func LoadInEnvs(cfg Config) (Config, error) {
 	/////////////////////////////////
 	// AGGREGATOR ///////////////////
-	envAggregator := os.Getenv("ANKLET_METRICS_AGGREGATOR")
-	if envAggregator != "" {
-		config.Metrics.Aggregator = envAggregator == "true"
+	if envAggregator := os.Getenv("ANKLET_METRICS_AGGREGATOR"); envAggregator != "" {
+		cfg.Metrics.Aggregator = envAggregator == "true"
 	}
-	envPort := os.Getenv("ANKLET_METRICS_PORT")
-	if envPort != "" {
-		config.Metrics.Port = envPort
+	if envBindAddress := os.Getenv("ANKLET_METRICS_BIND_ADDRESS"); envBindAddress != "" {
+		cfg.Metrics.BindAddress = envBindAddress
 	}
-	// envMetricsURLs := os.Getenv("ANKLET_METRICS_URLS")
-	// if envMetricsURLs != "" {
-	// 	config.Metrics.MetricsURLs = strings.Split(envMetricsURLs, ",")
-	// }
-	envSleepInterval := os.Getenv("ANKLET_METRICS_SLEEP_INTERVAL")
-	if envSleepInterval != "" {
+	if envPort := os.Getenv("ANKLET_METRICS_PORT"); envPort != "" {
+		cfg.Metrics.Port = envPort
+	}
+	if envSleepInterval := os.Getenv("ANKLET_METRICS_SLEEP_INTERVAL"); envSleepInterval != "" {
 		value, err := strconv.Atoi(envSleepInterval)
 		if err != nil {
 			return Config{}, err
 		}
-		config.Metrics.SleepInterval = value
+		cfg.Metrics.SleepInterval = value
 	}
-	envDBUser := os.Getenv("ANKLET_METRICS_DATABASE_USER")
-	if envDBUser != "" {
-		config.Metrics.Database.User = envDBUser
+	if envDBUser := os.Getenv("ANKLET_METRICS_DATABASE_USER"); envDBUser != "" {
+		cfg.Metrics.Database.User = envDBUser
 	}
-	envDBPassword := os.Getenv("ANKLET_METRICS_DATABASE_PASSWORD")
-	if envDBPassword != "" {
-		config.Metrics.Database.Password = envDBPassword
+	if envDBPassword := os.Getenv("ANKLET_METRICS_DATABASE_PASSWORD"); envDBPassword != "" {
+		cfg.Metrics.Database.Password = envDBPassword
 	}
-	envDBURL := os.Getenv("ANKLET_METRICS_DATABASE_URL")
-	if envDBURL != "" {
-		config.Metrics.Database.URL = envDBURL
+	if envDBURL := os.Getenv("ANKLET_METRICS_DATABASE_URL"); envDBURL != "" {
+		cfg.Metrics.Database.URL = envDBURL
 	}
-	envDBPort := os.Getenv("ANKLET_METRICS_DATABASE_PORT")
-	if envDBPort != "" {
+	if envDBPort := os.Getenv("ANKLET_METRICS_DATABASE_PORT"); envDBPort != "" {
 		port, err := strconv.Atoi(envDBPort)
 		if err != nil {
 			return Config{}, err
 		}
-		config.Metrics.Database.Port = port
+		cfg.Metrics.Database.Port = port
 	}
-	envDBDatabase := os.Getenv("ANKLET_METRICS_DATABASE_DATABASE")
-	if envDBDatabase != "" {
-		database, err := strconv.Atoi(envDBDatabase)
+	if envDBDatabase := os.Getenv("ANKLET_METRICS_DATABASE_DATABASE"); envDBDatabase != "" {
+		dbNum, err := strconv.Atoi(envDBDatabase)
 		if err != nil {
 			return Config{}, err
 		}
-		config.Metrics.Database.Database = database
-	}
-	///////////////////////////
-	// Other //////////////////
-	workDir := os.Getenv("ANKLET_WORK_DIR")
-	if workDir != "" {
-		config.WorkDir = workDir
-	}
-	envGlobalPrivateKey := os.Getenv("ANKLET_GLOBAL_PRIVATE_KEY")
-	if envGlobalPrivateKey != "" {
-		config.GlobalPrivateKey = envGlobalPrivateKey
-	}
-	envGlobalToken := os.Getenv("ANKLET_GLOBAL_TOKEN")
-	if envGlobalToken != "" {
-		config.GlobalToken = envGlobalToken
+		cfg.Metrics.Database.Database = dbNum
 	}
 
-	envGlobalDatabaseURL := os.Getenv("ANKLET_GLOBAL_DATABASE_URL")
-	if envGlobalDatabaseURL != "" {
-		config.GlobalDatabaseURL = envGlobalDatabaseURL
+	///////////////////////////
+	// Global / General ///////
+	if workDir := os.Getenv("ANKLET_WORK_DIR"); workDir != "" {
+		cfg.WorkDir = workDir
 	}
-	envGlobalDatabasePort := os.Getenv("ANKLET_GLOBAL_DATABASE_PORT")
-	if envGlobalDatabasePort != "" {
+	if logFileDir := os.Getenv("ANKLET_LOG_FILE_DIR"); logFileDir != "" {
+		cfg.Log.FileDir = logFileDir
+	}
+	if pluginsPath := os.Getenv("ANKLET_PLUGINS_PATH"); pluginsPath != "" {
+		cfg.PluginsPath = pluginsPath
+	}
+	if envGlobalPrivateKey := os.Getenv("ANKLET_GLOBAL_PRIVATE_KEY"); envGlobalPrivateKey != "" {
+		cfg.GlobalPrivateKey = envGlobalPrivateKey
+	}
+	if envGlobalToken := os.Getenv("ANKLET_GLOBAL_TOKEN"); envGlobalToken != "" {
+		cfg.GlobalToken = envGlobalToken
+	}
+
+	if envGlobalDatabaseURL := os.Getenv("ANKLET_GLOBAL_DATABASE_URL"); envGlobalDatabaseURL != "" {
+		cfg.GlobalDatabaseURL = envGlobalDatabaseURL
+	}
+	if envGlobalDatabasePort := os.Getenv("ANKLET_GLOBAL_DATABASE_PORT"); envGlobalDatabasePort != "" {
 		port, err := strconv.Atoi(envGlobalDatabasePort)
 		if err != nil {
 			return Config{}, err
 		}
-		config.GlobalDatabasePort = port
+		cfg.GlobalDatabasePort = port
 	}
-	envGlobalDatabaseUser := os.Getenv("ANKLET_GLOBAL_DATABASE_USER")
-	if envGlobalDatabaseUser != "" {
-		config.GlobalDatabaseUser = envGlobalDatabaseUser
+	if envGlobalDatabaseUser := os.Getenv("ANKLET_GLOBAL_DATABASE_USER"); envGlobalDatabaseUser != "" {
+		cfg.GlobalDatabaseUser = envGlobalDatabaseUser
 	}
-	envGlobalDatabasePassword := os.Getenv("ANKLET_GLOBAL_DATABASE_PASSWORD")
-	if envGlobalDatabasePassword != "" {
-		config.GlobalDatabasePassword = envGlobalDatabasePassword
+	if envGlobalDatabasePassword := os.Getenv("ANKLET_GLOBAL_DATABASE_PASSWORD"); envGlobalDatabasePassword != "" {
+		cfg.GlobalDatabasePassword = envGlobalDatabasePassword
 	}
-	envGlobalDatabaseDatabase := os.Getenv("ANKLET_GLOBAL_DATABASE_DATABASE")
-	if envGlobalDatabaseDatabase != "" {
-		database, err := strconv.Atoi(envGlobalDatabaseDatabase)
+	if envGlobalDatabaseDatabase := os.Getenv("ANKLET_GLOBAL_DATABASE_DATABASE"); envGlobalDatabaseDatabase != "" {
+		dbNum, err := strconv.Atoi(envGlobalDatabaseDatabase)
 		if err != nil {
 			return Config{}, err
 		}
-		config.GlobalDatabaseDatabase = database
+		cfg.GlobalDatabaseDatabase = dbNum
 	}
-	envGlobalDatabaseClusterMode := os.Getenv("ANKLET_GLOBAL_DATABASE_CLUSTER_MODE")
-	if envGlobalDatabaseClusterMode != "" {
-		config.GlobalDatabaseClusterMode = envGlobalDatabaseClusterMode == "true"
+	if envGlobalDatabaseMaxRetries := os.Getenv("ANKLET_GLOBAL_DATABASE_MAX_RETRIES"); envGlobalDatabaseMaxRetries != "" {
+		retries, err := strconv.Atoi(envGlobalDatabaseMaxRetries)
+		if err != nil {
+			return Config{}, err
+		}
+		cfg.GlobalDatabaseMaxRetries = retries
 	}
-	envGlobalDatabaseTLSEnabled := os.Getenv("ANKLET_GLOBAL_DATABASE_TLS_ENABLED")
-	if envGlobalDatabaseTLSEnabled != "" {
-		config.GlobalDatabaseTLSEnabled = envGlobalDatabaseTLSEnabled == "true"
+	if envGlobalDatabaseRetryDelay := os.Getenv("ANKLET_GLOBAL_DATABASE_RETRY_DELAY"); envGlobalDatabaseRetryDelay != "" {
+		delay, err := strconv.Atoi(envGlobalDatabaseRetryDelay)
+		if err != nil {
+			return Config{}, err
+		}
+		cfg.GlobalDatabaseRetryDelay = delay
 	}
-	envGlobalDatabaseTLSInsecure := os.Getenv("ANKLET_GLOBAL_DATABASE_TLS_INSECURE")
-	if envGlobalDatabaseTLSInsecure != "" {
-		config.GlobalDatabaseTLSInsecure = envGlobalDatabaseTLSInsecure == "true"
+	if envGlobalDatabaseRetryBackoff := os.Getenv("ANKLET_GLOBAL_DATABASE_RETRY_BACKOFF_FACTOR"); envGlobalDatabaseRetryBackoff != "" {
+		backoff, err := strconv.ParseFloat(envGlobalDatabaseRetryBackoff, 64)
+		if err != nil {
+			return Config{}, err
+		}
+		cfg.GlobalDatabaseRetryBackoffFactor = backoff
+	}
+	if envGlobalDatabaseClusterMode := os.Getenv("ANKLET_GLOBAL_DATABASE_CLUSTER_MODE"); envGlobalDatabaseClusterMode != "" {
+		cfg.GlobalDatabaseClusterMode = envGlobalDatabaseClusterMode == "true"
+	}
+	if envGlobalDatabaseTLSEnabled := os.Getenv("ANKLET_GLOBAL_DATABASE_TLS_ENABLED"); envGlobalDatabaseTLSEnabled != "" {
+		cfg.GlobalDatabaseTLSEnabled = envGlobalDatabaseTLSEnabled == "true"
+	}
+	if envGlobalDatabaseTLSInsecure := os.Getenv("ANKLET_GLOBAL_DATABASE_TLS_INSECURE"); envGlobalDatabaseTLSInsecure != "" {
+		cfg.GlobalDatabaseTLSInsecure = envGlobalDatabaseTLSInsecure == "true"
 	}
 
-	envGlobalReceiverSecret := os.Getenv("ANKLET_GLOBAL_RECEIVER_SECRET")
-	if envGlobalReceiverSecret != "" {
-		config.GlobalReceiverSecret = envGlobalReceiverSecret
+	if envGlobalReceiverSecret := os.Getenv("ANKLET_GLOBAL_RECEIVER_SECRET"); envGlobalReceiverSecret != "" {
+		cfg.GlobalReceiverSecret = envGlobalReceiverSecret
 	}
 
-	envGlobalTemplateDiskBuffer := os.Getenv("ANKLET_GLOBAL_TEMPLATE_DISK_BUFFER")
-	if envGlobalTemplateDiskBuffer != "" {
+	if envGlobalTemplateDiskBuffer := os.Getenv("ANKLET_GLOBAL_TEMPLATE_DISK_BUFFER"); envGlobalTemplateDiskBuffer != "" {
 		buffer, err := strconv.ParseFloat(envGlobalTemplateDiskBuffer, 64)
 		if err != nil {
 			return Config{}, err
 		}
-		config.GlobalTemplateDiskBuffer = buffer
+		cfg.GlobalTemplateDiskBuffer = buffer
 	}
-	envGlobalSkipCPUAndMemoryResourceChecks := os.Getenv("ANKLET_GLOBAL_SKIP_CPU_AND_MEMORY_RESOURCE_CHECKS")
-	if envGlobalSkipCPUAndMemoryResourceChecks != "" {
-		config.GlobalSkipCPUAndMemoryResourceChecks = envGlobalSkipCPUAndMemoryResourceChecks == "true"
+	if envGlobalSkip := os.Getenv("ANKLET_GLOBAL_SKIP_CPU_AND_MEMORY_RESOURCE_CHECKS"); envGlobalSkip != "" {
+		cfg.GlobalSkipCPUAndMemoryResourceChecks = envGlobalSkip == "true"
 	}
 
-	envGlobalHostToGuestFolderMounts := os.Getenv("ANKLET_GLOBAL_HOST_TO_GUEST_FOLDER_MOUNTS")
-	if envGlobalHostToGuestFolderMounts != "" {
+	if envGlobalMounts := os.Getenv("ANKLET_GLOBAL_HOST_TO_GUEST_FOLDER_MOUNTS"); envGlobalMounts != "" {
 		var entries []string
-		for _, part := range strings.Split(envGlobalHostToGuestFolderMounts, ",") {
-			trimmed := strings.TrimSpace(part)
-			if trimmed != "" {
+		for _, part := range strings.Split(envGlobalMounts, ",") {
+			if trimmed := strings.TrimSpace(part); trimmed != "" {
 				entries = append(entries, trimmed)
 			}
 		}
-		config.GlobalHostToGuestFolderMounts = entries
+		cfg.GlobalHostToGuestFolderMounts = entries
 	}
 
-	envJobRetryAttempts := os.Getenv("ANKLET_JOB_RETRY_ATTEMPTS")
-	if envJobRetryAttempts != "" {
+	if envJobRetryAttempts := os.Getenv("ANKLET_JOB_RETRY_ATTEMPTS"); envJobRetryAttempts != "" {
 		attempts, err := strconv.Atoi(envJobRetryAttempts)
 		if err != nil {
 			return Config{}, err
 		}
-		// Apply to all plugins if set globally
-		for i := range config.Plugins {
-			config.Plugins[i].JobRetryAttempts = attempts
+		for i := range cfg.Plugins {
+			cfg.Plugins[i].JobRetryAttempts = attempts
 		}
 	}
 
-	for i := range config.Plugins {
-		pluginEnvPrefix := normalizePluginEnvPrefix(config.Plugins[i].Name)
+	for i := range cfg.Plugins {
+		pluginEnvPrefix := normalizePluginEnvPrefix(cfg.Plugins[i].Name)
 		if pluginEnvPrefix == "" {
 			continue
 		}
-		if err := applyPluginEnvOverrides(&config.Plugins[i], pluginEnvPrefix); err != nil {
+		if err := applyPluginEnvOverrides(&cfg.Plugins[i], pluginEnvPrefix); err != nil {
 			return Config{}, err
 		}
 	}
 
-	for i := range config.Plugins {
-		if config.Plugins[i].PrivateKey == "" && config.GlobalPrivateKey != "" {
-			config.Plugins[i].PrivateKey = config.GlobalPrivateKey
+	for i := range cfg.Plugins {
+		if cfg.Plugins[i].PrivateKey == "" && cfg.GlobalPrivateKey != "" {
+			cfg.Plugins[i].PrivateKey = cfg.GlobalPrivateKey
 		}
-		if config.Plugins[i].Token == "" && config.GlobalToken != "" {
-			config.Plugins[i].Token = config.GlobalToken
+		if cfg.Plugins[i].Token == "" && cfg.GlobalToken != "" {
+			cfg.Plugins[i].Token = cfg.GlobalToken
 		}
 	}
 
-	// pidFileDir := os.Getenv("ANKLET_PID_FILE_DIR")
-	// if pidFileDir != "" {
-	// 	config.PidFileDir = pidFileDir
-	// }
-	// logFileDir := os.Getenv("ANKLET_LOG_FILE_DIR")
-	// if logFileDir != "" {
-	// 	config.Log.FileDir = logFileDir
-	// }
-	return config, nil
+	return cfg, nil
 }
 
 func normalizePluginEnvPrefix(name string) string {
@@ -564,75 +695,69 @@ type PluginGlobal struct {
 	Paused             atomic.Bool
 }
 
-// TemplateUsage tracks usage statistics for a template/tag combination
+// TemplateUsage tracks usage statistics for a template/tag combination.
 type TemplateUsage struct {
 	UUID         string    `json:"uuid"`
 	Name         string    `json:"name"`
 	Tag          string    `json:"tag"`
-	ImageSize    uint64    `json:"image_size"` // Template actual disk usage
+	ImageSize    uint64    `json:"image_size"`
 	LastAccessed time.Time `json:"last_accessed"`
 	UsageCount   uint64    `json:"usage_count"`
-	InUse        bool      `json:"in_use"`  // Currently being used by a running VM
-	Pulling      bool      `json:"pulling"` // Currently being pulled
+	InUse        bool      `json:"in_use"`
+	InUseCount   int       `json:"in_use_count"`
+	Pulling      bool      `json:"pulling"`
 }
 
-// TemplateTracker manages template usage across all plugins
+// TemplateTracker manages template usage across all plugins.
 type TemplateTracker struct {
 	Templates map[string]*TemplateUsage // key: templateUUID
 	Mutex     *sync.RWMutex
 }
 
 type Globals struct {
-	RunPluginsOnce bool
-	// block the second plugin until the first plugin is done
-	ReturnAllToMainQueue atomic.Bool
-	// GitHubAPIRateLimitResetUnix is the Unix time when the primary GitHub API rate limit resets (0 if not paused).
-	GitHubAPIRateLimitResetUnix atomic.Int64
-	// LastGitHubAPIRateLimitNoticeUnix throttles shared rate-limit log lines across handler plugins.
+	RunPluginsOnce                   bool
+	ReturnAllToMainQueue             atomic.Bool
+	GitHubAPIRateLimitResetUnix      atomic.Int64
 	LastGitHubAPIRateLimitNoticeUnix atomic.Int64
-	PluginsPath          string
-	DebugEnabled         bool
-	// block other plugins from running until the currently running
-	// plugin is at a place that's safe to let other run
-	HostCPUCount     int
-	HostMemoryBytes  uint64
-	QueueTargetIndex *int64
-	// We want each plugin to run at least once so that any VMs/jobs that were orphaned
-	// on this host get a chance to be cleaned or continue where they left off
-	Plugins         map[string]map[string]*PluginGlobal
-	TemplateTracker *TemplateTracker // Track template usage for LRU cleanup
+	PluginsPath                      string
+	DebugEnabled                     bool
+	HostCPUCount                     int
+	HostMemoryBytes                  uint64
+	QueueTargetIndex                 atomic.Int64
+	Plugins                          map[string]map[string]*PluginGlobal
+	TemplateTracker                  *TemplateTracker
 }
 
-// GetPluginRunCount returns the current value of the shared plugin run counter
+// GetPluginRunCount returns the current value of the shared plugin run counter.
 func (g *Globals) GetPluginRunCount(pluginName string) (uint64, error) {
 	for _, nameOfPlugin := range g.Plugins {
-		if _, ok := nameOfPlugin[pluginName]; ok {
-			return nameOfPlugin[pluginName].PluginRunCount.Load(), nil
+		if pg, ok := nameOfPlugin[pluginName]; ok {
+			return pg.PluginRunCount.Load(), nil
 		}
 	}
 	return 0, fmt.Errorf("GetPluginRunCount: plugin not found")
 }
 
-// IncrementPluginRunCount increments the shared plugin run counter and returns the new value
+// IncrementPluginRunCount increments the shared plugin run counter.
 func (g *Globals) IncrementPluginRunCount(pluginName string) {
 	for _, nameOfPlugin := range g.Plugins {
-		if _, ok := nameOfPlugin[pluginName]; ok {
-			nameOfPlugin[pluginName].PluginRunCount.Add(1)
+		if pg, ok := nameOfPlugin[pluginName]; ok {
+			pg.PluginRunCount.Add(1)
 		}
 	}
 }
 
 func GetWorkerGlobalsFromContext(ctx context.Context) (*Globals, error) {
 	globals, ok := ctx.Value(ContextKey("globals")).(*Globals)
-	if !ok {
+	if !ok || globals == nil {
 		return nil, fmt.Errorf("GetGlobalsFromContext failed")
 	}
 	return globals, nil
 }
 
 func (g *Globals) GetPausedPlugin() string {
-	for pluginName, plugin := range g.Plugins {
-		for _, pluginSettings := range plugin {
+	for pluginName, pluginGroup := range g.Plugins {
+		for _, pluginSettings := range pluginGroup {
 			if pluginSettings.Paused.Load() {
 				return pluginName
 			}
@@ -641,21 +766,31 @@ func (g *Globals) GetPausedPlugin() string {
 	return ""
 }
 
+func (g *Globals) GetQueueTargetIndex() int64 {
+	return g.QueueTargetIndex.Load()
+}
+
 func (g *Globals) IncrementQueueTargetIndex() {
-	*g.QueueTargetIndex++
+	g.QueueTargetIndex.Add(1)
 }
 
 func (g *Globals) DecrementQueueTargetIndex() {
-	if *g.QueueTargetIndex > 0 {
-		*g.QueueTargetIndex--
+	for {
+		cur := g.QueueTargetIndex.Load()
+		if cur <= 0 {
+			return
+		}
+		if g.QueueTargetIndex.CompareAndSwap(cur, cur-1) {
+			return
+		}
 	}
 }
 
 func (g *Globals) ResetQueueTargetIndex() {
-	*g.QueueTargetIndex = 0
+	g.QueueTargetIndex.Store(0)
 }
 
-// NewTemplateTracker creates a new template tracker
+// NewTemplateTracker creates a new template tracker.
 func NewTemplateTracker() *TemplateTracker {
 	return &TemplateTracker{
 		Templates: make(map[string]*TemplateUsage),
@@ -663,12 +798,80 @@ func NewTemplateTracker() *TemplateTracker {
 	}
 }
 
-// GetTemplateKey returns the key for a template UUID
+// LogValue safely snapshots templates under RLock so logging never races with writers.
+func (tt *TemplateTracker) LogValue() slog.Value {
+	if tt == nil {
+		return slog.AnyValue(nil)
+	}
+	return slog.AnyValue(tt.Snapshot())
+}
+
+// Len returns the number of tracked templates safely under RLock.
+func (tt *TemplateTracker) Len() int {
+	if tt == nil {
+		return 0
+	}
+	tt.Mutex.RLock()
+	defer tt.Mutex.RUnlock()
+	return len(tt.Templates)
+}
+
+// Snapshot returns a deep value copy of tracked templates safe for concurrent reads/logging.
+func (tt *TemplateTracker) Snapshot() map[string]TemplateUsage {
+	if tt == nil {
+		return nil
+	}
+	tt.Mutex.RLock()
+	defer tt.Mutex.RUnlock()
+	out := make(map[string]TemplateUsage, len(tt.Templates))
+	for k, v := range tt.Templates {
+		if v != nil {
+			out[k] = *v
+		}
+	}
+	return out
+}
+
+// GetTemplateKey returns the key for a template UUID.
 func (tt *TemplateTracker) GetTemplateKey(templateUUID string) string {
 	return templateUUID
 }
 
-// UpdateTemplateUsage updates the usage statistics for a template
+// RegisterDiscoveredTemplate adds or refreshes a locally discovered template under lock.
+func (tt *TemplateTracker) RegisterDiscoveredTemplate(
+	templateUUID, templateName, templateTag string,
+	sizeBytes uint64,
+	lastAccessed time.Time,
+) {
+	tt.Mutex.Lock()
+	defer tt.Mutex.Unlock()
+
+	key := tt.GetTemplateKey(templateUUID)
+	if existing, ok := tt.Templates[key]; ok {
+		existing.Name = templateName
+		existing.Tag = templateTag
+		if sizeBytes > 0 {
+			existing.ImageSize = sizeBytes
+		}
+		if !lastAccessed.IsZero() {
+			existing.LastAccessed = lastAccessed
+		}
+		return
+	}
+	tt.Templates[key] = &TemplateUsage{
+		UUID:         templateUUID,
+		Name:         templateName,
+		Tag:          templateTag,
+		ImageSize:    sizeBytes,
+		LastAccessed: lastAccessed,
+		UsageCount:   0,
+		InUse:        false,
+		InUseCount:   0,
+		Pulling:      false,
+	}
+}
+
+// UpdateTemplateUsage updates the usage statistics for a template.
 func (tt *TemplateTracker) UpdateTemplateUsage(
 	templateUUID, templateName, templateTag string,
 	sizeBytes uint64,
@@ -680,6 +883,12 @@ func (tt *TemplateTracker) UpdateTemplateUsage(
 	key := tt.GetTemplateKey(templateUUID)
 	if usage, exists := tt.Templates[key]; exists {
 		usage.UUID = templateUUID
+		if templateName != "" {
+			usage.Name = templateName
+		}
+		if templateTag != "" {
+			usage.Tag = templateTag
+		}
 		usage.LastAccessed = lastAccessed
 		usage.UsageCount++
 		if sizeBytes > 0 {
@@ -694,23 +903,41 @@ func (tt *TemplateTracker) UpdateTemplateUsage(
 			LastAccessed: lastAccessed,
 			UsageCount:   1,
 			InUse:        false,
+			InUseCount:   0,
 			Pulling:      false,
 		}
 	}
 }
 
-// SetTemplateInUse marks a template as in use or not in use
+// SetTemplateInUse reference-counts active users of a template so concurrent plugins
+// do not evict a template while another plugin is cloning or using it.
 func (tt *TemplateTracker) SetTemplateInUse(templateUUID, templateName, templateTag string, inUse bool) {
 	tt.Mutex.Lock()
 	defer tt.Mutex.Unlock()
 
 	key := tt.GetTemplateKey(templateUUID)
-	if usage, exists := tt.Templates[key]; exists {
-		usage.InUse = inUse
+	usage, exists := tt.Templates[key]
+	if !exists {
+		if !inUse {
+			return
+		}
+		usage = &TemplateUsage{
+			UUID:         templateUUID,
+			Name:         templateName,
+			Tag:          templateTag,
+			LastAccessed: time.Now(),
+		}
+		tt.Templates[key] = usage
 	}
+	if inUse {
+		usage.InUseCount++
+	} else if usage.InUseCount > 0 {
+		usage.InUseCount--
+	}
+	usage.InUse = usage.InUseCount > 0
 }
 
-// SetTemplatePulling marks a template as being pulled or not
+// SetTemplatePulling marks a template as being pulled or not.
 func (tt *TemplateTracker) SetTemplatePulling(
 	templateUUID, templateName, templateTag string,
 	pulling bool,
@@ -723,84 +950,58 @@ func (tt *TemplateTracker) SetTemplatePulling(
 	if usage, exists := tt.Templates[key]; exists {
 		usage.Pulling = pulling
 	} else if pulling {
-		// Create entry for template being pulled
 		tt.Templates[key] = &TemplateUsage{
 			UUID:         templateUUID,
 			Name:         templateName,
 			Tag:          templateTag,
-			ImageSize:    0, // Will be updated after pull
+			ImageSize:    0,
 			LastAccessed: lastAccessed,
 			UsageCount:   0,
 			InUse:        false,
+			InUseCount:   0,
 			Pulling:      true,
 		}
 	}
 }
 
-// GetLeastRecentlyUsedTemplates returns templates sorted by usage (LRU first)
+// GetLeastRecentlyUsedTemplates returns value copies of evictable templates sorted LRU first.
 func (tt *TemplateTracker) GetLeastRecentlyUsedTemplates() []*TemplateUsage {
 	tt.Mutex.RLock()
 	defer tt.Mutex.RUnlock()
 
-	var templates []*TemplateUsage
+	templates := make([]*TemplateUsage, 0, len(tt.Templates))
 	for _, usage := range tt.Templates {
-		// Don't include templates that are currently in use or being pulled
-		if !usage.InUse && !usage.Pulling {
-			templates = append(templates, usage)
+		if !usage.InUse && usage.InUseCount == 0 && !usage.Pulling {
+			copied := *usage
+			templates = append(templates, &copied)
 		}
 	}
 
-	// Sort by usage count (ascending), then by last used time (ascending)
-	// This prioritizes templates that are used less frequently and haven't been used recently
-	for i := 0; i < len(templates)-1; i++ {
-		for j := i + 1; j < len(templates); j++ {
-			// First sort by usage count
-			if templates[i].UsageCount > templates[j].UsageCount {
-				templates[i], templates[j] = templates[j], templates[i]
-			} else if templates[i].UsageCount == templates[j].UsageCount {
-				// If usage count is the same, sort by last used time
-				if templates[i].LastAccessed.After(templates[j].LastAccessed) {
-					templates[i], templates[j] = templates[j], templates[i]
-				}
-			}
+	slices.SortFunc(templates, func(a, b *TemplateUsage) int {
+		if c := cmp.Compare(a.UsageCount, b.UsageCount); c != 0 {
+			return c
 		}
-	}
+		if a.LastAccessed.Before(b.LastAccessed) {
+			return -1
+		}
+		if a.LastAccessed.After(b.LastAccessed) {
+			return 1
+		}
+		return cmp.Compare(a.UUID, b.UUID)
+	})
 
 	return templates
 }
 
-// GetTotalTemplateSize returns the total size of all templates
-func (tt *TemplateTracker) GetTotalTemplateSize() uint64 {
-	tt.Mutex.RLock()
-	defer tt.Mutex.RUnlock()
-
-	var totalSize uint64
-	for _, usage := range tt.Templates {
-		totalSize += usage.ImageSize
-	}
-	return totalSize
-}
-
-// RemoveTemplate removes a template from tracking
+// RemoveTemplate removes a template from tracking.
 func (tt *TemplateTracker) RemoveTemplate(templateUUID string) {
 	tt.Mutex.Lock()
 	defer tt.Mutex.Unlock()
 
-	key := tt.GetTemplateKey(templateUUID)
-	delete(tt.Templates, key)
+	delete(tt.Templates, tt.GetTemplateKey(templateUUID))
 }
 
-// GetTemplateUsage returns the usage info for a specific template
-func (tt *TemplateTracker) GetTemplateUsage(templateUUID string) (*TemplateUsage, bool) {
-	tt.Mutex.RLock()
-	defer tt.Mutex.RUnlock()
-
-	key := tt.GetTemplateKey(templateUUID)
-	usage, exists := tt.Templates[key]
-	return usage, exists
-}
-
-// HasPullingTemplates returns true if any templates are currently being pulled
+// HasPullingTemplates returns true if any templates are currently being pulled.
 func (tt *TemplateTracker) HasPullingTemplates() bool {
 	tt.Mutex.RLock()
 	defer tt.Mutex.RUnlock()
@@ -813,22 +1014,21 @@ func (tt *TemplateTracker) HasPullingTemplates() bool {
 	return false
 }
 
-// Contains checks if a template with the given UUID exists in the tracker
+// Contains checks if a template with the given UUID exists in the tracker.
 func (tt *TemplateTracker) Contains(templateUUID string) bool {
 	tt.Mutex.RLock()
 	defer tt.Mutex.RUnlock()
 
-	key := tt.GetTemplateKey(templateUUID)
-	_, exists := tt.Templates[key]
+	_, exists := tt.Templates[tt.GetTemplateKey(templateUUID)]
 	return exists
 }
 
 func GetLoadedConfigFromContext(ctx context.Context) (*Config, error) {
-	config, ok := ctx.Value(ContextKey("config")).(*Config)
-	if !ok {
+	cfg, ok := ctx.Value(ContextKey("config")).(*Config)
+	if !ok || cfg == nil {
 		return nil, fmt.Errorf("GetLoadedConfigFromContext failed")
 	}
-	return config, nil
+	return cfg, nil
 }
 
 func GetConfigFileNameFromContext(ctx context.Context) (string, error) {
@@ -837,13 +1037,4 @@ func GetConfigFileNameFromContext(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("GetConfigFileNameFromContext failed")
 	}
 	return configFileName, nil
-}
-
-func FindIndexByName(slice []Plugin, name string) int {
-	for i, v := range slice {
-		if v.Name == name {
-			return i
-		}
-	}
-	return -1
 }

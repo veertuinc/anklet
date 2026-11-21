@@ -3,7 +3,7 @@ package github
 import (
 	"testing"
 
-	gogithub "github.com/google/go-github/v74/github"
+	gogithub "github.com/google/go-github/v75/github"
 )
 
 func TestFilterFailedOriginalDeliveries(t *testing.T) {
@@ -92,5 +92,16 @@ func TestCountCandidatesFittingBudget(t *testing.T) {
 	got = countCandidatesFittingBudget(actions, 1)
 	if got != 0 {
 		t.Errorf("countCandidatesFittingBudget(1) = %d, want 0", got)
+	}
+}
+
+func TestHookDeliverySafeHelpersHandleNilFields(t *testing.T) {
+	t.Parallel()
+	empty := &gogithub.HookDelivery{}
+	if hookAction(empty) != "" || hookGUID(empty) != "" || hookStatusCode(empty) != 0 || hookRedeliveryFlag(empty) {
+		t.Fatalf("unexpected non-zero values for empty HookDelivery")
+	}
+	if hookAction(nil) != "" || hookGUID(nil) != "" || hookStatusCode(nil) != 0 || hookRedeliveryFlag(nil) {
+		t.Fatalf("unexpected non-zero values for nil HookDelivery")
 	}
 }

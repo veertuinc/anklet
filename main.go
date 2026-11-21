@@ -18,8 +18,6 @@ import (
 	"syscall"
 	"time"
 
-	github_ratelimit "github.com/gofri/go-github-ratelimit/v2/github_ratelimit"
-	"github.com/gofri/go-github-ratelimit/v2/github_ratelimit/github_secondary_ratelimit"
 	"github.com/veertuinc/anklet/internal/anka"
 	"github.com/veertuinc/anklet/internal/config"
 	"github.com/veertuinc/anklet/internal/database"
@@ -27,51 +25,93 @@ import (
 	"github.com/veertuinc/anklet/internal/host"
 	"github.com/veertuinc/anklet/internal/logging"
 	"github.com/veertuinc/anklet/internal/metrics"
+	"github.com/veertuinc/anklet/internal/plugin"
 	"github.com/veertuinc/anklet/internal/run"
 )
 
 var (
-	version     = "dev"
-	runOnce     = "false"
-	versionFlag = flag.Bool("version", false, "Print the version")
-	configFlag  = flag.String("c", "", "Path to the config file (defaults to ~/.config/anklet/config.yml)")
-	// 	signalFlag  = flag.String("s", "", `Send signal to the daemon:
-	//   drain — graceful shutdown, will wait until all jobs finish before exiting
-	//   stop — best effort graceful shutdown, interrupting the job as soon as possible`)
-	// attachFlag      = flag.Bool("attach", false, "Attach to the anklet and don't background it (useful for containers)")
-	// stop            = make(chan struct{})
-	// done            = make(chan struct{})
+	version         = "dev"
+	runOnce         = "false"
+	versionFlag     = flag.Bool("version", false, "Print the version")
+	configFlag      = flag.String("c", "", "Path to the config file (defaults to ~/.config/anklet/config.yml)")
 	shutDownMessage = "anklet plugin shut down"
 )
-
-// func termHandler(ctx context.Context, logger *slog.Logger) daemon.SignalHandlerFunc {
-// 	return func(sig os.Signal) error {
-// 		logger.WarnContext(ctx, "terminating anklet, please do not interrupt...")
-// 		stop <- struct{}{}
-// 		if sig == syscall.SIGQUIT {
-// 			<-done
-// 		}
-// 		return daemon.ErrStop
-// 	}
-// }
 
 // steadyStatus returns the status a plugin should report between runs:
 // "draining" for handler plugins while the drain file is present, otherwise
 // "idle". Receiver plugins are never marked draining (they only queue jobs).
-func steadyStatus(plugin config.Plugin) string {
-	if !strings.Contains(plugin.Plugin, "_receiver") && drain.IsDraining() {
+func steadyStatus(p config.Plugin) string {
+	if !run.IsReceiverType(p.Plugin) && !p.IsReceiver() && drain.IsDraining() {
 		return "draining"
 	}
 	return "idle"
 }
 
-func main() {
+// computeSoloReceiver reports whether every configured plugin is a receiver.
+func computeSoloReceiver(plugins []config.Plugin) bool {
+	if len(plugins) == 0 {
+		return false
+	}
+	for _, p := range plugins {
+		if !run.IsReceiverType(p.Plugin) && !p.IsReceiver() {
+			return false
+		}
+	}
+	return true
+}
 
+// openMetricsListener binds and returns a live TCP listener for the metrics server.
+// When configuredPort is empty, ports starting at 8080 up to 65535 are probed.
+func openMetricsListener(bindAddress, configuredPort string) (net.Listener, string, error) {
+	if configuredPort != "" {
+		ln, err := net.Listen("tcp", net.JoinHostPort(bindAddress, configuredPort))
+		if err != nil {
+			return nil, configuredPort, err
+		}
+		return ln, configuredPort, nil
+	}
+	for port := 8080; port <= 65535; port++ {
+		portStr := strconv.Itoa(port)
+		ln, err := net.Listen("tcp", net.JoinHostPort(bindAddress, portStr))
+		if err == nil {
+			return ln, portStr, nil
+		}
+	}
+	return nil, "", fmt.Errorf("no available TCP port found in range 8080-65535")
+}
+
+// applyPluginDefaults sets default configuration values across loaded plugins.
+func applyPluginDefaults(cfg *config.Config) {
+	for index := range cfg.Plugins {
+		p := &cfg.Plugins[index]
+		if run.IsReceiverType(p.Plugin) || p.IsReceiver() {
+			if p.RedeliverHours == 0 {
+				p.RedeliverHours = 24
+			}
+			if cfg.GlobalReceiverSecret != "" {
+				p.Secret = cfg.GlobalReceiverSecret
+			}
+		} else {
+			if p.TemplateDiskBuffer == 0 {
+				if cfg.GlobalTemplateDiskBuffer > 0 {
+					p.TemplateDiskBuffer = cfg.GlobalTemplateDiskBuffer
+				} else {
+					p.TemplateDiskBuffer = 10.0
+				}
+			}
+			if cfg.GlobalSkipCPUAndMemoryResourceChecks {
+				p.SkipCPUAndMemoryResourceChecks = true
+			}
+		}
+	}
+}
+
+func main() {
 	parentLogger := logging.New()
 	parentCtx := context.Background()
 
 	if version == "" {
-		version = "dev" // Default version if not set by go build
+		version = "dev"
 	}
 
 	flag.Parse()
@@ -79,8 +119,6 @@ func main() {
 		fmt.Println(version)
 		os.Exit(0)
 	}
-	// daemon.AddCommand(daemon.StringFlag(signalFlag, "drain"), syscall.SIGQUIT, termHandler(parentCtx, logger))
-	// daemon.AddCommand(daemon.StringFlag(signalFlag, "stop"), syscall.SIGTERM, termHandler(parentCtx, logger))
 
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
@@ -92,6 +130,7 @@ func main() {
 	var configFileName string
 	if *configFlag != "" {
 		configPath = *configFlag
+		configFileName = filepath.Base(*configFlag)
 	} else {
 		envConfigFileName := os.Getenv("ANKLET_CONFIG_FILE_NAME")
 		if envConfigFileName != "" {
@@ -103,7 +142,6 @@ func main() {
 	}
 	parentCtx = context.WithValue(parentCtx, config.ContextKey("configFileName"), configFileName)
 
-	// obtain config
 	loadedConfig, err := config.LoadConfig(configPath)
 	if err != nil {
 		parentLogger.ErrorContext(parentCtx, "unable to load config.yml (is it in the work_dir, or are you using an absolute path?)", "error", err)
@@ -114,7 +152,15 @@ func main() {
 		parentLogger.ErrorContext(parentCtx, "unable to load config.yml from environment variables", "error", err)
 		os.Exit(1)
 	}
+
+	applyPluginDefaults(&loadedConfig)
+	// Config implements slog.LogValuer so secrets are automatically redacted.
 	parentLogger.InfoContext(parentCtx, "loaded config", slog.Any("config", loadedConfig))
+
+	if err := config.ValidatePlugins(loadedConfig.Plugins); err != nil {
+		parentLogger.ErrorContext(parentCtx, err.Error())
+		os.Exit(1)
+	}
 
 	parentCtx = logging.AppendCtx(parentCtx, slog.String("version", version))
 
@@ -132,76 +178,20 @@ func main() {
 			parentLogger.ErrorContext(parentCtx, "log directory does not exist", "directory", loadedConfig.Log.FileDir)
 			os.Exit(1)
 		}
-		// logger, fileLocation, err = logging.UpdateLoggerToFile(logger, logFileDir, suffix)
-		// if err != nil {
-		// 	fmt.Printf("{\"time\":\"%s\",\"level\":\"ERROR\",\"msg\":\"%s\"}\n", time.Now().Format(time.RFC3339), err)
-		// 	os.Exit(1)
-		// }
-		// logger.InfoContext(parentCtx, "writing logs to file", slog.String("fileLocation", fileLocation))
 	}
 
-	// must come after the log config is handled
 	parentCtx = context.WithValue(parentCtx, config.ContextKey("logger"), parentLogger)
 
-	// if loadedConfig.PidFileDir == "" {
-	// 	loadedConfig.PidFileDir = "./"
-	// }
 	if loadedConfig.WorkDir == "" {
 		loadedConfig.WorkDir = "./"
 	}
 
-	// Handle setting defaults
-	for index, plugin := range loadedConfig.Plugins {
-		if strings.Contains(plugin.Plugin, "_receiver") {
-			if plugin.RedeliverHours == 0 {
-				loadedConfig.Plugins[index].RedeliverHours = 24
-			}
-			if loadedConfig.GlobalReceiverSecret != "" {
-				loadedConfig.Plugins[index].Secret = loadedConfig.GlobalReceiverSecret
-			}
-		} else { // handlers and others
-			// Set default TemplateDiskBuffer if not specified
-			if plugin.TemplateDiskBuffer == 0 {
-				loadedConfig.Plugins[index].TemplateDiskBuffer = 10.0
-			}
-			if loadedConfig.GlobalSkipCPUAndMemoryResourceChecks {
-				loadedConfig.Plugins[index].SkipCPUAndMemoryResourceChecks = true
-			}
-		}
-	}
-
-	parentLogger.DebugContext(parentCtx, "loaded config", slog.Any("config", loadedConfig))
 	parentCtx = context.WithValue(parentCtx, config.ContextKey("config"), &loadedConfig)
 
-	// daemonContext := &daemon.Context{
-	// 	PidFileName: loadedConfig.PidFileDir + "anklet" + suffix + ".pid",
-	// 	PidFilePerm: 0644,
-	// 	LogFileName: loadedConfig.Log.FileDir + "anklet" + suffix + ".log",
-	// 	LogFilePerm: 0640,
-	// 	WorkDir:     loadedConfig.WorkDir,
-	// 	Umask:       027,
-	// 	Args:        []string{"anklet", "-c", configPath},
-	// }
-
-	// if len(daemon.ActiveFlags()) > 0 {
-	// 	d, err := daemonContext.Search()
-	// 	if err != nil {
-	// 		log.Fatalf("Unable send signal to the daemon: %s", err.Error())
-	// 	}
-	// 	err = daemon.SendCommands(d)
-	// 	if err != nil {
-	// 		log.Fatalln(err.Error())
-	// 	}
-	// 	return
-	// }
-
-	var pluginsPath string
-	if loadedConfig.PluginsPath != "" {
-		pluginsPath = loadedConfig.PluginsPath
-	} else {
+	pluginsPath := loadedConfig.PluginsPath
+	if pluginsPath == "" {
 		pluginsPath = filepath.Join(homeDir, ".config", "anklet", "plugins")
 	}
-
 	parentLogger.InfoContext(parentCtx, "plugins path", slog.String("pluginsPath", pluginsPath))
 
 	hostCPUCount, err := host.GetHostCPUCount(parentCtx)
@@ -219,82 +209,38 @@ func main() {
 		slog.Uint64("hostMemoryBytes", hostMemoryBytes),
 	)
 
+	pluginsMap := make(map[string]map[string]*config.PluginGlobal)
+	for _, p := range loadedConfig.Plugins {
+		if pluginsMap[p.Plugin] == nil {
+			pluginsMap[p.Plugin] = make(map[string]*config.PluginGlobal)
+		}
+		pluginsMap[p.Plugin][p.Name] = &config.PluginGlobal{}
+	}
+
 	parentCtx = context.WithValue(parentCtx, config.ContextKey("globals"), &config.Globals{
-		RunPluginsOnce:       runOnce == "true",
-		ReturnAllToMainQueue: atomic.Bool{},
-		PluginsPath:          pluginsPath,
-		DebugEnabled:         logging.IsDebugEnabled(),
-		HostCPUCount:         hostCPUCount,
-		HostMemoryBytes:      hostMemoryBytes,
-		QueueTargetIndex:     new(int64),
-		TemplateTracker:      config.NewTemplateTracker(),
-		Plugins: func() map[string]map[string]*config.PluginGlobal {
-			plugins := make(map[string]map[string]*config.PluginGlobal)
-			for _, p := range loadedConfig.Plugins {
-				if plugins[p.Plugin] == nil {
-					plugins[p.Plugin] = make(map[string]*config.PluginGlobal)
-				}
-				plugins[p.Plugin][p.Name] = &config.PluginGlobal{
-					PluginRunCount:     atomic.Uint64{},
-					Preparing:          atomic.Bool{}, // false
-					FinishedInitialRun: atomic.Bool{}, // false
-					Paused:             atomic.Bool{}, // true
-				}
-			}
-			return plugins
-		}(),
+		RunPluginsOnce:  runOnce == "true",
+		PluginsPath:     pluginsPath,
+		DebugEnabled:    logging.IsDebugEnabled(),
+		HostCPUCount:    hostCPUCount,
+		HostMemoryBytes: hostMemoryBytes,
+		TemplateTracker: config.NewTemplateTracker(),
+		Plugins:         pluginsMap,
 	})
 
 	httpTransport := http.DefaultTransport
 	parentCtx = context.WithValue(parentCtx, config.ContextKey("httpTransport"), httpTransport)
 
-	githubPluginExists := false
-	for _, plugin := range loadedConfig.Plugins {
-		if plugin.Plugin == "github" || plugin.Plugin == "github_receiver" {
-			githubPluginExists = true
-		}
-	}
-	if githubPluginExists {
-		rateLimiter := github_ratelimit.NewClient(
-			httpTransport,
-			github_secondary_ratelimit.WithLimitDetectedCallback(func(ctx *github_secondary_ratelimit.CallbackContext) {
-				parentLogger.WarnContext(parentCtx, "GitHub secondary rate limit detected, sleeping until reset",
-					slog.Time("resetTime", *ctx.ResetTime),
-					slog.Duration("totalSleepTime", *ctx.TotalSleepTime),
-				)
-			}),
-		)
-		parentCtx = context.WithValue(parentCtx, config.ContextKey("rateLimiter"), rateLimiter)
-	}
-
-	// if !*attachFlag {
-	// 	d, err := daemonContext.Reborn()
-	// 	if err != nil {
-	// 		log.Fatalln(err)
-	// 	}
-	// 	if d != nil {
-	// 		return
-	// 	}
-	// 	defer daemonContext.Release()
-	// }
-
-	// Capture ctrl+c and handle sending cancellation
-	sigChan := make(chan os.Signal, 1)
+	sigChan := make(chan os.Signal, 2)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
 
-	//go
-	worker(parentCtx, parentLogger, loadedConfig, sigChan)
-
-	// err = daemon.ServeSignals()
-	// if err != nil {
-	// 	log.Printf("Error: %s", err.Error())
-	// }
+	worker(parentCtx, parentLogger, loadedConfig, configFileName, sigChan)
 }
 
 func worker(
 	parentCtx context.Context,
 	parentLogger *slog.Logger,
 	loadedConfig config.Config,
+	configFileName string,
 	sigChan chan os.Signal,
 ) {
 	workerGlobals, err := config.GetWorkerGlobalsFromContext(parentCtx)
@@ -302,514 +248,371 @@ func worker(
 		parentLogger.ErrorContext(parentCtx, "unable to get globals from context", "error", err)
 		os.Exit(1)
 	}
-	// Set each plugin's state
 	for _, pluginGroup := range workerGlobals.Plugins {
 		for _, pluginGlobal := range pluginGroup {
-			// paused by default
 			pluginGlobal.Paused.Store(true)
 		}
 	}
-	toRunOnce := workerGlobals.RunPluginsOnce
+
+	var toRunOnce atomic.Bool
+	toRunOnce.Store(workerGlobals.RunPluginsOnce)
 	workerCtx, workerCancel := context.WithCancel(parentCtx)
 
 	defer func() {
-		time.Sleep(time.Second) // prevents exiting before the logger has a chance to write the final log entry (from panics)
+		workerCancel()
+		time.Sleep(time.Second)
 		parentLogger.WarnContext(parentCtx, "anklet (and all plugins) shut down")
-		os.Exit(0)
 	}()
-	suffix := parentCtx.Value(config.ContextKey("suffix")).(string)
+
+	suffix, _ := parentCtx.Value(config.ContextKey("suffix")).(string)
 	parentLogger.InfoContext(workerCtx, "starting anklet"+suffix)
-	var wg sync.WaitGroup
+
 	go func() {
 		defer signal.Stop(sigChan)
-		defer close(sigChan)
 		var sigCount int
 		for sig := range sigChan {
 			switch sig {
-			case syscall.SIGQUIT: // doesn't work for receivers since they don't loop
+			case syscall.SIGQUIT:
 				parentLogger.WarnContext(workerCtx, "graceful shutdown, waiting for jobs to finish...")
 				workerGlobals.ReturnAllToMainQueue.Store(true)
-				toRunOnce = true
-				// Don't call workerCancel() immediately - let plugins finish gracefully
-				// The plugins will detect ReturnAllToMainQueue and return jobs to main queue
+				toRunOnce.Store(true)
 			default:
 				sigCount++
 				if sigCount >= 2 {
 					parentLogger.WarnContext(workerCtx, "forceful shutdown after second interrupt... be sure to clean up any self-hosted runners and VMs!")
 					os.Exit(1)
 				}
-
 				if !loadedConfig.Metrics.Aggregator {
 					parentLogger.WarnContext(workerCtx, "best effort graceful shutdown, interrupting the job as soon as possible...")
 				}
-
 				workerGlobals.ReturnAllToMainQueue.Store(true)
 				workerCancel()
 			}
 		}
 	}()
 
-	// TODO: move this into a function/different file
-	// Setup Metrics Server and context
-	metricsPort := "8080"
-	if loadedConfig.Metrics.Port != "" {
-		metricsPort = loadedConfig.Metrics.Port
-	} else {
-		for {
-			ln, err := net.Listen("tcp", ":"+metricsPort)
-			if err == nil {
-				err = ln.Close()
-				if err != nil {
-					parentLogger.ErrorContext(workerCtx, "error closing metrics port", "port", metricsPort, "error", err)
-					os.Exit(1)
-				}
-				break
-			}
-			port, _ := strconv.Atoi(metricsPort)
-			port++
-			metricsPort = strconv.Itoa(port)
-		}
-	}
-	ln, err := net.Listen("tcp", ":"+metricsPort)
+	metricsLn, metricsPort, err := openMetricsListener(loadedConfig.Metrics.BindAddress, loadedConfig.Metrics.Port)
 	if err != nil {
-		parentLogger.ErrorContext(workerCtx, "metrics port already in use", "port", metricsPort, "error", err)
+		parentLogger.ErrorContext(workerCtx, "unable to bind metrics port", "port", loadedConfig.Metrics.Port, "error", err)
 		os.Exit(1)
 	}
-	err = ln.Close()
-	if err != nil {
-		parentLogger.ErrorContext(workerCtx, "error closing metrics port", "port", metricsPort, "error", err)
-		os.Exit(1)
-	}
-	metricsService := metrics.NewServer(metricsPort)
+	metricsService := metrics.NewServerWithAddress(loadedConfig.Metrics.BindAddress, metricsPort)
 	metricsDone := make(chan struct{})
+
 	if loadedConfig.Metrics.Aggregator {
-		var metricsServiceDatabaseURL = loadedConfig.GlobalDatabaseURL
-		var metricsServiceDatabasePort = loadedConfig.GlobalDatabasePort
-		var metricsServiceDatabaseUser = loadedConfig.GlobalDatabaseUser
-		var metricsServiceDatabasePassword = loadedConfig.GlobalDatabasePassword
-		var metricsServiceDatabaseDatabase = loadedConfig.GlobalDatabaseDatabase
-		if metricsServiceDatabaseURL == "" {
-			metricsServiceDatabaseURL = loadedConfig.Metrics.Database.URL
-		}
-		if metricsServiceDatabasePort == 0 {
-			metricsServiceDatabasePort = loadedConfig.Metrics.Database.Port
-		}
-		if metricsServiceDatabaseUser == "" {
-			metricsServiceDatabaseUser = loadedConfig.Metrics.Database.User
-		}
-		if metricsServiceDatabasePassword == "" {
-			metricsServiceDatabasePassword = loadedConfig.Metrics.Database.Password
-		}
-		if metricsServiceDatabaseDatabase == 0 {
-			metricsServiceDatabaseDatabase = loadedConfig.Metrics.Database.Database
-		}
-		databaseContainer, err := database.NewClient(workerCtx, config.Database{
-			URL:         metricsServiceDatabaseURL,
-			Port:        metricsServiceDatabasePort,
-			User:        metricsServiceDatabaseUser,
-			Password:    metricsServiceDatabasePassword,
-			Database:    metricsServiceDatabaseDatabase,
-			ClusterMode: loadedConfig.GlobalDatabaseClusterMode,
-			TLSEnabled:  loadedConfig.GlobalDatabaseTLSEnabled,
-			TLSInsecure: loadedConfig.GlobalDatabaseTLSInsecure,
-		})
+		dbCfg := config.ResolveDatabaseConfig(loadedConfig, loadedConfig.Metrics.Database)
+		databaseContainer, err := database.NewClient(workerCtx, dbCfg)
 		if err != nil {
+			_ = metricsLn.Close()
 			parentLogger.ErrorContext(workerCtx, "unable to access database", "error", err)
 			os.Exit(1)
 		}
 		workerCtx = context.WithValue(workerCtx, config.ContextKey("database"), databaseContainer)
-		go metricsService.StartAggregatorServer(workerCtx, parentLogger, false)
-		parentLogger.InfoContext(workerCtx, "metrics aggregator started on port "+metricsPort)
-		wg.Add(1)
-		defer wg.Done()
-		pluginCtx, pluginCancel := context.WithCancel(context.Background())
-		for {
-			select {
-			case <-workerCtx.Done():
-				pluginCancel()
-				// parentLogger.WarnContext(pluginCtx, shutDownMessage+" inside plugin loop (aggregator)")
-				return
-			default:
-				if workerCtx.Err() != nil || toRunOnce {
-					pluginCancel()
-					break
-				}
-				select {
-				case <-time.After(time.Duration(loadedConfig.Metrics.SleepInterval) * time.Second):
-				case <-pluginCtx.Done():
-					break
-				}
-			}
-		}
-	} else {
-		metricsData := &metrics.MetricsDataLock{}
-		workerCtx = context.WithValue(workerCtx, config.ContextKey("metrics"), metricsData)
-		parentLogger.InfoContext(workerCtx, "metrics server started on port "+metricsPort)
-		metrics.UpdateSystemMetrics(workerCtx, metricsData)
-
-		/////////////
-		// Plugins //
-		soloReceiver := false
-		for index, plugin := range loadedConfig.Plugins {
-			wg.Add(1)
-			// support starting the plugins in the order they're listed in the config one by one
-			if index != 0 {
-			waitLoop:
-				for {
-					select {
-					case <-workerCtx.Done():
-						return
-					default:
-						if workerGlobals.Plugins[loadedConfig.Plugins[index-1].Plugin][loadedConfig.Plugins[index-1].Name].FinishedInitialRun.Load() {
-							// parentLogger.DebugContext(workerCtx, "previous plugin finished initial run, continuing", "plugin.Name", plugin.Name, "plugin.Plugin", plugin.Plugin)
-							workerGlobals.Plugins[plugin.Plugin][plugin.Name].Paused.Store(false)
-							break waitLoop
-						}
-						// Check for shutdown signal before sleeping
-						if workerCtx.Err() != nil {
-							logging.Warn(workerCtx, "context canceled while waiting for previous plugin to finish initial run")
-							return
-						}
-						time.Sleep(time.Second * 5)
-					}
-				}
-			}
-			go func(plugin config.Plugin) {
-				defer wg.Done()
-				pluginCtx, pluginCancel := context.WithCancel(context.Background()) // we don't use workerCtx here as it causes Attrs to race condition and be incorrect
-
-				// Listen for workerCtx cancellation (SIGINT) and cancel pluginCtx
-				go func() {
-					<-workerCtx.Done()
-					pluginCancel()
-				}()
-
-				workerGlobals, err := config.GetWorkerGlobalsFromContext(workerCtx)
-				if err != nil {
-					parentLogger.ErrorContext(pluginCtx, "unable to get globals from context", "error", err)
-					pluginCancel()
-					workerCancel()
-					return
-				}
-
-				if plugin.Name == "" {
-					parentLogger.ErrorContext(pluginCtx, "name is required for plugins")
-					pluginCancel()
-					workerCancel()
-					return
-				}
-
-				if strings.Contains(plugin.Name, " ") {
-					parentLogger.ErrorContext(pluginCtx, "plugin name cannot contain spaces")
-					pluginCancel()
-					workerCancel()
-					return
-				}
-
-				// support plugin specific log files
-				var pluginLogger = parentLogger
-				if loadedConfig.Log.SplitByPlugin {
-					parentLogger.InfoContext(parentCtx, "writing "+plugin.Name+" logs to "+loadedConfig.Log.FileDir+"anklet"+"-"+plugin.Name+".log")
-					pluginLogger, _, err = logging.UpdateLoggerToFile(parentLogger, loadedConfig.Log.FileDir, "-"+plugin.Name)
-					if err != nil {
-						parentLogger.ErrorContext(pluginCtx, "unable to update logger to file", "error", err)
-						pluginCancel()
-						workerCancel()
-						return
-					}
-				}
-
-				// must come after the log config is handled
-				pluginCtx = context.WithValue(pluginCtx, config.ContextKey("logger"), pluginLogger)
-				pluginCtx = context.WithValue(pluginCtx, config.ContextKey("config"), workerCtx.Value(config.ContextKey("config")))
-				pluginCtx = context.WithValue(pluginCtx, config.ContextKey("globals"), workerCtx.Value(config.ContextKey("globals")))
-				pluginCtx = context.WithValue(pluginCtx, config.ContextKey("httpTransport"), workerCtx.Value(config.ContextKey("httpTransport")))
-				pluginCtx = context.WithValue(pluginCtx, config.ContextKey("configFileName"), workerCtx.Value(config.ContextKey("configFileName")))
-
-				// so logging with attributes works
-				pluginCtx = context.WithValue(pluginCtx, config.ContextKey("plugin"), plugin)
-
-				logging.Info(pluginCtx, "starting plugin")
-
-				switch plugin.GitHubScope() {
-				case config.GitHubScopeEnterprise:
-					logging.Info(pluginCtx, "enterprise set for plugin; using enterprise level plugin")
-				case config.GitHubScopeOrganization:
-					logging.Info(pluginCtx, "no repo set for plugin; assuming it's an organization level plugin")
-				}
-
-				if plugin.PrivateKey == "" && loadedConfig.GlobalPrivateKey != "" {
-					logging.Dev(pluginCtx, "using global private key")
-					plugin.PrivateKey = loadedConfig.GlobalPrivateKey
-				}
-				if plugin.Token == "" && loadedConfig.GlobalToken != "" {
-					logging.Dev(pluginCtx, "using global token")
-					plugin.Token = loadedConfig.GlobalToken
-				}
-
-				// keep this here or the changes to plugin don't get set in the pluginCtx
-				pluginCtx = context.WithValue(pluginCtx, config.ContextKey("plugin"), plugin)
-
-				if !strings.Contains(plugin.Plugin, "_receiver") {
-					logging.Dev(pluginCtx, "plugin is not a receiver; loading the anka CLI")
-					ankaCLI, err := anka.NewCLI(pluginCtx)
-					if err != nil {
-						logging.Error(pluginCtx, "unable to create anka cli", "error", err)
-						pluginCancel()
-						workerCancel()
-						return
-					}
-					pluginCtx = context.WithValue(pluginCtx, config.ContextKey("ankacli"), ankaCLI)
-					logging.Dev(pluginCtx, "loaded the anka CLI")
-
-					if config.AnyHostToGuestFolderMountsConfigured(loadedConfig) {
-						if runtime.GOARCH == "amd64" {
-							logging.Error(pluginCtx, "host-to-guest folder mounts are configured but Anka does not support this on Intel macOS hosts (Apple Silicon only); see Anka 3.9.0 release notes")
-							pluginCancel()
-							workerCancel()
-							return
-						}
-						if err := anka.ValidateAnkaVersionForHostToGuestFolderMounts(ankaCLI.Version); err != nil {
-							logging.Error(pluginCtx, "mounting host folders into the guest VM requires Anka >= 3.9.0", "error", err, "ankaVersion", ankaCLI.Version)
-							pluginCancel()
-							workerCancel()
-							return
-						}
-						if len(plugin.HostToGuestFolderMounts) > 0 {
-							logging.Info(pluginCtx, "plugin host-to-guest folder mounts configured", "mounts", plugin.HostToGuestFolderMounts)
-						}
-						if len(loadedConfig.GlobalHostToGuestFolderMounts) > 0 {
-							logging.Info(pluginCtx, "global host-to-guest folder mounts configured", "mounts", loadedConfig.GlobalHostToGuestFolderMounts)
-						}
-					}
-
-					// Discover and populate existing templates in the TemplateTracker
-					// This only needs to be done once per system, so we check if templates are already populated
-					if len(workerGlobals.TemplateTracker.Templates) == 0 {
-						logging.Dev(pluginCtx, "discovering existing templates on system")
-						err = ankaCLI.DiscoverAndPopulateExistingTemplates(pluginCtx, workerGlobals.TemplateTracker)
-						if err != nil {
-							logging.Warn(pluginCtx, "failed to discover existing templates", "error", err)
-							// Don't fail the plugin startup for this, just log the warning
-						}
-					}
-					logging.Debug(pluginCtx, "populated existing templates in TemplateTracker", "templates", workerGlobals.TemplateTracker.Templates)
-				}
-
-				var databaseURL = loadedConfig.GlobalDatabaseURL
-				var databasePort = loadedConfig.GlobalDatabasePort
-				var databaseUser = loadedConfig.GlobalDatabaseUser
-				var databasePassword = loadedConfig.GlobalDatabasePassword
-				var databaseDatabase = loadedConfig.GlobalDatabaseDatabase
-
-				if databaseURL != "" || plugin.Database.URL != "" {
-					if databaseURL == "" {
-						databaseURL = plugin.Database.URL
-					}
-					if databasePort == 0 {
-						databasePort = plugin.Database.Port
-					}
-					if databaseUser == "" {
-						databaseUser = plugin.Database.User
-					}
-					if databasePassword == "" {
-						databasePassword = plugin.Database.Password
-					}
-					if databaseDatabase == 0 {
-						databaseDatabase = plugin.Database.Database
-					}
-					logging.Dev(pluginCtx, "connecting to database")
-					// Create database client with background context so it remains usable during shutdown
-					// even when pluginCtx is canceled. Operations will still use their own contexts for cancellation.
-					dbCtx := context.WithValue(context.Background(), config.ContextKey("logger"), pluginLogger)
-					databaseClient, err := database.NewClient(dbCtx, config.Database{
-						URL:         databaseURL,
-						Port:        databasePort,
-						User:        databaseUser,
-						Password:    databasePassword,
-						Database:    databaseDatabase,
-						ClusterMode: loadedConfig.GlobalDatabaseClusterMode,
-						TLSEnabled:  loadedConfig.GlobalDatabaseTLSEnabled,
-						TLSInsecure: loadedConfig.GlobalDatabaseTLSInsecure,
-					})
-					if err != nil {
-						logging.Error(pluginCtx, "unable to access database", "error", err)
-						pluginCancel()
-						workerCancel()
-						return
-					}
-					pluginCtx = context.WithValue(pluginCtx, config.ContextKey("database"), databaseClient)
-					logging.Dev(pluginCtx, "connected to database")
-					// cleanup metrics data when the plugin is stopped (otherwise it's orphaned in the aggregator)
-					if index == 0 {
-						// Capture values needed for cleanup
-						capturedOwner := plugin.MetricsOwner()
-						capturedName := plugin.Name
-						capturedLogger := pluginLogger
-						capturedDatabase := databaseClient
-						defer func() {
-							// Create a fresh context for metrics cleanup WITHOUT a deadline
-							// Database client was created with background context so it remains usable
-							metricsCleanupCtx := context.Background()
-							metricsCleanupCtx = context.WithValue(metricsCleanupCtx, config.ContextKey("logger"), capturedLogger)
-
-							// Create a modified database client with 0 retries for fast-fail during cleanup
-							cleanupDb := *capturedDatabase
-							cleanupDb.MaxRetries = 0 // No retries during cleanup
-							metricsCleanupCtx = context.WithValue(metricsCleanupCtx, config.ContextKey("database"), &cleanupDb)
-
-							metrics.Cleanup(metricsCleanupCtx, capturedOwner, capturedName)
-						}()
-					}
-				}
-
-				// Metrics for the plugin
-				err = metricsData.AddPlugin(metrics.Plugin{
-					PluginBase: &metrics.PluginBase{
-						Name:        plugin.Name,
-						PluginName:  plugin.Plugin,
-						RepoName:    plugin.Repo,
-						OwnerName:   plugin.MetricsOwner(),
-						Status:      "idle",
-						StatusSince: time.Now(),
-					},
-				})
-				if err != nil {
-					parentLogger.ErrorContext(pluginCtx, "error adding plugin to metrics", "error", err)
-					workerCancel()
-					pluginCancel()
-					return
-				}
-				// the key is the first plugin in the list's name
-				// The goRoutine inside shouild continue to run so only run this once
-				if index == 0 {
-					metrics.ExportMetricsToDB(workerCtx, pluginCtx, loadedConfig.Plugins[0].MetricsKeyEnding())
-				}
-
-				for {
-					select {
-					case <-pluginCtx.Done():
-						err = metricsData.SetStatus(pluginCtx, "stopped")
-						if err != nil {
-							logging.Error(pluginCtx, "error setting plugin status", "error", err)
-						}
-						logging.Warn(pluginCtx, shutDownMessage)
-						pluginCancel()
-						workerCancel()
-						return
-					default:
-						// don't paused if it's the initial start and first plugin
-						if workerGlobals.Plugins[plugin.Plugin][plugin.Name].PluginRunCount.Load() != 0 &&
-							index != 0 {
-							// pause all other plugins when we find one that's paused
-							for workerGlobals.GetPausedPlugin() != "" {
-								// Check for shutdown signal
-								if workerCtx.Err() != nil || pluginCtx.Err() != nil {
-									logging.Warn(pluginCtx, "context canceled while waiting for paused plugin")
-									pluginCancel()
-									workerCancel()
-									return
-								}
-
-								logging.Dev(pluginCtx, "paused for another plugin to finish running")
-								// When paused, sleep briefly and continue checking
-								err = metricsData.SetStatus(pluginCtx, "paused")
-								if err != nil {
-									logging.Error(pluginCtx, "error setting plugin status", "error", err)
-								}
-								time.Sleep(time.Second * 3)
-								continue
-							}
-						}
-
-						// we need to wait for other plugins (of same type) on this host to finish preparing
-						preparing := false
-						for siblingPluginName, siblingPlugin := range workerGlobals.Plugins[plugin.Plugin] {
-							if siblingPluginName == plugin.Name {
-								continue
-							}
-							if siblingPlugin.Preparing.Load() {
-								logging.Dev(pluginCtx, "waiting for the previous plugin to finish preparing")
-								// Don't set metrics to "paused" here - this is just normal coordination
-								// between handlers, not a resource wait. Keep status as "idle".
-								preparing = true
-								break
-							}
-						}
-						if preparing {
-							time.Sleep(time.Second * 3)
-							continue
-						}
-						// Set status back to idle (or draining) after exiting the preparing wait loop
-						err = metricsData.SetStatus(pluginCtx, steadyStatus(plugin))
-						if err != nil {
-							logging.Error(pluginCtx, "error setting plugin status", "error", err)
-						}
-
-						workerGlobals.IncrementPluginRunCount(plugin.Name)
-
-						// Create a fresh context for this iteration to avoid accumulating QueueTargetIndex
-						iterationCtx := logging.AppendCtx(pluginCtx, slog.Int64("queueTargetIndex", *workerGlobals.QueueTargetIndex))
-
-						updatedPluginCtx, err := run.Plugin(
-							workerCtx,
-							iterationCtx,
-							pluginCancel,
-						)
-						if err != nil {
-							logging.Error(updatedPluginCtx, "error running plugin", "error", err)
-							pluginCancel()
-							workerCancel()
-							// Send SIGQUIT to the main pid
-							p, err := os.FindProcess(os.Getpid())
-							if err != nil {
-								logging.Error(updatedPluginCtx, "error finding process", "error", err)
-							} else {
-								err = p.Signal(syscall.SIGQUIT)
-								if err != nil {
-									logging.Error(updatedPluginCtx, "error sending SIGQUIT signal", "error", err)
-								}
-							}
-							return
-						}
-						if workerCtx.Err() != nil || toRunOnce {
-							// logging.Warn(updatedPluginCtx, shutDownMessage+" inside plugin loop 2")
-							pluginCancel()
-							break
-						}
-						err = metricsData.SetStatus(updatedPluginCtx, steadyStatus(plugin))
-						if err != nil {
-							logging.Error(updatedPluginCtx, "error setting plugin status", "error", err)
-						}
-						select {
-						case <-time.After(time.Duration(plugin.SleepInterval) * time.Second):
-						case <-pluginCtx.Done():
-							//logging.Dev(pluginCtx, "plugin for loop::default::pluginCtx.Done()")
-							break
-						}
-					}
-				}
-			}(plugin)
-			// if the only service is a receiver, set the soloReceiver flag to true
-			if strings.Contains(plugin.Plugin, "_receiver") {
-				soloReceiver = true
-			} else { // otherwise disable it if other plugins exist
-				soloReceiver = false
-			}
-		}
 		go func() {
 			defer close(metricsDone)
-			metricsService.Start(workerCtx, soloReceiver)
+			metricsService.StartAggregatorServerWithListener(workerCtx, parentLogger, metricsLn)
 		}()
-	}
-	wg.Wait()
-	// Wait for metrics service to shut down if context was canceled (error case)
-	if workerCtx.Err() != nil {
+		parentLogger.InfoContext(workerCtx, "metrics aggregator started on port "+metricsPort)
+
+		if !toRunOnce.Load() {
+			<-workerCtx.Done()
+		} else {
+			workerCancel()
+		}
 		select {
 		case <-metricsDone:
-			// Metrics service finished shutting down
 		case <-time.After(5 * time.Second):
-			// Timeout waiting for metrics service
 		}
+		return
+	}
+
+	metricsData := &metrics.MetricsDataLock{}
+	workerCtx = context.WithValue(workerCtx, config.ContextKey("metrics"), metricsData)
+	parentLogger.InfoContext(workerCtx, "metrics server started on port "+metricsPort)
+	metrics.UpdateSystemMetrics(workerCtx, metricsData)
+
+	soloReceiver := computeSoloReceiver(loadedConfig.Plugins)
+	go func() {
+		defer close(metricsDone)
+		metricsService.StartWithListener(workerCtx, metricsLn, soloReceiver)
+	}()
+
+	var wg sync.WaitGroup
+	httpTransport, _ := parentCtx.Value(config.ContextKey("httpTransport")).(*http.Transport)
+
+launchLoop:
+	for index, p := range loadedConfig.Plugins {
+		if index != 0 {
+			prev := loadedConfig.Plugins[index-1]
+			waitTicker := time.NewTicker(5 * time.Second)
+		waitLoop:
+			for {
+				if workerGlobals.Plugins[prev.Plugin][prev.Name].FinishedInitialRun.Load() {
+					workerGlobals.Plugins[p.Plugin][p.Name].Paused.Store(false)
+					break waitLoop
+				}
+				select {
+				case <-workerCtx.Done():
+					waitTicker.Stop()
+					break launchLoop
+				case <-waitTicker.C:
+				}
+			}
+			waitTicker.Stop()
+		}
+
+		wg.Add(1)
+		go func(idx int, pluginCfg config.Plugin) {
+			defer wg.Done()
+			pluginCtx, pluginCancel := context.WithCancel(context.Background())
+			defer pluginCancel()
+
+			go func() {
+				<-workerCtx.Done()
+				pluginCancel()
+			}()
+
+			pluginLogger := parentLogger
+			if loadedConfig.Log.SplitByPlugin {
+				parentLogger.InfoContext(parentCtx, "writing "+pluginCfg.Name+" logs to "+loadedConfig.Log.FileDir+"anklet"+"-"+pluginCfg.Name+".log")
+				var logFile *os.File
+				var logErr error
+				pluginLogger, _, logFile, logErr = logging.UpdateLoggerToFile(parentLogger, loadedConfig.Log.FileDir, "-"+pluginCfg.Name)
+				if logErr != nil {
+					parentLogger.ErrorContext(pluginCtx, "unable to update logger to file", "error", logErr)
+					workerCancel()
+					return
+				}
+				defer func() {
+					_ = logFile.Close()
+				}()
+			}
+
+			deps := plugin.Deps{
+				Logger:         pluginLogger,
+				Config:         &loadedConfig,
+				PluginConfig:   pluginCfg,
+				ConfigFileName: configFileName,
+				Globals:        workerGlobals,
+				Metrics:        metricsData,
+				HTTPTransport:  httpTransport,
+			}
+			pluginCtx = deps.WithContext(pluginCtx)
+
+			logging.Info(pluginCtx, "starting plugin")
+
+			switch pluginCfg.GitHubScope() {
+			case config.GitHubScopeEnterprise:
+				logging.Info(pluginCtx, "enterprise set for plugin; using enterprise level plugin")
+			case config.GitHubScopeOrganization:
+				logging.Info(pluginCtx, "no repo set for plugin; assuming it's an organization level plugin")
+			}
+
+			isReceiver := run.IsReceiverType(pluginCfg.Plugin) || pluginCfg.IsReceiver()
+			if !isReceiver {
+				logging.Dev(pluginCtx, "plugin is not a receiver; loading the anka CLI")
+				ankaCLI, cliErr := anka.NewCLI(pluginCtx)
+				if cliErr != nil {
+					logging.Error(pluginCtx, "unable to create anka cli", "error", cliErr)
+					workerCancel()
+					return
+				}
+				deps.AnkaCLI = ankaCLI
+				pluginCtx = deps.WithContext(pluginCtx)
+				logging.Dev(pluginCtx, "loaded the anka CLI")
+
+				if config.AnyHostToGuestFolderMountsConfigured(loadedConfig) {
+					if runtime.GOARCH == "amd64" {
+						logging.Error(pluginCtx, "host-to-guest folder mounts are configured but Anka does not support this on Intel macOS hosts (Apple Silicon only); see Anka 3.9.0 release notes")
+						workerCancel()
+						return
+					}
+					if verErr := anka.ValidateAnkaVersionForHostToGuestFolderMounts(ankaCLI.Version); verErr != nil {
+						logging.Error(pluginCtx, "mounting host folders into the guest VM requires Anka >= 3.9.0", "error", verErr, "ankaVersion", ankaCLI.Version)
+						workerCancel()
+						return
+					}
+					if len(pluginCfg.HostToGuestFolderMounts) > 0 {
+						logging.Info(pluginCtx, "plugin host-to-guest folder mounts configured", "mounts", pluginCfg.HostToGuestFolderMounts)
+					}
+					if len(loadedConfig.GlobalHostToGuestFolderMounts) > 0 {
+						logging.Info(pluginCtx, "global host-to-guest folder mounts configured", "mounts", loadedConfig.GlobalHostToGuestFolderMounts)
+					}
+				}
+
+				if workerGlobals.TemplateTracker.Len() == 0 {
+					logging.Dev(pluginCtx, "discovering existing templates on system")
+					if discErr := ankaCLI.DiscoverAndPopulateExistingTemplates(pluginCtx, workerGlobals.TemplateTracker); discErr != nil {
+						logging.Warn(pluginCtx, "failed to discover existing templates", "error", discErr)
+					}
+				}
+				logging.Debug(pluginCtx, "populated existing templates in TemplateTracker", "templates", workerGlobals.TemplateTracker)
+			}
+
+			resolvedDB := config.ResolveDatabaseConfig(loadedConfig, pluginCfg.Database)
+			if resolvedDB.URL != "" {
+				logging.Dev(pluginCtx, "connecting to database")
+				dbCtx := context.WithValue(context.Background(), config.ContextKey("logger"), pluginLogger)
+				databaseClient, dbErr := database.NewClient(dbCtx, resolvedDB)
+				if dbErr != nil {
+					logging.Error(pluginCtx, "unable to access database", "error", dbErr)
+					workerCancel()
+					return
+				}
+				deps.Database = databaseClient
+				pluginCtx = deps.WithContext(pluginCtx)
+				logging.Dev(pluginCtx, "connected to database")
+
+				if idx == 0 {
+					capturedOwner := pluginCfg.MetricsOwner()
+					capturedName := pluginCfg.Name
+					capturedLogger := pluginLogger
+					capturedDatabase := databaseClient
+					defer func() {
+						metricsCleanupCtx := context.WithValue(context.Background(), config.ContextKey("logger"), capturedLogger)
+						cleanupDb := *capturedDatabase
+						cleanupDb.MaxRetries = 0
+						metricsCleanupCtx = context.WithValue(metricsCleanupCtx, config.ContextKey("database"), &cleanupDb)
+						metrics.Cleanup(metricsCleanupCtx, capturedOwner, capturedName)
+					}()
+				}
+			}
+
+			if addErr := metricsData.AddPlugin(metrics.Plugin{
+				PluginBase: metrics.PluginBase{
+					Name:        pluginCfg.Name,
+					PluginName:  pluginCfg.Plugin,
+					RepoName:    pluginCfg.Repo,
+					OwnerName:   pluginCfg.MetricsOwner(),
+					IsReceiver:  isReceiver,
+					Status:      "idle",
+					StatusSince: time.Now(),
+				},
+			}); addErr != nil {
+				parentLogger.ErrorContext(pluginCtx, "error adding plugin to metrics", "error", addErr)
+				workerCancel()
+				return
+			}
+
+			if idx == 0 {
+				metrics.ExportMetricsToDB(workerCtx, pluginCtx, loadedConfig.Plugins[0].MetricsKeyEnding())
+			}
+
+			runner, buildErr := run.Build(deps)
+			if buildErr != nil {
+				logging.Error(pluginCtx, "error running plugin", "error", buildErr)
+				workerCancel()
+				return
+			}
+
+			for {
+				select {
+				case <-pluginCtx.Done():
+					if statusErr := metricsData.SetStatus(pluginCtx, "stopped"); statusErr != nil {
+						logging.Error(pluginCtx, "error setting plugin status", "error", statusErr)
+					}
+					logging.Warn(pluginCtx, shutDownMessage)
+					workerCancel()
+					return
+				default:
+					if workerGlobals.Plugins[pluginCfg.Plugin][pluginCfg.Name].PluginRunCount.Load() != 0 && idx != 0 {
+						for workerGlobals.GetPausedPlugin() != "" {
+							if workerCtx.Err() != nil || pluginCtx.Err() != nil {
+								logging.Warn(pluginCtx, "context canceled while waiting for paused plugin")
+								workerCancel()
+								return
+							}
+							logging.Dev(pluginCtx, "paused for another plugin to finish running")
+							if statusErr := metricsData.SetStatus(pluginCtx, "paused"); statusErr != nil {
+								logging.Error(pluginCtx, "error setting plugin status", "error", statusErr)
+							}
+							pauseTimer := time.NewTimer(3 * time.Second)
+							select {
+							case <-pauseTimer.C:
+							case <-pluginCtx.Done():
+								pauseTimer.Stop()
+								workerCancel()
+								return
+							case <-workerCtx.Done():
+								pauseTimer.Stop()
+								return
+							}
+						}
+					}
+
+					preparing := false
+					for siblingPluginName, siblingPlugin := range workerGlobals.Plugins[pluginCfg.Plugin] {
+						if siblingPluginName == pluginCfg.Name {
+							continue
+						}
+						if siblingPlugin.Preparing.Load() {
+							logging.Dev(pluginCtx, "waiting for the previous plugin to finish preparing")
+							preparing = true
+							break
+						}
+					}
+					if preparing {
+						prepTimer := time.NewTimer(3 * time.Second)
+						select {
+						case <-prepTimer.C:
+						case <-pluginCtx.Done():
+							prepTimer.Stop()
+							workerCancel()
+							return
+						case <-workerCtx.Done():
+							prepTimer.Stop()
+							return
+						}
+						continue
+					}
+
+					if statusErr := metricsData.SetStatus(pluginCtx, steadyStatus(pluginCfg)); statusErr != nil {
+						logging.Error(pluginCtx, "error setting plugin status", "error", statusErr)
+					}
+
+					workerGlobals.IncrementPluginRunCount(pluginCfg.Name)
+
+					iterationCtx := logging.AppendCtx(pluginCtx, slog.Int64("queueTargetIndex", workerGlobals.GetQueueTargetIndex()))
+					updatedPluginCtx, runErr := run.Plugin(workerCtx, iterationCtx, pluginCancel, runner)
+					if runErr != nil {
+						logging.Error(updatedPluginCtx, "error running plugin", "error", runErr)
+						pluginCancel()
+						workerCancel()
+						if proc, procErr := os.FindProcess(os.Getpid()); procErr != nil {
+							logging.Error(updatedPluginCtx, "error finding process", "error", procErr)
+						} else if sigErr := proc.Signal(syscall.SIGQUIT); sigErr != nil {
+							logging.Error(updatedPluginCtx, "error sending SIGQUIT signal", "error", sigErr)
+						}
+						return
+					}
+					if workerCtx.Err() != nil || toRunOnce.Load() {
+						pluginCancel()
+						return
+					}
+					if statusErr := metricsData.SetStatus(updatedPluginCtx, steadyStatus(pluginCfg)); statusErr != nil {
+						logging.Error(pluginCtx, "error setting plugin status", "error", statusErr)
+					}
+
+					sleepTimer := time.NewTimer(time.Duration(pluginCfg.SleepInterval) * time.Second)
+					select {
+					case <-sleepTimer.C:
+					case <-pluginCtx.Done():
+						sleepTimer.Stop()
+						return
+					}
+				}
+			}
+		}(index, p)
+	}
+
+	if len(loadedConfig.Plugins) == 0 {
+		<-workerCtx.Done()
+	}
+
+	wg.Wait()
+	workerCancel()
+	select {
+	case <-metricsDone:
+	case <-time.After(5 * time.Second):
 	}
 }

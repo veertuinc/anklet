@@ -3,7 +3,7 @@ services:
     image: redis:7-alpine
     container_name: anklet-redis
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     command: redis-server --save 60 1 --loglevel warning
     volumes:
       - redis_data:/data
@@ -17,8 +17,8 @@ services:
     depends_on:
       - redis
     volumes:
-      - ./config:/root/.config/anklet/
-      - ./anklet-private-key.pem:/private-key.pem
+      - ./config:/home/anklet/.config/anklet/:ro
+      - ./anklet-private-key.pem:/private-key.pem:ro
     ports:
       - "8081:8081"
     environment:

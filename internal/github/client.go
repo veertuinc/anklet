@@ -13,7 +13,7 @@ import (
 	"github.com/bradleyfalzon/ghinstallation/v2"
 	github_ratelimit "github.com/gofri/go-github-ratelimit/v2/github_ratelimit"
 	"github.com/gofri/go-github-ratelimit/v2/github_ratelimit/github_secondary_ratelimit"
-	"github.com/google/go-github/v74/github"
+	"github.com/google/go-github/v75/github"
 	"github.com/veertuinc/anklet/internal/config"
 	"github.com/veertuinc/anklet/internal/logging"
 )
@@ -32,7 +32,7 @@ func NewGitHubClientWrapper(client *github.Client) *GitHubClientWrapper {
 
 func GetGitHubClientWrapperFromContext(ctx context.Context) (*GitHubClientWrapper, error) {
 	wrapper, ok := ctx.Value(config.ContextKey("githubwrapperclient")).(*GitHubClientWrapper)
-	if !ok {
+	if !ok || wrapper == nil {
 		return nil, fmt.Errorf("GetGitHubClientWrapperFromContext failed")
 	}
 	return wrapper, nil
@@ -89,17 +89,13 @@ func (w *GitHubClientWrapper) ClientForOrganization(ctx context.Context, org str
 	return actual.(*github.Client), nil
 }
 
-func GetRateLimitWaiterClientFromContext(ctx context.Context) (*http.Client, error) {
-	rateLimiter, ok := ctx.Value(config.ContextKey("rateLimiter")).(*http.Client)
-	if rateLimiter != nil && !ok {
-		return nil, fmt.Errorf("GetRateLimitWaiterClientFromContext failed")
-	}
-	return rateLimiter, nil
-}
-
 func GetHttpTransportFromContext(ctx context.Context) (*http.Transport, error) {
-	httpTransport, ok := ctx.Value(config.ContextKey("httpTransport")).(*http.Transport)
-	if httpTransport != nil && !ok {
+	raw := ctx.Value(config.ContextKey("httpTransport"))
+	if raw == nil {
+		return nil, nil
+	}
+	httpTransport, ok := raw.(*http.Transport)
+	if !ok {
 		return nil, fmt.Errorf("GetHttpTransportFromContext failed")
 	}
 	return httpTransport, nil
@@ -115,8 +111,7 @@ func GetHttpTransportFromContext(ctx context.Context) (*http.Transport, error) {
 // installation tokens ("Resource not accessible by integration"). When enterprise is set
 // and a classic PAT (token) is also provided, the default client uses the PAT for those
 // APIs while appsTransport remains available for per-org Actions calls via
-// ClientForOrganization. In that hybrid mode, installation_id is unused for the default
-// client (org installs are resolved per job owner).
+// ClientForOrganization.
 func AuthenticateAndReturnGitHubClient(
 	ctx context.Context,
 	privateKey string,
@@ -126,31 +121,21 @@ func AuthenticateAndReturnGitHubClient(
 	enterprise string,
 	owner string,
 ) (*github.Client, *GitHubClientWrapper, error) {
-
-	var client *github.Client
-	var err error
-	var rateLimiter *http.Client
-	rateLimiter, err = GetRateLimitWaiterClientFromContext(ctx)
-	if err != nil {
-		return nil, nil, err
-	}
-	var httpTransport *http.Transport
-	httpTransport, err = GetHttpTransportFromContext(ctx)
+	httpTransport, err := GetHttpTransportFromContext(ctx)
 	if err != nil {
 		return nil, nil, err
 	}
 	if httpTransport == nil {
 		httpTransport = http.DefaultTransport.(*http.Transport)
 	}
-	if rateLimiter == nil {
-		rateLimiter = newSecondaryRateLimitedClient(ctx, httpTransport)
-	}
+	rateLimiter := newSecondaryRateLimitedClient(ctx, httpTransport)
+
 	wrapper := &GitHubClientWrapper{}
+	var client *github.Client
 	if privateKey != "" {
 		if appID == 0 {
 			return nil, nil, fmt.Errorf("app_id is required when private_key is set")
 		}
-		// support private key in a file or as text
 		var privateKeyBytes []byte
 		privateKeyBytes, err = os.ReadFile(privateKey)
 		if err != nil {
@@ -191,8 +176,6 @@ func AuthenticateAndReturnGitHubClient(
 				)
 			}
 
-			// Do not mutate the shared context rateLimiter.Transport; wrap the
-			// installation transport in a fresh secondary rate-limit client.
 			itr := ghinstallation.NewFromAppsTransport(appsTransport, resolvedInstallationID)
 			client = github.NewClient(newSecondaryRateLimitedClient(ctx, itr))
 		}
@@ -304,7 +287,6 @@ func matchEnterpriseInstallation(installations []*github.Installation, enterpris
 		if account == nil {
 			continue
 		}
-		// Enterprise account login is the enterprise slug in installation payloads.
 		if strings.EqualFold(account.GetLogin(), enterprise) {
 			return inst.GetID()
 		}
@@ -333,7 +315,8 @@ func summarizeInstallations(installations []*github.Installation) string {
 	return strings.Join(parts, ", ")
 }
 
-// https://github.com/gofri/go-github-ratelimit has yet to support primary rate limits, so we have to do it ourselves.
+// ExecuteGitHubClientFunction executes a GitHub REST call with primary rate-limit waiting
+// and exponential backoff retries on transient 404 responses.
 func ExecuteGitHubClientFunction[T any](
 	workerCtx context.Context,
 	pluginCtx context.Context,
@@ -342,41 +325,46 @@ func ExecuteGitHubClientFunction[T any](
 	return executeGitHubClientFunctionWithRetry(workerCtx, pluginCtx, executeFunc, 0)
 }
 
-// executeGitHubClientFunctionWithRetry handles the actual retry logic with exponential backoff
 func executeGitHubClientFunctionWithRetry[T any](
 	workerCtx context.Context,
 	pluginCtx context.Context,
 	executeFunc func() (*T, *github.Response, error),
 	retryAttempt int,
 ) (context.Context, *T, *github.Response, error) {
-	executeGitHubClientFunctionCtx, cancel := context.WithCancel(pluginCtx) // Inherit from parent context
+	executeGitHubClientFunctionCtx, cancel := context.WithCancel(pluginCtx)
 	defer cancel()
 
 	result, response, err := executeFunc()
 
 	if response != nil {
+		method := ""
+		reqURL := ""
+		if response.Request != nil {
+			method = response.Request.Method
+			if response.Request.URL != nil {
+				reqURL = response.Request.URL.String()
+			}
+		}
 		logging.Debug(pluginCtx,
 			"GitHub API rate limit",
-			"method", response.Request.Method,
-			"url", response.Request.URL.String(),
+			"method", method,
+			"url", reqURL,
 			"remaining", response.Rate.Remaining,
 			"reset", response.Rate.Reset.Format(time.RFC3339),
 			"limit", response.Rate.Limit,
 		)
-		if response.Rate.Remaining <= 10 { // handle primary rate limiting
-			if err := waitForGitHubAPIRateLimitReset(workerCtx, executeGitHubClientFunctionCtx, response.Rate.Reset.Time); err != nil {
-				return pluginCtx, nil, nil, err
+		// Only pause for primary rate limiting when GitHub actually returned rate-limit headers (Limit > 0).
+		if response.Rate.Limit > 0 && response.Rate.Remaining <= 10 {
+			if waitErr := waitForGitHubAPIRateLimitReset(workerCtx, executeGitHubClientFunctionCtx, response.Rate.Reset.Time); waitErr != nil {
+				return pluginCtx, nil, nil, waitErr
 			}
-			return executeGitHubClientFunctionWithRetry(workerCtx, executeGitHubClientFunctionCtx, executeFunc, retryAttempt) // Retry the function after waiting
+			return executeGitHubClientFunctionWithRetry(workerCtx, executeGitHubClientFunctionCtx, executeFunc, retryAttempt)
 		}
 	}
 
 	if err != nil {
-		// Check if this is a 404 error that we should retry
 		if is404Error(err) {
-			if retryAttempt < 4 { // Retry up to 4 times as requested
-				// Before retrying, check if the client is still authenticated
-				// This helps distinguish between auth issues and GitHub service issues
+			if retryAttempt < 4 {
 				githubClient, clientErr := GetGitHubClientFromContext(pluginCtx)
 				if clientErr != nil {
 					logging.Error(pluginCtx, "failed to get GitHub client for authentication validation", "error", clientErr)
@@ -389,19 +377,13 @@ func executeGitHubClientFunctionWithRetry[T any](
 							"originalError", err.Error(),
 							"attempt", retryAttempt+1,
 						)
-						// Don't retry if authentication has failed - return the original error
 						return pluginCtx, nil, nil, fmt.Errorf("GitHub API 404 error with authentication failure: %v (original: %v)", authErr, err)
-					} else {
-						logging.Debug(pluginCtx, "GitHub client authentication validated successfully during 404 retry")
 					}
+					logging.Debug(pluginCtx, "GitHub client authentication validated successfully during 404 retry")
 				}
 
-				// Calculate exponential backoff with jitter
-				// Base delay starts at 30 seconds, doubles each time
-				baseDelay := time.Duration(30) * time.Second
+				baseDelay := 30 * time.Second
 				backoffDelay := time.Duration(math.Pow(2, float64(retryAttempt))) * baseDelay
-
-				// Cap the maximum delay at 30 minutes to prevent excessive waits
 				maxDelay := 30 * time.Minute
 				if backoffDelay > maxDelay {
 					backoffDelay = maxDelay
@@ -415,32 +397,29 @@ func executeGitHubClientFunctionWithRetry[T any](
 					"error", err.Error(),
 				)
 
-				// Check for shutdown signal before sleeping
 				if workerCtx.Err() != nil || pluginCtx.Err() != nil {
 					logging.Warn(pluginCtx, "context canceled while retrying 404 error")
 					return pluginCtx, nil, nil, fmt.Errorf("context canceled while retrying 404 error")
 				}
 
+				timer := time.NewTimer(backoffDelay)
+				defer timer.Stop()
 				select {
-				case <-time.After(backoffDelay):
+				case <-timer.C:
 					return executeGitHubClientFunctionWithRetry(workerCtx, pluginCtx, executeFunc, retryAttempt+1)
 				case <-pluginCtx.Done():
 					return pluginCtx, nil, nil, pluginCtx.Err()
 				case <-workerCtx.Done():
 					return pluginCtx, nil, nil, workerCtx.Err()
 				}
-			} else {
-				logging.Error(pluginCtx, "GitHub API 404 error: maximum retry attempts exceeded (4)",
-					"attempts", retryAttempt,
-					"error", err.Error())
 			}
+			logging.Error(pluginCtx, "GitHub API 404 error: maximum retry attempts exceeded (4)",
+				"attempts", retryAttempt,
+				"error", err.Error())
 		}
 
-		// Log non-404 errors or final 404 error after all retries
-		if err.Error() != "context canceled" {
-			if !strings.Contains(err.Error(), "try again later") {
-				logging.Error(pluginCtx, "error executing GitHub client function: "+err.Error())
-			}
+		if err.Error() != "context canceled" && !strings.Contains(err.Error(), "try again later") {
+			logging.Error(pluginCtx, "error executing GitHub client function: "+err.Error())
 		}
 		return pluginCtx, nil, nil, err
 	}
@@ -448,40 +427,38 @@ func executeGitHubClientFunctionWithRetry[T any](
 	return pluginCtx, result, response, nil
 }
 
-// is404Error checks if the error is a 404 Not Found error from GitHub API
+// is404Error checks if the error is a 404 Not Found error from GitHub API.
 func is404Error(err error) bool {
 	if err == nil {
 		return false
 	}
 	errorStr := err.Error()
 	return strings.Contains(errorStr, "404 Not Found") ||
-		strings.Contains(errorStr, "404") && strings.Contains(errorStr, "Not Found")
+		(strings.Contains(errorStr, "404") && strings.Contains(errorStr, "Not Found"))
 }
 
-// validateGitHubClientAuthentication checks if the GitHub client is still authenticated
-// by making a simple API call to /user endpoint
+// validateGitHubClientAuthentication checks if the GitHub client credentials are valid
+// by calling GET /rate_limit, which works for both PATs and GitHub App installation tokens
+// and does not consume primary rate-limit quota.
 func validateGitHubClientAuthentication(ctx context.Context, client *github.Client) error {
 	if client == nil {
 		return fmt.Errorf("github client is nil")
 	}
 
-	// Use a short timeout for the authentication check to avoid long waits
 	authCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	// Try to get the authenticated user - this will fail if auth is invalid
-	_, response, err := client.Users.Get(authCtx, "")
+	_, response, err := client.RateLimit.Get(authCtx)
 	if err != nil {
-		// Check if it's an authentication error (401/403) vs other errors
 		if response != nil {
 			switch response.StatusCode {
-			case 401:
+			case http.StatusUnauthorized:
 				return fmt.Errorf("authentication failed: token is invalid or expired")
-			case 403:
+			case http.StatusForbidden:
 				return fmt.Errorf("authentication failed: insufficient permissions or rate limited")
 			}
 		}
-		return fmt.Errorf("authentication check failed: %v", err)
+		return fmt.Errorf("authentication check failed: %w", err)
 	}
 
 	return nil

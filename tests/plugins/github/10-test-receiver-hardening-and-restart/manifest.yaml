@@ -1,0 +1,12 @@
+description: "Github receiver HTTP hardening, cross-org Redis isolation, and restart resilience during active in_progress jobs"
+tests:
+    - name: "Receiver hardening and restart test"
+      hosts:
+        - name: "receiver"
+          id: "ubuntu-linux"
+          config: ubuntu-linux.yaml
+          tester: true
+
+        - name: "handler-8-16"
+          id: "13-L-ARM-macos"
+          config: 13-L-ARM-macos.yaml
