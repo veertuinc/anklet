@@ -34,20 +34,21 @@ go.releaser:
 
 
 GOLANGCI_LINT_VERSION ?= v2.14.0
+GOLANGCI_LINT := $(shell command -v golangci-lint 2>/dev/null || echo "$(shell go env GOPATH)/bin/golangci-lint")
 
 #go.lint:		@ Run `golangci-lint run` against the current code
 go.lint:
 	set -exo pipefail
 	go vet ./...
-	if ! command -v golangci-lint >/dev/null 2>&1; then \
+	if [ ! -x "$(GOLANGCI_LINT)" ]; then \
 		go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION); \
 	fi
 	echo "golangci-lint run"
-	golangci-lint run
+	"$(GOLANGCI_LINT)" run
 
 go.test:
 	go mod tidy
-	go test -race -v ./...
+	CGO_ENABLED=1 go test -race -v ./...
 
 #cross-compile-check:	@ Check compilation for all target platforms without building
 cross-compile-check:
