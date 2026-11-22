@@ -236,7 +236,8 @@ func (h *Handler) Run(
 	}()
 
 	if err := h.waitForFirstWatcherPass(workerCtx, pluginCtx, state); err != nil {
-		return pluginCtx, err
+		logging.Warn(pluginCtx, "context canceled while waiting for first checkForCompletedJobs to run")
+		return pluginCtx, nil
 	}
 
 	select {

@@ -20,8 +20,9 @@ import (
 
 type fakeHandlerRedis struct {
 	redis.Cmdable
-	mu    sync.Mutex
-	lists map[string][]string
+	mu       sync.Mutex
+	lists    map[string][]string
+	onLIndex func()
 }
 
 func newFakeHandlerRedis() *fakeHandlerRedis {
@@ -29,6 +30,12 @@ func newFakeHandlerRedis() *fakeHandlerRedis {
 }
 
 func (f *fakeHandlerRedis) LIndex(_ context.Context, key string, index int64) *redis.StringCmd {
+	f.mu.Lock()
+	hook := f.onLIndex
+	f.mu.Unlock()
+	if hook != nil {
+		hook()
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	cmd := redis.NewStringCmd(context.Background())
@@ -292,5 +299,34 @@ func TestExtractLabelValueAndWatchJobHelpers(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("handleWatchJobCompleted() error = %v", err)
+	}
+}
+
+func TestRunReturnsNilWhenCanceledDuringInitialWatcherWait(t *testing.T) {
+	t.Parallel()
+
+	h, baseCtx, fake := newTestHandlerAndCtx()
+	h.deps.PluginConfig.Token = "test-token"
+	h.deps.ConfigFileName = "config.yml"
+
+	workerCtx, workerCancel := context.WithCancel(context.Background())
+	defer workerCancel()
+	pluginCtx, pluginCancel := context.WithCancel(baseCtx)
+	defer pluginCancel()
+
+	var cancelOnce sync.Once
+	fake.onLIndex = func() {
+		cancelOnce.Do(func() {
+			workerCancel()
+			pluginCancel()
+		})
+		// Hold watcher briefly so Run's waitForFirstWatcherPass observes context cancellation
+		// before firstCheckRan flips true.
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	_, err := h.Run(workerCtx, pluginCtx, pluginCancel)
+	if err != nil {
+		t.Fatalf("Run() returned error on graceful context cancel during initial watcher wait: %v", err)
 	}
 }

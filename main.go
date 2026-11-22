@@ -505,103 +505,18 @@ launchLoop:
 				return
 			}
 
-			for {
-				select {
-				case <-pluginCtx.Done():
-					if statusErr := metricsData.SetStatus(pluginCtx, "stopped"); statusErr != nil {
-						logging.Error(pluginCtx, "error setting plugin status", "error", statusErr)
-					}
-					logging.Warn(pluginCtx, shutDownMessage)
-					workerCancel()
-					return
-				default:
-					if workerGlobals.Plugins[pluginCfg.Plugin][pluginCfg.Name].PluginRunCount.Load() != 0 && idx != 0 {
-						for workerGlobals.GetPausedPlugin() != "" {
-							if workerCtx.Err() != nil || pluginCtx.Err() != nil {
-								logging.Warn(pluginCtx, "context canceled while waiting for paused plugin")
-								workerCancel()
-								return
-							}
-							logging.Dev(pluginCtx, "paused for another plugin to finish running")
-							if statusErr := metricsData.SetStatus(pluginCtx, "paused"); statusErr != nil {
-								logging.Error(pluginCtx, "error setting plugin status", "error", statusErr)
-							}
-							pauseTimer := time.NewTimer(3 * time.Second)
-							select {
-							case <-pauseTimer.C:
-							case <-pluginCtx.Done():
-								pauseTimer.Stop()
-								workerCancel()
-								return
-							case <-workerCtx.Done():
-								pauseTimer.Stop()
-								return
-							}
-						}
-					}
-
-					preparing := false
-					for siblingPluginName, siblingPlugin := range workerGlobals.Plugins[pluginCfg.Plugin] {
-						if siblingPluginName == pluginCfg.Name {
-							continue
-						}
-						if siblingPlugin.Preparing.Load() {
-							logging.Dev(pluginCtx, "waiting for the previous plugin to finish preparing")
-							preparing = true
-							break
-						}
-					}
-					if preparing {
-						prepTimer := time.NewTimer(3 * time.Second)
-						select {
-						case <-prepTimer.C:
-						case <-pluginCtx.Done():
-							prepTimer.Stop()
-							workerCancel()
-							return
-						case <-workerCtx.Done():
-							prepTimer.Stop()
-							return
-						}
-						continue
-					}
-
-					if statusErr := metricsData.SetStatus(pluginCtx, steadyStatus(pluginCfg)); statusErr != nil {
-						logging.Error(pluginCtx, "error setting plugin status", "error", statusErr)
-					}
-
-					workerGlobals.IncrementPluginRunCount(pluginCfg.Name)
-
-					iterationCtx := logging.AppendCtx(pluginCtx, slog.Int64("queueTargetIndex", workerGlobals.GetQueueTargetIndex()))
-					updatedPluginCtx, runErr := run.Plugin(workerCtx, iterationCtx, pluginCancel, runner)
-					if runErr != nil {
-						logging.Error(updatedPluginCtx, "error running plugin", "error", runErr)
-						pluginCancel()
-						workerCancel()
-						if proc, procErr := os.FindProcess(os.Getpid()); procErr != nil {
-							logging.Error(updatedPluginCtx, "error finding process", "error", procErr)
-						} else if sigErr := proc.Signal(syscall.SIGQUIT); sigErr != nil {
-							logging.Error(updatedPluginCtx, "error sending SIGQUIT signal", "error", sigErr)
-						}
-						return
-					}
-					if workerCtx.Err() != nil || toRunOnce.Load() {
-						pluginCancel()
-						return
-					}
-					if statusErr := metricsData.SetStatus(updatedPluginCtx, steadyStatus(pluginCfg)); statusErr != nil {
-						logging.Error(pluginCtx, "error setting plugin status", "error", statusErr)
-					}
-
-					sleepTimer := time.NewTimer(time.Duration(pluginCfg.SleepInterval) * time.Second)
-					select {
-					case <-sleepTimer.C:
-					case <-pluginCtx.Done():
-						sleepTimer.Stop()
-						return
-					}
-				}
-			}
+			runPluginLoop(
+				workerCtx,
+				workerCancel,
+				pluginCtx,
+				pluginCancel,
+				pluginCfg,
+				idx,
+				workerGlobals,
+				metricsData,
+				&toRunOnce,
+				runner,
+			)
 		}(index, p)
 	}
 
@@ -614,5 +529,128 @@ launchLoop:
 	select {
 	case <-metricsDone:
 	case <-time.After(5 * time.Second):
+	}
+}
+
+func runPluginLoop(
+	workerCtx context.Context,
+	workerCancel context.CancelFunc,
+	pluginCtx context.Context,
+	pluginCancel context.CancelFunc,
+	pluginCfg config.Plugin,
+	idx int,
+	workerGlobals *config.Globals,
+	metricsData *metrics.MetricsDataLock,
+	toRunOnce *atomic.Bool,
+	runner plugin.Runner,
+) {
+	shutdownPlugin := func() {
+		if statusErr := metricsData.SetStatus(pluginCtx, "stopped"); statusErr != nil {
+			logging.Error(pluginCtx, "error setting plugin status", "error", statusErr)
+		}
+		logging.Warn(pluginCtx, shutDownMessage)
+		pluginCancel()
+		workerCancel()
+	}
+
+	for {
+		select {
+		case <-pluginCtx.Done():
+			shutdownPlugin()
+			return
+		default:
+			if workerGlobals.Plugins[pluginCfg.Plugin][pluginCfg.Name].PluginRunCount.Load() != 0 && idx != 0 {
+				for workerGlobals.GetPausedPlugin() != "" {
+					if workerCtx.Err() != nil || pluginCtx.Err() != nil {
+						logging.Warn(pluginCtx, "context canceled while waiting for paused plugin")
+						shutdownPlugin()
+						return
+					}
+					logging.Dev(pluginCtx, "paused for another plugin to finish running")
+					if statusErr := metricsData.SetStatus(pluginCtx, "paused"); statusErr != nil {
+						logging.Error(pluginCtx, "error setting plugin status", "error", statusErr)
+					}
+					pauseTimer := time.NewTimer(3 * time.Second)
+					select {
+					case <-pauseTimer.C:
+					case <-pluginCtx.Done():
+						pauseTimer.Stop()
+						shutdownPlugin()
+						return
+					case <-workerCtx.Done():
+						pauseTimer.Stop()
+						shutdownPlugin()
+						return
+					}
+				}
+			}
+
+			preparing := false
+			for siblingPluginName, siblingPlugin := range workerGlobals.Plugins[pluginCfg.Plugin] {
+				if siblingPluginName == pluginCfg.Name {
+					continue
+				}
+				if siblingPlugin.Preparing.Load() {
+					logging.Dev(pluginCtx, "waiting for the previous plugin to finish preparing")
+					preparing = true
+					break
+				}
+			}
+			if preparing {
+				prepTimer := time.NewTimer(3 * time.Second)
+				select {
+				case <-prepTimer.C:
+				case <-pluginCtx.Done():
+					prepTimer.Stop()
+					shutdownPlugin()
+					return
+				case <-workerCtx.Done():
+					prepTimer.Stop()
+					shutdownPlugin()
+					return
+				}
+				continue
+			}
+
+			if statusErr := metricsData.SetStatus(pluginCtx, steadyStatus(pluginCfg)); statusErr != nil {
+				logging.Error(pluginCtx, "error setting plugin status", "error", statusErr)
+			}
+
+			workerGlobals.IncrementPluginRunCount(pluginCfg.Name)
+
+			iterationCtx := logging.AppendCtx(pluginCtx, slog.Int64("queueTargetIndex", workerGlobals.GetQueueTargetIndex()))
+			updatedPluginCtx, runErr := run.Plugin(workerCtx, iterationCtx, pluginCancel, runner)
+			if runErr != nil {
+				logging.Error(updatedPluginCtx, "error running plugin", "error", runErr)
+				pluginCancel()
+				workerCancel()
+				if proc, procErr := os.FindProcess(os.Getpid()); procErr != nil {
+					logging.Error(updatedPluginCtx, "error finding process", "error", procErr)
+				} else if sigErr := proc.Signal(syscall.SIGQUIT); sigErr != nil {
+					logging.Error(updatedPluginCtx, "error sending SIGQUIT signal", "error", sigErr)
+				}
+				return
+			}
+			if workerCtx.Err() != nil || toRunOnce.Load() {
+				shutdownPlugin()
+				return
+			}
+			if statusErr := metricsData.SetStatus(updatedPluginCtx, steadyStatus(pluginCfg)); statusErr != nil {
+				logging.Error(pluginCtx, "error setting plugin status", "error", statusErr)
+			}
+
+			sleepTimer := time.NewTimer(time.Duration(pluginCfg.SleepInterval) * time.Second)
+			select {
+			case <-sleepTimer.C:
+			case <-pluginCtx.Done():
+				sleepTimer.Stop()
+				shutdownPlugin()
+				return
+			case <-workerCtx.Done():
+				sleepTimer.Stop()
+				shutdownPlugin()
+				return
+			}
+		}
 	}
 }
