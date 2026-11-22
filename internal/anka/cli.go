@@ -278,9 +278,11 @@ func (cli *Cli) executeCommand(
 		return nil, 0, fmt.Errorf("starting command %v: %w", safeArgs, err), nil
 	}
 
-	done := make(chan error, 1)
+	var waitErr error
+	done := make(chan struct{})
 	go func() {
-		done <- cmd.Wait()
+		waitErr = cmd.Wait()
+		close(done)
 	}()
 
 	ticker := time.NewTicker(10 * time.Second)
@@ -315,8 +317,8 @@ func (cli *Cli) executeCommand(
 			return nil, 0, nil, fmt.Errorf("%w: execution of command %v timed out", ErrCommandTimeout, safeArgs)
 		case <-ticker.C:
 			logAnkaCommandProgress(pluginCtx, safeArgs, &stderr, secrets)
-		case err := <-done:
-			out, exitCode, execErr := finishAnkaExec(pluginCtx, &stdout, &stderr, err, secrets)
+		case <-done:
+			out, exitCode, execErr := finishAnkaExec(pluginCtx, &stdout, &stderr, waitErr, secrets)
 			return out, exitCode, execErr, nil
 		}
 	}
