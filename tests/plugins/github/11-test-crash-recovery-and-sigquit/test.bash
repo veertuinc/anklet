@@ -74,18 +74,18 @@ assert_redis_key_exists "anklet/metrics/${QUEUE_OWNER}/GITHUB_RECEIVER1"
 
 trigger_workflow_runs "veertuinc" "anklet" "t1-with-tag-1.yml" 1
 
-echo "] Waiting for handler to start handling job before sending SIGQUIT..."
-started=false
-for _ in $(seq 1 90); do
-    if grep -q "handling anka workflow run job" /tmp/anklet.log 2>/dev/null; then
-        started=true
+echo "] Waiting for registered runner to be in progress before sending SIGQUIT..."
+runner_in_progress=false
+for _ in $(seq 1 180); do
+    if grep -q "job found registered runner and is now in progress" /tmp/anklet.log 2>/dev/null; then
+        runner_in_progress=true
         break
     fi
     sleep 2
 done
 
-if [[ "${started}" != "true" ]]; then
-    record_fail "handler did not start handling job before SIGQUIT window"
+if [[ "${runner_in_progress}" != "true" ]]; then
+    record_fail "runner was not in progress before SIGQUIT window"
 else
     anklet_pid="$(pgrep -f '^/tmp/anklet$' | head -n 1 || true)"
     if [[ -z "${anklet_pid}" ]]; then
