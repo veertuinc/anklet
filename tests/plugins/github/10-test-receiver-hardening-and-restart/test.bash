@@ -151,17 +151,32 @@ else
     start_anklet_on_host_background "handler-8-16"
     assert_redis_key_exists "anklet/metrics/${QUEUE_OWNER}/GITHUB_HANDLER1"
 
-    trigger_workflow_runs "veertuinc" "anklet" "t1-with-tag-1.yml" 1
-    assert_remote_log_contains "handler-8-16" "job found registered runner and is now in progress" 300
+    # Pull 6c14r before the job starts. Anklet skips registry pull when this tag is already local.
+    # A cold pull can exceed the 300s runner-registration wait.
+    template_uuid="84266873-da90-4e0d-903b-ed0233471f9f"
+    template_tag="6c14r"
+    echo "] Pre-pulling template ${template_uuid} tag ${template_tag} on handler-8-16..."
+    if ! ssh_to_host "handler-8-16" "anka delete --yes ${template_uuid} 2>/dev/null || true; anka registry pull ${template_uuid} --tag ${template_tag}"; then
+        record_fail "pre-pull of ${template_tag} failed on handler-8-16"
+    else
+        if ! trigger_workflow_runs "veertuinc" "anklet" "t1-with-tag-1.yml" 1; then
+            record_fail "failed to trigger t1-with-tag-1"
+        elif ! assert_remote_log_contains "handler-8-16" "job found registered runner and is now in progress" 300; then
+            record_fail "handler did not register the runner within 300s"
+        else
+            echo "] Restarting receiver while job is in_progress..."
+            stop_local_receiver
+            : > /tmp/anklet.log
+            start_anklet_backgrounded_but_attached "receiver"
+            wait_for_receiver_ready
 
-    echo "] Restarting receiver while job is in_progress..."
-    stop_local_receiver
-    : > /tmp/anklet.log
-    start_anklet_backgrounded_but_attached "receiver"
-    wait_for_receiver_ready
-
-    wait_for_workflow_runs_to_complete "veertuinc" "anklet" "t1-with-tag-1" "success" 600
-    record_pass
+            if ! wait_for_workflow_runs_to_complete "veertuinc" "anklet" "t1-with-tag-1" "success" 600; then
+                record_fail "workflow did not complete as success within 600s"
+            else
+                record_pass
+            fi
+        fi
+    fi
 fi
 end_test
 ############
