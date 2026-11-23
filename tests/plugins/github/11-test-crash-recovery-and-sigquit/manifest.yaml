@@ -1,0 +1,12 @@
+description: "Handler crash recovery of orphaned /cleaning VM on startup and graceful SIGQUIT drain of in-flight job"
+tests:
+    - name: "Crash recovery and SIGQUIT drain test"
+      hosts:
+        - name: "receiver"
+          id: "ubuntu-linux"
+          config: ubuntu-linux.yaml
+
+        - name: "handler-8-16"
+          id: "13-L-ARM-macos"
+          config: 13-L-ARM-macos.yaml
+          tester: true

@@ -27,9 +27,6 @@ func clearGitHubAPIRateLimitPaused(workerCtx context.Context) {
 	globals.GitHubAPIRateLimitResetUnix.Store(0)
 }
 
-// logGitHubAPIRateLimitStatusAtRunStart logs a throttled notice when this handler's loop
-// runs while another call is waiting out the primary GitHub API rate limit.
-// Returns true when the normal "starting github plugin" line should be skipped.
 // LogGitHubAPIRateLimitStatusAtRunStart logs a throttled notice when this handler's loop
 // runs while waiting out the primary GitHub API rate limit.
 // Returns true when the normal "starting github plugin" line should be skipped.
@@ -69,6 +66,9 @@ func LogGitHubAPIRateLimitStatusAtRunStart(workerCtx, pluginCtx context.Context)
 
 func waitForGitHubAPIRateLimitReset(workerCtx, pluginCtx context.Context, resetAt time.Time) error {
 	sleepDuration := time.Until(resetAt) + time.Second
+	if sleepDuration < time.Second {
+		sleepDuration = time.Second
+	}
 	setGitHubAPIRateLimitPaused(workerCtx, resetAt)
 	defer clearGitHubAPIRateLimitPaused(workerCtx)
 
@@ -80,14 +80,8 @@ func waitForGitHubAPIRateLimitReset(workerCtx, pluginCtx context.Context, resetA
 	)
 
 	if metricsData, metricsErr := metrics.GetMetricsDataFromContext(workerCtx); metricsErr == nil {
-		if ctxPlugin, pluginErr := config.GetPluginFromContext(pluginCtx); pluginErr == nil {
-			if updateErr := metricsData.UpdatePlugin(workerCtx, pluginCtx, metrics.PluginBase{
-				Name:        ctxPlugin.Name,
-				Status:      "limit_paused",
-				StatusSince: time.Now(),
-			}); updateErr != nil {
-				logging.Error(workerCtx, "error updating plugin metrics to limit_paused", "error", updateErr)
-			}
+		if updateErr := metricsData.SetStatus(pluginCtx, "limit_paused"); updateErr != nil {
+			logging.Error(workerCtx, "error updating plugin metrics to limit_paused", "error", updateErr)
 		}
 	}
 
@@ -104,24 +98,23 @@ func waitForGitHubAPIRateLimitReset(workerCtx, pluginCtx context.Context, resetA
 	noticeTicker := time.NewTicker(githubAPIRateLimitNoticeInterval)
 	defer noticeTicker.Stop()
 
+	restoreRunningStatus := func() {
+		if metricsData, metricsErr := metrics.GetMetricsDataFromContext(workerCtx); metricsErr == nil {
+			if updateErr := metricsData.SetStatus(pluginCtx, "running"); updateErr != nil {
+				logging.Error(workerCtx, "error updating plugin metrics to running", "error", updateErr)
+			}
+		}
+	}
+
 	for {
 		select {
 		case <-timer.C:
-			if metricsData, metricsErr := metrics.GetMetricsDataFromContext(workerCtx); metricsErr == nil {
-				if ctxPlugin, pluginErr := config.GetPluginFromContext(pluginCtx); pluginErr == nil {
-					if updateErr := metricsData.UpdatePlugin(workerCtx, pluginCtx, metrics.PluginBase{
-						Name:        ctxPlugin.Name,
-						Status:      "running",
-						StatusSince: time.Now(),
-					}); updateErr != nil {
-						logging.Error(workerCtx, "error updating plugin metrics to running", "error", updateErr)
-					}
-				}
-			}
+			restoreRunningStatus()
 			return nil
 		case <-noticeTicker.C:
 			remaining := time.Until(resetAt)
 			if remaining <= 0 {
+				restoreRunningStatus()
 				return nil
 			}
 			logging.Info(
@@ -132,6 +125,8 @@ func waitForGitHubAPIRateLimitReset(workerCtx, pluginCtx context.Context, resetA
 			)
 		case <-pluginCtx.Done():
 			return pluginCtx.Err()
+		case <-workerCtx.Done():
+			return workerCtx.Err()
 		}
 	}
 }

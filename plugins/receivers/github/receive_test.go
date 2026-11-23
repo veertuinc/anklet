@@ -2,16 +2,22 @@ package github
 
 import (
 	"bytes"
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
-	gogithub "github.com/google/go-github/v74/github"
+	gogithub "github.com/google/go-github/v75/github"
+	"github.com/redis/go-redis/v9"
+	"github.com/veertuinc/anklet/internal/config"
+	"github.com/veertuinc/anklet/internal/database"
 )
 
 func signedReceiverRequest(t *testing.T, body string) *http.Request {
@@ -418,5 +424,58 @@ func TestQueueJobJSONAllowsNullOptionalFields(t *testing.T) {
 	}
 	if workflowJob["status"] != nil {
 		t.Errorf("workflow_job.status = %#v, want null", workflowJob["status"])
+	}
+}
+
+func TestReceiverMuxSecurityAndRedisErrorReturns500(t *testing.T) {
+	t.Parallel()
+
+	// Unreachable Redis client forces Redis error inside handler.
+	redisClient := redis.NewClient(&redis.Options{Addr: "127.0.0.1:1"})
+	defer func() { _ = redisClient.Close() }()
+	db := &database.Database{Client: redisClient, MaxRetries: 0}
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	ctx := context.WithValue(context.Background(), config.ContextKey("logger"), logger)
+	ctx = context.WithValue(ctx, config.ContextKey("database"), db)
+	mux := newReceiverMux(ctx, config.Plugin{Secret: "secret"}, db, "org")
+
+	// Metrics endpoint must NOT be exposed on receiver mux.
+	recMetrics := httptest.NewRecorder()
+	mux.ServeHTTP(recMetrics, httptest.NewRequest(http.MethodGet, "/metrics/v1?format=prometheus", nil))
+	if recMetrics.Code != http.StatusNotFound {
+		t.Errorf("/metrics/v1 on receiver mux status = %d, want 404", recMetrics.Code)
+	}
+
+	// Non-POST method must be rejected with 405.
+	recGet := httptest.NewRecorder()
+	mux.ServeHTTP(recGet, httptest.NewRequest(http.MethodGet, "/jobs/v1/receiver", nil))
+	if recGet.Code != http.StatusMethodNotAllowed {
+		t.Errorf("GET /jobs/v1/receiver status = %d, want 405", recGet.Code)
+	}
+
+	// Oversized payload (>10 MiB) must be rejected with 413 before HMAC validation.
+	oversized := strings.Repeat("a", maxWebhookBodyBytes+64)
+	reqBig := httptest.NewRequest(http.MethodPost, "/jobs/v1/receiver", strings.NewReader(oversized))
+	reqBig.Header.Set("Content-Type", "application/json")
+	reqBig.Header.Set("X-GitHub-Event", "workflow_job")
+	recBig := httptest.NewRecorder()
+	mux.ServeHTTP(recBig, reqBig)
+	if recBig.Code != http.StatusRequestEntityTooLarge {
+		t.Errorf("oversized body status = %d, want 413", recBig.Code)
+	}
+
+	// Valid webhook encountering Redis failure must return 500 (never silent 200 OK).
+	body := `{"action":"queued","workflow_job":{"id":123,"run_id":456,"labels":["anka-template:mac14"]},"repository":{"name":"repo","owner":{"login":"org"}}}`
+	recErr := httptest.NewRecorder()
+	mux.ServeHTTP(recErr, signedReceiverRequest(t, body))
+	if recErr.Code != http.StatusInternalServerError {
+		t.Errorf("Redis failure status = %d, want 500", recErr.Code)
+	}
+
+	// Truncation cap for malformed payload logging.
+	longStr := bytes.Repeat([]byte("x"), maxLoggedPayloadBytes+50)
+	if got := truncateForLog(longStr); !strings.HasSuffix(got, "...[truncated]") {
+		t.Errorf("truncateForLog() did not truncate long payload")
 	}
 }

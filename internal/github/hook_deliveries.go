@@ -6,7 +6,7 @@ import (
 	"net/url"
 	"strconv"
 
-	gogithub "github.com/google/go-github/v74/github"
+	gogithub "github.com/google/go-github/v75/github"
 )
 
 // ListFailedHookDeliveries lists webhook deliveries with status=failure.

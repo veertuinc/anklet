@@ -192,7 +192,7 @@ If GitHub cannot deliver a webhook (or you need to replay one by hand), you can 
 1. Set the `Payload URL` to the Public IP or URL that points to the server running the Anklet Github Receiver + `/jobs/v1/receiver`. So for example: `http://{PUBLIC IP OR URL}:54321/jobs/v1/receiver`
 1. Set `Content Type` to `application/json`
 1. Set the `Secret` to the `secret` from the `config.yml`
-1. `SSL verfifcation` is up to you.
+1. Keep `SSL verification` enabled and terminate TLS with a valid certificate (for example via a reverse proxy).
 1. Choose `Workflow jobs` as the event to trigger/receive
 1. Make sure `Active` is enabled
 1. Click on `Add webhook`

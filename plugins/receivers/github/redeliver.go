@@ -6,21 +6,17 @@ import (
 	"fmt"
 	"time"
 
-	gogithub "github.com/google/go-github/v74/github"
+	gogithub "github.com/google/go-github/v75/github"
 	"github.com/veertuinc/anklet/internal/config"
 	"github.com/veertuinc/anklet/internal/database"
 	internalGithub "github.com/veertuinc/anklet/internal/github"
 	"github.com/veertuinc/anklet/internal/logging"
 )
 
-func hasAnkaTemplateLabel(labels []string) bool {
-	return exists_in_array_partial(labels, []string{"anka-template"})
-}
-
 func filterFailedOriginalDeliveries(deliveries []*gogithub.HookDelivery) []*gogithub.HookDelivery {
 	out := make([]*gogithub.HookDelivery, 0, len(deliveries))
 	for _, hookDelivery := range deliveries {
-		if hookDelivery == nil || hookDelivery.Action == nil {
+		if hookDelivery == nil || hookDelivery.ID == nil || hookDelivery.Action == nil {
 			continue
 		}
 		if hookDelivery.StatusCode == nil || *hookDelivery.StatusCode == 200 {
@@ -75,6 +71,27 @@ func hookAction(hookDelivery *gogithub.HookDelivery) string {
 		return ""
 	}
 	return *hookDelivery.Action
+}
+
+func hookGUID(hookDelivery *gogithub.HookDelivery) string {
+	if hookDelivery == nil || hookDelivery.GUID == nil {
+		return ""
+	}
+	return *hookDelivery.GUID
+}
+
+func hookStatusCode(hookDelivery *gogithub.HookDelivery) int {
+	if hookDelivery == nil || hookDelivery.StatusCode == nil {
+		return 0
+	}
+	return *hookDelivery.StatusCode
+}
+
+func hookRedeliveryFlag(hookDelivery *gogithub.HookDelivery) bool {
+	if hookDelivery == nil || hookDelivery.Redelivery == nil {
+		return false
+	}
+	return *hookDelivery.Redelivery
 }
 
 // runRedeliveryWalk lists failed deliveries and redelivers Anklet jobs that
@@ -142,13 +159,13 @@ func runRedeliveryWalk(
 
 	databaseContainer, err := database.GetDatabaseFromContext(pluginCtx)
 	if err != nil {
-		return fmt.Errorf("error getting database client from context: %s", err.Error())
+		return fmt.Errorf("error getting database client from context: %w", err)
 	}
-	allQueuedJobs, err := loadQueueJobsByPrefix(pluginCtx, databaseContainer, "anklet/jobs/github/queued/"+queueOwner+"*")
+	allQueuedJobs, err := loadQueueJobsForOwner(pluginCtx, databaseContainer, "anklet/jobs/github/queued", queueOwner)
 	if err != nil {
 		return err
 	}
-	allCompletedJobs, err := loadQueueJobsByPrefix(pluginCtx, databaseContainer, "anklet/jobs/github/completed/"+queueOwner+"*")
+	allCompletedJobs, err := loadQueueJobsForOwner(pluginCtx, databaseContainer, "anklet/jobs/github/completed", queueOwner)
 	if err != nil {
 		return err
 	}
@@ -158,34 +175,39 @@ func runRedeliveryWalk(
 
 	for i := len(toRedeliver) - 1; i >= 0; i-- {
 		hookDelivery := toRedeliver[i]
-		estimate := redeliveryCallEstimate(hookAction(hookDelivery))
+		deliveryID := *hookDelivery.ID
+		action := hookAction(hookDelivery)
+		statusCode := hookStatusCode(hookDelivery)
+		guid := hookGUID(hookDelivery)
+
+		estimate := redeliveryCallEstimate(action)
 		if err := budget.Reserve(workerCtx, pluginCtx, githubClient, estimate); err != nil {
 			return err
 		}
 
 		logging.Debug(pluginCtx, "processing hook for redelivery",
-			"hook_id", *hookDelivery.ID,
-			"guid", *hookDelivery.GUID,
-			"action", *hookDelivery.Action,
-			"status_code", *hookDelivery.StatusCode,
+			"hook_id", deliveryID,
+			"guid", guid,
+			"action", action,
+			"status_code", statusCode,
 		)
 
-		pluginCtx, gottenHookDelivery, response, err := executeGetHookDelivery(workerCtx, pluginCtx, githubClient, pluginConfig, *hookDelivery.ID)
+		pluginCtx, gottenHookDelivery, response, err := executeGetHookDelivery(workerCtx, pluginCtx, githubClient, pluginConfig, deliveryID)
 		budget.Record(1)
 		if response != nil {
 			budget.ApplyRate(response.Rate)
 		}
 		if err != nil {
-			logging.Error(pluginCtx, "error getting hook delivery, skipping", "error", err, "hook_id", *hookDelivery.ID)
+			logging.Error(pluginCtx, "error getting hook delivery, skipping", "error", err, "hook_id", deliveryID)
 			continue
 		}
 		if gottenHookDelivery == nil || gottenHookDelivery.Request == nil || gottenHookDelivery.Request.RawPayload == nil {
-			logging.Warn(pluginCtx, "hook delivery payload missing, skipping", "hook_id", *hookDelivery.ID)
+			logging.Warn(pluginCtx, "hook delivery payload missing, skipping", "hook_id", deliveryID)
 			continue
 		}
 		var workflowJobEventPayload internalGithub.QueueJob
 		if err := json.Unmarshal(*gottenHookDelivery.Request.RawPayload, &workflowJobEventPayload); err != nil {
-			logging.Error(pluginCtx, "error unmarshalling hook request raw payload, skipping", "error", err, "hook_id", *hookDelivery.ID)
+			logging.Error(pluginCtx, "error unmarshalling hook request raw payload, skipping", "error", err, "hook_id", deliveryID)
 			continue
 		}
 		workflowJob := workflowJobEventPayload.WorkflowJob
@@ -195,7 +217,7 @@ func runRedeliveryWalk(
 		}
 
 		logging.Debug(pluginCtx, "fetched hook delivery details",
-			"hook_id", *hookDelivery.ID,
+			"hook_id", deliveryID,
 			"workflow_job_id", *workflowJob.ID,
 			"workflow_job_name", workflowJob.Name,
 			"labels", workflowJob.Labels,
@@ -203,13 +225,13 @@ func runRedeliveryWalk(
 
 		if !hasAnkaTemplateLabel(workflowJob.Labels) {
 			logging.Debug(pluginCtx, "skipping redelivery, job labels do not include anka-template",
-				"hook_id", *hookDelivery.ID,
+				"hook_id", deliveryID,
 				"workflow_job_id", *workflowJob.ID,
 			)
 			continue
 		}
 
-		if *hookDelivery.Action == "queued" {
+		if action == "queued" {
 			status, conclusion, statusErr := fetchWorkflowJobStatus(workerCtx, pluginCtx, githubClient, workflowJobEventPayload)
 			budget.Record(1)
 			if statusErr != nil {
@@ -219,7 +241,7 @@ func runRedeliveryWalk(
 				)
 			} else if shouldSkipQueuedRedelivery(status, conclusion) {
 				logging.Debug(pluginCtx, "skipping queued redelivery, GitHub job already progressed",
-					"hook_id", *hookDelivery.ID,
+					"hook_id", deliveryID,
 					"workflow_job_id", *workflowJob.ID,
 					"status", status,
 					"conclusion", conclusion,
@@ -232,60 +254,67 @@ func runRedeliveryWalk(
 		inCompleted := false
 		inCompletedListKey := ""
 		inCompletedIndex := 0
-		if *hookDelivery.Action == "completed" {
+		if action == "completed" {
 			inCompleted, inCompletedListKey, inCompletedIndex = jobIDInCompletedMap(allCompletedJobs, *workflowJob.ID)
 		}
 
 		if inQueued && inCompleted {
 			logging.Debug(pluginCtx, "job is in both queued and completed, skipping redelivery",
 				"workflow_job_id", *workflowJob.ID,
-				"hook_id", *hookDelivery.ID,
+				"hook_id", deliveryID,
 			)
 			continue
 		}
 		if inCompleted && !inQueued {
 			logging.Debug(pluginCtx, "job is in completed but not queued, removing from completed database",
 				"workflow_job_id", *workflowJob.ID,
-				"hook_id", *hookDelivery.ID,
+				"hook_id", deliveryID,
 			)
-			_, remErr := databaseContainer.RetryLRem(pluginCtx, inCompletedListKey, 1, allCompletedJobs[inCompletedListKey][inCompletedIndex])
-			if remErr != nil {
+			if _, remErr := databaseContainer.RetryLRem(pluginCtx, inCompletedListKey, 1, allCompletedJobs[inCompletedListKey][inCompletedIndex]); remErr != nil {
 				logging.Error(pluginCtx, "error removing completed job from database, skipping", "error", remErr)
 			}
 			continue
 		}
-		if *hookDelivery.StatusCode == 200 || inCompleted {
+		if statusCode == 200 || inCompleted {
 			logging.Debug(pluginCtx, "skipping redelivery, hook already succeeded or completed",
-				"hook_id", *hookDelivery.ID,
+				"hook_id", deliveryID,
 				"workflow_job_id", *workflowJob.ID,
-				"status_code", *hookDelivery.StatusCode,
+				"status_code", statusCode,
 				"in_completed", inCompleted,
 			)
 			continue
 		}
 
 		logging.Info(pluginCtx, "redelivering hook",
-			"hook_id", *hookDelivery.ID,
+			"hook_id", deliveryID,
 			"workflow_job_id", *workflowJob.ID,
-			"action", *hookDelivery.Action,
-			"original_status_code", *hookDelivery.StatusCode,
+			"action", action,
+			"original_status_code", statusCode,
 			"in_queued", inQueued,
 			"in_completed", inCompleted,
 		)
 
-		pluginCtx, redelivery, redResp, _ := executeRedeliverHookDelivery(workerCtx, pluginCtx, githubClient, pluginConfig, *hookDelivery.ID)
+		pluginCtx, redelivery, redResp, redErr := executeRedeliverHookDelivery(workerCtx, pluginCtx, githubClient, pluginConfig, deliveryID)
 		budget.Record(1)
 		if redResp != nil {
 			budget.ApplyRate(redResp.Rate)
+		}
+		if redErr != nil {
+			logging.Error(pluginCtx, "error requesting hook redelivery, skipping",
+				"hook_id", deliveryID,
+				"workflow_job_id", *workflowJob.ID,
+				"error", redErr,
+			)
+			continue
 		}
 		redeliveryRequested = true
 		logging.Info(pluginCtx, "hook redelivery requested successfully",
 			"redelivery", redelivery,
 			"hookDelivery", map[string]any{
-				"guid":       *hookDelivery.GUID,
-				"action":     *hookDelivery.Action,
-				"statusCode": *hookDelivery.StatusCode,
-				"redelivery": *hookDelivery.Redelivery,
+				"guid":       guid,
+				"action":     action,
+				"statusCode": statusCode,
+				"redelivery": hookRedeliveryFlag(hookDelivery),
 			},
 			"job", map[string]any{
 				"workflowJob": map[string]any{
@@ -302,8 +331,10 @@ func runRedeliveryWalk(
 
 	if redeliveryRequested {
 		logging.Info(pluginCtx, "sleeping for 1 minute to allow handlers to process jobs")
+		timer := time.NewTimer(1 * time.Minute)
+		defer timer.Stop()
 		select {
-		case <-time.After(1 * time.Minute):
+		case <-timer.C:
 		case <-workerCtx.Done():
 			return workerCtx.Err()
 		case <-pluginCtx.Done():
@@ -401,20 +432,21 @@ func fetchWorkflowJobStatus(
 	return status, conclusion, nil
 }
 
-func loadQueueJobsByPrefix(
+func loadQueueJobsForOwner(
 	pluginCtx context.Context,
 	databaseContainer *database.Database,
-	pattern string,
+	prefix string,
+	queueOwner string,
 ) (map[string][]string, error) {
-	keys, err := databaseContainer.RetryKeys(pluginCtx, pattern)
+	keys, err := internalGithub.ListOwnerQueueKeys(pluginCtx, databaseContainer, prefix, queueOwner)
 	if err != nil {
-		return nil, fmt.Errorf("error getting list of keys for %s: %s", pattern, err.Error())
+		return nil, fmt.Errorf("error getting list of keys for %s/%s: %w", prefix, queueOwner, err)
 	}
 	out := make(map[string][]string, len(keys))
 	for _, key := range keys {
 		jobs, rangeErr := databaseContainer.RetryLRange(pluginCtx, key, 0, -1)
 		if rangeErr != nil {
-			return nil, fmt.Errorf("error getting list of jobs for key: %s", rangeErr.Error())
+			return nil, fmt.Errorf("error getting list of jobs for key %s: %w", key, rangeErr)
 		}
 		out[key] = jobs
 	}
@@ -427,8 +459,8 @@ func jobIDInQueueMap(allQueuedJobs map[string][]string, jobID int64) bool {
 			if queuedJob == "" {
 				continue
 			}
-			wrappedPayload, err, typeErr := database.Unwrap[internalGithub.QueueJob](queuedJob)
-			if err != nil || typeErr != nil || wrappedPayload.WorkflowJob.ID == nil {
+			wrappedPayload, err := database.Unwrap[internalGithub.QueueJob](queuedJob)
+			if err != nil || wrappedPayload.WorkflowJob.ID == nil {
 				continue
 			}
 			if *wrappedPayload.WorkflowJob.ID == jobID {
@@ -442,8 +474,8 @@ func jobIDInQueueMap(allQueuedJobs map[string][]string, jobID int64) bool {
 func jobIDInCompletedMap(allCompletedJobs map[string][]string, jobID int64) (bool, string, int) {
 	for key, completedJobs := range allCompletedJobs {
 		for index, completedJob := range completedJobs {
-			wrappedPayload, err, typeErr := database.Unwrap[internalGithub.QueueJob](completedJob)
-			if err != nil || typeErr != nil || wrappedPayload.WorkflowJob.ID == nil {
+			wrappedPayload, err := database.Unwrap[internalGithub.QueueJob](completedJob)
+			if err != nil || wrappedPayload.WorkflowJob.ID == nil {
 				continue
 			}
 			if *wrappedPayload.WorkflowJob.ID == jobID {

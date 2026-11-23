@@ -2,18 +2,33 @@ package github
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 
-	"github.com/google/go-github/v74/github"
+	"github.com/google/go-github/v75/github"
 	"github.com/veertuinc/anklet/internal/anka"
 	internalGithub "github.com/veertuinc/anklet/internal/github"
 )
 
+const (
+	maxWebhookBodyBytes   = 10 << 20 // 10 MiB hard cap before signature validation
+	maxLoggedPayloadBytes = 1024     // Cap malformed payload logging to prevent log flooding
+)
+
+var errPayloadTooLarge = errors.New("webhook payload exceeds maximum allowed size")
+
 type receiverDecodeResult struct {
 	Job           internalGithub.QueueJob
 	IsWorkflowJob bool
+}
+
+func truncateForLog(payload []byte) string {
+	if len(payload) <= maxLoggedPayloadBytes {
+		return string(payload)
+	}
+	return string(payload[:maxLoggedPayloadBytes]) + "...[truncated]"
 }
 
 func readWebhookPayload(r *http.Request, secret string) ([]byte, error) {
@@ -23,9 +38,17 @@ func readWebhookPayload(r *http.Request, secret string) ([]byte, error) {
 	if r.Body == nil {
 		return nil, fmt.Errorf("request body is empty")
 	}
-	raw, err := io.ReadAll(r.Body)
+	limited := io.LimitReader(r.Body, maxWebhookBodyBytes+1)
+	raw, err := io.ReadAll(limited)
 	if err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			return raw, errPayloadTooLarge
+		}
 		return raw, fmt.Errorf("reading request body: %w", err)
+	}
+	if int64(len(raw)) > maxWebhookBodyBytes {
+		return raw[:maxLoggedPayloadBytes], errPayloadTooLarge
 	}
 	r.Body = io.NopCloser(bytes.NewReader(raw))
 	if _, err := github.ValidatePayload(r, []byte(secret)); err != nil {
@@ -35,7 +58,11 @@ func readWebhookPayload(r *http.Request, secret string) ([]byte, error) {
 }
 
 func writeMalformedWebhook(w http.ResponseWriter, err error) {
-	http.Error(w, err.Error(), http.StatusBadRequest)
+	if errors.Is(err, errPayloadTooLarge) {
+		http.Error(w, "payload too large", http.StatusRequestEntityTooLarge)
+		return
+	}
+	http.Error(w, "invalid webhook payload", http.StatusBadRequest)
 }
 
 func decodeReceiverWebhook(r *http.Request, secret string) (receiverDecodeResult, []byte, error) {

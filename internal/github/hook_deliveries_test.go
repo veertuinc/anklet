@@ -7,7 +7,7 @@ import (
 	"net/url"
 	"testing"
 
-	gogithub "github.com/google/go-github/v74/github"
+	gogithub "github.com/google/go-github/v75/github"
 )
 
 func TestListFailedHookDeliveriesQuery(t *testing.T) {

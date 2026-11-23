@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	gogithub "github.com/google/go-github/v74/github"
+	gogithub "github.com/google/go-github/v75/github"
 )
 
 func TestRedeliveryBudgetFromRemaining(t *testing.T) {

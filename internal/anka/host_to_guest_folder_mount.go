@@ -7,6 +7,19 @@ import (
 	"strings"
 )
 
+func validateGuestFolderName(guestPart string) error {
+	if guestPart == "" {
+		return fmt.Errorf("empty guest_folder_name")
+	}
+	if guestPart == "." || guestPart == ".." {
+		return fmt.Errorf("invalid guest_folder_name %q: relative path segments are not allowed", guestPart)
+	}
+	if strings.ContainsAny(guestPart, "/\\:\x00\r\n") {
+		return fmt.Errorf("invalid guest_folder_name %q: must be a single folder name without path separators or colons", guestPart)
+	}
+	return nil
+}
+
 // ResolveHostToGuestFolderMountSpec resolves symlinks in the host path portion and returns a string
 // suitable for `anka -j mount <vm> <spec>`, mapping a host folder into the guest. Optional guest name
 // uses a single first colon: host_path[:guest_folder_name].
@@ -28,8 +41,8 @@ func ResolveHostToGuestFolderMountSpec(mountSpec string) (string, error) {
 		return realPath, nil
 	}
 	guestPart = strings.TrimSpace(guestPart)
-	if guestPart == "" {
-		return "", fmt.Errorf("invalid host-to-guest folder mount %q: empty guest_folder_name", mountSpec)
+	if err := validateGuestFolderName(guestPart); err != nil {
+		return "", fmt.Errorf("invalid host-to-guest folder mount %q: %w", mountSpec, err)
 	}
 	return realPath + ":" + guestPart, nil
 }
@@ -69,8 +82,7 @@ func (cli *Cli) mountHostToGuestFolders(pluginCtx context.Context, vmName string
 		if err != nil {
 			return err
 		}
-		err = cli.AnkaMount(pluginCtx, vmName, resolved)
-		if err != nil {
+		if err = cli.AnkaMount(pluginCtx, vmName, resolved); err != nil {
 			return err
 		}
 	}

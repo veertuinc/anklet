@@ -3,43 +3,59 @@ package github
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/veertuinc/anklet/internal/database"
 	"github.com/veertuinc/anklet/internal/logging"
 )
 
-func UpdateJobInDB(pluginCtx context.Context, queue string, upToDateJob *QueueJob) (error, error) {
+// ErrJobAlreadyCompleted indicates the queue head job is already marked completed in Redis.
+var ErrJobAlreadyCompleted = errors.New("job is already completed")
+
+func int64PtrEqual(a, b *int64) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	return *a == *b
+}
+
+// UpdateJobInDB replaces the matching job in queue unless the head job is already completed
+// (in which case ErrJobAlreadyCompleted is returned).
+func UpdateJobInDB(pluginCtx context.Context, queue string, upToDateJob *QueueJob) error {
+	if upToDateJob == nil || upToDateJob.WorkflowJob.ID == nil {
+		return fmt.Errorf("cannot update job in database: workflow job ID is nil")
+	}
 	databaseContainer, err := database.GetDatabaseFromContext(pluginCtx)
 	if err != nil {
-		return err, nil
+		return err
 	}
 
-	// do a check to see if the object in the DB is already completed and prevent overwriting it
 	completed, existingJob, err := CheckIfJobIsCompleted(pluginCtx, queue)
 	if err != nil {
-		return fmt.Errorf("error checking if job is completed: %w", err), nil
+		return fmt.Errorf("error checking if job is completed: %w", err)
 	}
 	if completed {
-		var storedStatus any
-		if existingJob != nil && existingJob.WorkflowJob.Status != nil {
-			storedStatus = *existingJob.WorkflowJob.Status
+		var storedStatus, storedConclusion, incomingStatus, incomingConclusion, existingJobID any
+		if existingJob != nil {
+			if existingJob.WorkflowJob.Status != nil {
+				storedStatus = *existingJob.WorkflowJob.Status
+			}
+			if existingJob.WorkflowJob.Conclusion != nil {
+				storedConclusion = *existingJob.WorkflowJob.Conclusion
+			}
+			if existingJob.WorkflowJob.ID != nil {
+				existingJobID = *existingJob.WorkflowJob.ID
+			}
 		}
-		var storedConclusion any
-		if existingJob != nil && existingJob.WorkflowJob.Conclusion != nil {
-			storedConclusion = *existingJob.WorkflowJob.Conclusion
-		}
-		var incomingStatus any
 		if upToDateJob.WorkflowJob.Status != nil {
 			incomingStatus = *upToDateJob.WorkflowJob.Status
 		}
-		var incomingConclusion any
 		if upToDateJob.WorkflowJob.Conclusion != nil {
 			incomingConclusion = *upToDateJob.WorkflowJob.Conclusion
-		}
-		var existingJobID any
-		if existingJob != nil && existingJob.WorkflowJob.ID != nil {
-			existingJobID = *existingJob.WorkflowJob.ID
 		}
 		logging.Warn(
 			pluginCtx,
@@ -51,49 +67,36 @@ func UpdateJobInDB(pluginCtx context.Context, queue string, upToDateJob *QueueJo
 			"incoming_conclusion", incomingConclusion,
 			"queue", queue,
 		)
-		return nil, fmt.Errorf("job is already completed")
+		return ErrJobAlreadyCompleted
 	}
 
-	// Find the job in the database by ID and run_id within the plugin queue
 	jobList, err := databaseContainer.RetryLRange(pluginCtx, queue, 0, -1)
 	if err != nil {
-		return fmt.Errorf("error getting job list: %w", err), nil
+		return fmt.Errorf("error getting job list: %w", err)
 	}
-	// logger.DebugContext(pluginCtx, "jobList", "jobList", jobList)
-	// Find the matching job
 	for i, jobStr := range jobList {
-		existingJob, err, typeErr := database.Unwrap[QueueJob](jobStr)
-		if err != nil || typeErr != nil {
+		existing, unwrapErr := database.Unwrap[QueueJob](jobStr)
+		if unwrapErr != nil {
 			continue
 		}
-		// logger.DebugContext(pluginCtx, "existingJob", "existingJob", existingJob)
-		// logger.DebugContext(pluginCtx, "upToDateJob", "upToDateJob", upToDateJob)
-		if existingJob.Type == upToDateJob.Type &&
-			*existingJob.WorkflowJob.ID == *upToDateJob.WorkflowJob.ID &&
-			*existingJob.WorkflowJob.RunID == *upToDateJob.WorkflowJob.RunID {
-			// Update the job at this index
-			updatedJobJSON, err := json.Marshal(upToDateJob)
-			if err != nil {
-				return fmt.Errorf("error marshaling updated job: %w", err), nil
+		if existing.Type == upToDateJob.Type &&
+			int64PtrEqual(existing.WorkflowJob.ID, upToDateJob.WorkflowJob.ID) &&
+			int64PtrEqual(existing.WorkflowJob.RunID, upToDateJob.WorkflowJob.RunID) {
+			updatedJobJSON, marshalErr := json.Marshal(upToDateJob)
+			if marshalErr != nil {
+				return fmt.Errorf("error marshaling updated job: %w", marshalErr)
 			}
-			err = databaseContainer.RetryLSet(pluginCtx, queue, int64(i), updatedJobJSON)
-			if err != nil {
-				return fmt.Errorf("error updating job in database: %w", err), nil
+			if setErr := databaseContainer.RetryLSet(pluginCtx, queue, int64(i), updatedJobJSON); setErr != nil {
+				return fmt.Errorf("error updating job in database: %w", setErr)
 			}
 			logging.Debug(pluginCtx, "job updated in database", "job", upToDateJob)
-			// Find the job in the database by ID and run_id within the plugin queue
-			// jobList, err := databaseContainer.Client.LRange(pluginCtx, queue, 0, -1).Result()
-			// if err != nil {
-			// 	return fmt.Errorf("error getting job list: %w", err)
-			// }
-			// logger.DebugContext(pluginCtx, "jobList", "jobList", jobList)
-			return nil, nil
+			return nil
 		}
 	}
-	return fmt.Errorf("job not found in database"), nil
+	return fmt.Errorf("job not found in database")
 }
 
-// check if the job in the DB is completed status
+// CheckIfJobIsCompleted checks whether the head job in pluginQueueName is already completed.
 func CheckIfJobIsCompleted(pluginCtx context.Context, pluginQueueName string) (bool, *QueueJob, error) {
 	databaseContainer, err := database.GetDatabaseFromContext(pluginCtx)
 	if err != nil {
@@ -106,9 +109,9 @@ func CheckIfJobIsCompleted(pluginCtx context.Context, pluginQueueName string) (b
 	if jobStr == "" {
 		return false, nil, fmt.Errorf("no job found in queue")
 	}
-	job, err, typeErr := database.Unwrap[QueueJob](jobStr)
-	if err != nil || typeErr != nil {
-		return false, nil, fmt.Errorf("error unmarshalling job")
+	job, err := database.Unwrap[QueueJob](jobStr)
+	if err != nil {
+		return false, nil, fmt.Errorf("error unmarshalling job: %w", err)
 	}
 	if job.WorkflowJob.Status != nil && *job.WorkflowJob.Status == "completed" {
 		return true, &job, nil

@@ -25,10 +25,10 @@ Anklet is a tool that runs custom plugins to communicate with CI platforms/tools
 - **Language:** Go 1.27.4
 - **Database:** Redis 7.x (for job queue and state management)
 - **Dependencies:** 
-  - `github.com/google/go-github/v74` - GitHub API client
+  - `github.com/google/go-github/v75` - GitHub API client
   - `github.com/redis/go-redis/v9` - Redis client
   - `github.com/shirou/gopsutil/v4` - Host metrics
-  - `gopkg.in/yaml.v2` - Configuration parsing
+  - `gopkg.in/yaml.v3` - Configuration parsing
 - **External Tools:** Anka CLI (macOS virtualization), GitHub Actions
 
 ### File Structure
